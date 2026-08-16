@@ -1,7 +1,11 @@
 import cors from 'cors';
 import express, { type ErrorRequestHandler } from 'express';
+import swaggerUi from 'swagger-ui-express';
 import { environment } from './config/environment.js';
+import { swaggerSpec } from './lib/swagger.js';
 import { healthRouter } from './routes/health.js';
+import { authRouter } from './routes/auth.js';
+import { organizationsRouter } from './routes/organizations.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -18,6 +22,14 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   app.use('/health', healthRouter);
   app.use('/api/health', healthRouter);
+
+  app.use('/api/auth', authRouter);
+  app.use('/api/organizations', organizationsRouter);
+
+  app.get('/api/docs.json', (_request, response) => {
+    response.json(swaggerSpec);
+  });
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
   if (options.includeErrorProbe) {
     app.get('/__error-probe', () => {
