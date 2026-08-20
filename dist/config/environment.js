@@ -23,6 +23,10 @@ export const readEnvironment = () => ({
     host: parseHost(process.env.API_HOST),
     port: parsePort(process.env.API_PORT),
     webOrigin: process.env.WEB_ORIGIN,
+    mongoUri: process.env.MONGODB_URI,
+    jwtSecret: process.env.JWT_SECRET ?? 'change-me',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
+    refreshTokenExpiresIn: process.env.REFRESH_EXPIRES_IN ?? '7d',
     version: process.env.npm_package_version ?? '0.1.0',
 });
 export const environment = readEnvironment();
