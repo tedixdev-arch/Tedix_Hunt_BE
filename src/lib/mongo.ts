@@ -3,7 +3,8 @@ import { environment } from '../config/environment.js';
 
 export const connectMongo = async (): Promise<void> => {
   const uri = environment.mongoUri;
-
+console.log('Connecting to MongoDB...');
+console.log(`MONGODB_URI: ${uri}`);
   if (!uri) {
     console.warn('MONGODB_URI not provided — skipping MongoDB connection.');
     return;
