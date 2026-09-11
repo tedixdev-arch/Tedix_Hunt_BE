@@ -1,20 +1,22 @@
 import mongoose from 'mongoose';
-// import { environment } from '../config/environment.js';
+import type { RequestHandler } from 'express';
+import { environment } from '../config/environment.js';
 
+// Compatibility only: existing product routes remain on Mongo until later steps.
 export const connectMongo = async (): Promise<void> => {
-  const uri = 'mongodb+srv://beersheik:Beer%24heik@cluster0.qyqt3.mongodb.net/tedix_hunt?retryWrites=true&w=majority';//environment.mongoUri;
-console.log('Connecting to MongoDB...');
-console.log(`MONGODB_URI: ${uri}`);
-  if (!uri) {
-    console.warn('MONGODB_URI not provided — skipping MongoDB connection.');
+  if (!environment.mongoUri) {
+    console.warn('MONGODB_URI is absent; legacy Mongo-backed routes are unavailable.');
     return;
   }
+  await mongoose.connect(environment.mongoUri, { serverSelectionTimeoutMS: 5_000 });
+};
 
-  await mongoose.connect(uri, {
-    // use defaults; mongoose 7+ no longer needs options
-  } as mongoose.ConnectOptions);
-
-  console.log('Connected to MongoDB');
+export const requireLegacyMongo: RequestHandler = (_request, response, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    response.status(503).json({ error: 'service_unavailable', message: 'Legacy data service is unavailable.' });
+    return;
+  }
+  next();
 };
 
 export const disconnectMongo = async (): Promise<void> => {

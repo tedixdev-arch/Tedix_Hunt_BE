@@ -6,6 +6,7 @@ import { swaggerSpec } from './lib/swagger.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { organizationsRouter } from './routes/organizations.js';
+import { requireLegacyMongo } from './lib/mongo.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -23,8 +24,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/health', healthRouter);
   app.use('/api/health', healthRouter);
 
-  app.use('/api/auth', authRouter);
-  app.use('/api/organizations', organizationsRouter);
+  app.use('/api/auth', requireLegacyMongo, authRouter);
+  app.use('/api/organizations', requireLegacyMongo, organizationsRouter);
 
   app.get('/api/docs.json', (_request, response) => {
     response.json(swaggerSpec);
