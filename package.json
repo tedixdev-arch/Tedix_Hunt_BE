@@ -9,7 +9,9 @@
     "build": "tsc -b tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -b tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "node dist/db/migrate.js up",
+    "db:rollback": "node dist/db/migrate.js down"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -19,6 +21,8 @@
     "express-validator": "^7.0.1",
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^7.5.0",
+    "node-pg-migrate": "^9.0.0",
+    "pg": "^8.23.0",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
   },
@@ -27,6 +31,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
