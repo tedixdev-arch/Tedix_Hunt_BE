@@ -88,5 +88,19 @@ the database provider and configure the replacement through deployment secrets.
 
 See [the scoped task and review workflow](docs/step-7.1-task.md).
 
+## Core User schema (step 7.2)
+
+The next migration adds `public.users`: UUID identity, case-insensitively unique
+email, optional password hash/display name, and creation/update timestamps.
+Role associations will reference the user ID in a later step; no role grants or
+PostgreSQL authentication endpoints are introduced here. Existing MongoDB users
+are not automatically copied. See [schema decisions and deployment prerequisites](docs/step-7.2-task.md).
+
+Run the usual migration command to apply pending changes. Check existing server
+tables first: this migration expects no existing `public.users` table. Its rollback
+drops user data; do not use rollback on populated databases without an explicit
+recovery plan and verified backup. Server deployment validation remains pending
+until Hetzner access is available.
+
 Library references: [node-postgres pool](https://node-postgres.com/apis/pool) and
 [node-pg-migrate API](https://salsita.github.io/node-pg-migrate/api).

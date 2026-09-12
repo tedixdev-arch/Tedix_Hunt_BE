@@ -26,12 +26,70 @@ describe.skipIf(!databaseUrl)('PostgreSQL integration', () => {
   it('applies, repeats, rolls back and reapplies the compiled migration command', async () => {
     await migrate('up');
     await migrate('up');
-    expect((await pool.query('SELECT name FROM pgmigrations')).rows).toEqual([{ name: '1789065600000_foundation' }]);
+    expect((await pool.query('SELECT name FROM pgmigrations ORDER BY name')).rows).toEqual([
+      { name: '1789065600000_foundation' }, { name: '1789214400000_core_users' },
+    ]);
+    expect((await pool.query("SELECT to_regclass('public.users') AS name")).rows[0].name).toBe('users');
     await migrate('down');
-    expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('0');
-    await migrate('up');
     expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('1');
+    expect((await pool.query("SELECT to_regclass('public.users') AS name")).rows[0].name).toBeNull();
+    await migrate('up');
+    expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('2');
   }, 30_000);
+
+  it('stores identity with generated UUIDs, timestamps and optional profile fields', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query("INSERT INTO users (email) VALUES ('identity@example.test'), ('second@example.test') RETURNING *");
+      expect(rows[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(rows[0].id).not.toBe(rows[1].id);
+      expect(rows[0].created_at).toBeInstanceOf(Date);
+      expect(rows[0].updated_at).toEqual(rows[0].created_at);
+      expect(rows[0].password_hash).toBeNull();
+      expect(rows[0].display_name).toBeNull();
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('rejects case-insensitive duplicate email addresses', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("INSERT INTO users (email) VALUES ('Unique@example.test')");
+      await expect(client.query("INSERT INTO users (email) VALUES ('unique@example.test')")).rejects.toMatchObject({ code: '23505' });
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it.each([null, '', 'missing-at', ' a@example.test', 'a b@example.test', 'a@@example.test', `${'a'.repeat(250)}@example.test`])('rejects invalid identity email: %s', async (email) => {
+    await expect(pool.query('INSERT INTO users (email) VALUES ($1)', [email])).rejects.toMatchObject({ code: email === null ? '23502' : '23514' });
+  });
+
+  it.each([
+    { hash: '', name: 'Tester' },
+    { hash: '   ', name: 'Tester' },
+    { hash: null, name: '' },
+    { hash: null, name: '   ' },
+    { hash: null, name: 'x'.repeat(121) },
+  ])('rejects empty credential hashes and invalid profile names: %j', async ({ hash, name }) => {
+    await expect(pool.query('INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3)', ['invalid-profile@example.test', hash, name])).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('preserves existing user data when migrations are rerun', async () => {
+    const { rows } = await pool.query('INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id', ['retained@example.test', 'test-only-hash', 'Test Participant']);
+    try {
+      await migrate('up');
+      const saved = await pool.query('SELECT email, password_hash, display_name FROM users WHERE id = $1', [rows[0].id]);
+      expect(saved.rows).toEqual([{ email: 'retained@example.test', password_hash: 'test-only-hash', display_name: 'Test Participant' }]);
+    } finally {
+      await pool.query('DELETE FROM users WHERE id = $1', [rows[0].id]);
+    }
+  });
 
   it('rolls back DDL and history when a migration fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tedix-migration-test-'));
