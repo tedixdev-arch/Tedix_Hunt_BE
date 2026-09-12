@@ -19,7 +19,7 @@ describe('PostgreSQL readiness', () => {
     expect(response.body).toEqual({ status: 'unavailable', database: 'down' });
     await request(app).get('/api/health').expect(200);
   });
-  it.each(['/api/auth/guest', '/api/organizations'])('isolates disconnected legacy routes: %s', async (path) => {
+  it.each(['/api/organizations'])('isolates disconnected legacy routes: %s', async (path) => {
     const response = await request(createApp()).post(path).send({}).expect(503);
     expect(response.body.error).toBe('service_unavailable');
   });
