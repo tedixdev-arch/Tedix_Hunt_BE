@@ -1,5 +1,6 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import { environment } from '../config/environment.js';
+import { authPaths } from './auth-openapi.js';
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -11,6 +12,7 @@ const options: swaggerJsdoc.Options = {
         'API for TedixHunt, an outdoor location-based treasure-hunt / escape-room competition engine.',
     },
     servers: [{ url: '/', description: 'Current host' }],
+    paths: authPaths,
     components: {
       securitySchemes: {
         bearerAuth: {

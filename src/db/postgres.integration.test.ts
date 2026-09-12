@@ -11,6 +11,7 @@ import request from 'supertest';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { disconnectPostgres } from '../lib/postgres.js';
+import { authenticationTests } from './auth.integration.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const exec = promisify(execFile);
@@ -27,14 +28,17 @@ describe.skipIf(!databaseUrl)('PostgreSQL integration', () => {
     await migrate('up');
     await migrate('up');
     expect((await pool.query('SELECT name FROM pgmigrations ORDER BY name')).rows).toEqual([
-      { name: '1789065600000_foundation' }, { name: '1789214400000_core_users' },
+      { name: '1789065600000_foundation' }, { name: '1789214400000_core_users' }, { name: '1789218000000_auth_sessions' },
     ]);
+    expect((await pool.query("SELECT to_regclass('public.users') AS name")).rows[0].name).toBe('users');
+    await migrate('down');
+    expect((await pool.query("SELECT to_regclass('public.auth_sessions') AS name")).rows[0].name).toBeNull();
     expect((await pool.query("SELECT to_regclass('public.users') AS name")).rows[0].name).toBe('users');
     await migrate('down');
     expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('1');
     expect((await pool.query("SELECT to_regclass('public.users') AS name")).rows[0].name).toBeNull();
     await migrate('up');
-    expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('2');
+    expect((await pool.query('SELECT count(*) FROM pgmigrations')).rows[0].count).toBe('3');
   }, 30_000);
 
   it('stores identity with generated UUIDs, timestamps and optional profile fields', async () => {
@@ -152,4 +156,6 @@ describe.skipIf(!databaseUrl)('PostgreSQL integration', () => {
       if (child.exitCode === null) child.kill('SIGKILL');
     }
   }, 20_000);
+
+  authenticationTests(pool, databaseUrl!);
 });
