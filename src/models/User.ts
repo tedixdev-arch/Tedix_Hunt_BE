@@ -1,27 +1,95 @@
-import mongoose from 'mongoose';
+import { pool } from '../lib/postgres.js';
 
 export type Role = 'creator' | 'participant' | 'guest';
 
-export interface IUser extends mongoose.Document {
+export interface IUser {
+  id: string;
+  email?: string | null;
+  passwordHash?: string | null;
+  role: Role;
+  name?: string | null;
+  isGuest: boolean;
+  tedixUserId?: string | null;
+  createdAt: Date;
+}
+
+export interface CreateUserInput {
   email?: string;
   passwordHash?: string;
   role: Role;
   name?: string;
-  organizations?: mongoose.Types.ObjectId[];
   isGuest?: boolean;
   tedixUserId?: string;
-  createdAt: Date;
 }
 
-const schema = new mongoose.Schema<IUser>({
-  email: { type: String, index: true, sparse: true },
-  passwordHash: { type: String },
-  role: { type: String, required: true },
-  name: { type: String },
-  organizations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Organization' }],
-  isGuest: { type: Boolean, default: false },
-  tedixUserId: { type: String, index: true, sparse: true },
-  createdAt: { type: Date, default: () => new Date() },
+export interface FindUserFilter {
+  id?: string;
+  email?: string;
+  tedixUserId?: string;
+  role?: Role;
+}
+
+const mapRow = (row: any): IUser => ({
+  id: row.id,
+  email: row.email,
+  passwordHash: row.password_hash,
+  role: row.role,
+  name: row.name,
+  isGuest: row.is_guest,
+  tedixUserId: row.tedix_user_id,
+  createdAt: row.created_at,
 });
 
-export const User = mongoose.model<IUser>('User', schema);
+export const User = {
+  async create(input: CreateUserInput): Promise<IUser> {
+    const { rows } = await pool.query(
+      `INSERT INTO users (email, password_hash, role, name, is_guest, tedix_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        input.email ?? null,
+        input.passwordHash ?? null,
+        input.role,
+        input.name ?? null,
+        input.isGuest ?? false,
+        input.tedixUserId ?? null,
+      ],
+    );
+    return mapRow(rows[0]);
+  },
+
+  async findOne(filter: FindUserFilter): Promise<IUser | null> {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+
+    if (filter.id !== undefined) {
+      values.push(filter.id);
+      clauses.push(`id = $${values.length}`);
+    }
+    if (filter.email !== undefined) {
+      values.push(filter.email);
+      clauses.push(`email = $${values.length}`);
+    }
+    if (filter.tedixUserId !== undefined) {
+      values.push(filter.tedixUserId);
+      clauses.push(`tedix_user_id = $${values.length}`);
+    }
+    if (filter.role !== undefined) {
+      values.push(filter.role);
+      clauses.push(`role = $${values.length}`);
+    }
+
+    if (clauses.length === 0) return null;
+
+    const { rows } = await pool.query(
+      `SELECT * FROM users WHERE ${clauses.join(' AND ')} LIMIT 1`,
+      values,
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async findById(id: string): Promise<IUser | null> {
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1 LIMIT 1', [id]);
+    return rows[0] ? mapRow(rows[0]) : null;
+  },
+};

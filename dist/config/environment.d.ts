@@ -3,7 +3,7 @@ export interface ApiEnvironment {
     host: string;
     port: number;
     webOrigin?: string;
-    mongoUri?: string;
+    databaseUrl?: string;
     jwtSecret: string;
     jwtExpiresIn: string;
     refreshTokenExpiresIn: string;

@@ -17,7 +17,7 @@ export const requireAuth: RequestHandler = async (req: AuthRequest, res, next) =
 
   try {
     const payload = verifyJwt<{ sub: string }>(token);
-    const user = await User.findById(payload.sub).exec();
+    const user = await User.findById(payload.sub);
 
     if (!user) return res.status(401).json({ error: 'unauthorized' });
 

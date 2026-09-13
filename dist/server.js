@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { environment } from './config/environment.js';
-import { connectMongo } from './lib/mongo.js';
+import { connectPostgres } from './lib/postgres.js';
 const shutdownTimeoutMs = 5_000;
 const start = async () => {
-    await connectMongo();
+    await connectPostgres();
     const app = createApp();
     const server = app.listen(environment.port, environment.host, () => {
         console.log(`TedixHunt API listening on ${environment.host}:${environment.port}`);

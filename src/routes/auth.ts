@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { signJwt } from '../lib/jwt.js';
 import { User } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
+import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
@@ -86,7 +87,7 @@ router.post('/creator/register', async (req, res) => {
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
-  const exists = await User.findOne({ email }).exec();
+  const exists = await User.findOne({ email });
   if (exists) return res.status(409).json({ error: 'email_taken' });
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -139,7 +140,7 @@ router.post('/creator/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
-  const user = await User.findOne({ email, role: 'creator' }).exec();
+  const user = await User.findOne({ email, role: 'creator' });
   if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
   const ok = await bcrypt.compare(password, user.passwordHash ?? '');
@@ -191,7 +192,7 @@ router.post('/participant/register', async (req, res) => {
   const { email, password, name, tedixUserId } = req.body;
 
   if (tedixUserId) {
-    const exists = await User.findOne({ tedixUserId }).exec();
+    const exists = await User.findOne({ tedixUserId });
     if (exists) return res.status(409).json({ error: 'tedix_account_linked' });
 
     const user = await User.create({ role: 'participant', name, tedixUserId });
@@ -201,7 +202,7 @@ router.post('/participant/register', async (req, res) => {
 
   // participants may register with or without email/password
   if (email && password) {
-    const exists = await User.findOne({ email }).exec();
+    const exists = await User.findOne({ email });
     if (exists) return res.status(409).json({ error: 'email_taken' });
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -262,7 +263,7 @@ router.post('/participant/login', async (req, res) => {
   // Tedix-linked accounts authenticate upstream in Tedix; TedixHunt trusts the
   // tedixUserId handed back by that flow rather than holding its own password.
   if (tedixUserId) {
-    const user = await User.findOne({ tedixUserId, role: 'participant' }).exec();
+    const user = await User.findOne({ tedixUserId, role: 'participant' });
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
     const tokens = await createTokens(user.id);
@@ -271,7 +272,7 @@ router.post('/participant/login', async (req, res) => {
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
-  const user = await User.findOne({ email, role: 'participant' }).exec();
+  const user = await User.findOne({ email, role: 'participant' });
   if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
   const ok = await bcrypt.compare(password, user.passwordHash ?? '');
@@ -346,16 +347,16 @@ router.post('/refresh', async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) return res.status(400).json({ error: 'invalid_input' });
 
-  const stored = await RefreshToken.findOne({ token: refreshToken }).exec();
+  const stored = await RefreshToken.findOne({ token: refreshToken });
   if (!stored) return res.status(401).json({ error: 'invalid_refresh' });
 
   if (stored.expiresAt < new Date()) {
-    await stored.deleteOne();
+    await RefreshToken.deleteOne(stored.id);
     return res.status(401).json({ error: 'refresh_expired' });
   }
 
   const userId = String(stored.user);
-  await stored.deleteOne();
+  await RefreshToken.deleteOne(stored.id);
 
   const tokens = await createTokens(userId);
   res.json(tokens);
@@ -383,7 +384,14 @@ router.post('/refresh', async (req, res) => {
  */
 router.get('/me', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user;
-  res.json({ id: user.id, email: user.email, name: user.name, role: user.role, organizations: user.organizations });
+  const organizations = await Organization.findByOwnerOrMember(user.id);
+  res.json({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    organizations: organizations.map((org) => org.id),
+  });
 });
 
 export const authRouter = router;
