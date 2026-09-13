@@ -90,13 +90,13 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
  */
 router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user;
-  const { id } = req.params;
-  const org = await Organization.findById(id).populate('owner members').exec();
+  const id = String(req.params.id);
+  const org = await Organization.findById(id, { populate: true });
   if (!org) return res.status(404).json({ error: 'not_found' });
 
-  const isOwner = String(org.owner) === String(user.id) || String((org.owner as any)?._id) === String(user.id);
+  const isOwner = String((org.owner as any)?.id ?? org.owner) === String(user.id);
   const isMember = org.members.some(
-    (member: any) => String(member) === String(user.id) || String(member?._id) === String(user.id),
+    (member: any) => String(member?.id ?? member) === String(user.id),
   );
   if (!isOwner && !isMember) return res.status(403).json({ error: 'forbidden' });
 
@@ -123,7 +123,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
  */
 router.get('/', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user;
-  const orgs = await Organization.find({ $or: [{ owner: user.id }, { members: user.id }] }).exec();
+  const orgs = await Organization.findByOwnerOrMember(user.id);
   res.json(orgs);
 });
 
@@ -169,16 +169,14 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
  */
 router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user;
-  const { id } = req.params;
-  const org = await Organization.findById(id).exec();
+  const id = String(req.params.id);
+  const org = await Organization.findById(id);
   if (!org) return res.status(404).json({ error: 'not_found' });
   if (String(org.owner) !== String(user.id)) return res.status(403).json({ error: 'forbidden' });
 
   const { name, description } = req.body;
-  if (name) org.name = name;
-  if (description) org.description = description;
-  await org.save();
-  res.json(org);
+  const updated = await Organization.update(id, { name, description });
+  res.json(updated);
 });
 
 export const organizationsRouter = router;

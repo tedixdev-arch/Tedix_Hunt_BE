@@ -1,11 +1,4 @@
-import { Pool } from 'pg';
-import { environment } from '../config/environment.js';
-
-export const pool = new Pool({ connectionString: environment.databaseUrl });
-
-// Mirrors src/db/schema.sql — kept inline so it ships with the compiled dist/ output
-// without relying on a separate asset-copy step in the build.
-const SCHEMA_SQL = `
+-- TedixHunt API schema (PostgreSQL)
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -42,19 +35,3 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id);
-`;
-
-export const connectPostgres = async (): Promise<void> => {
-  if (!environment.databaseUrl) {
-    console.warn('DATABASE_URL not provided — skipping PostgreSQL connection.');
-    return;
-  }
-
-  await pool.query(SCHEMA_SQL);
-
-  console.log('Connected to PostgreSQL');
-};
-
-export const disconnectPostgres = async (): Promise<void> => {
-  await pool.end();
-};

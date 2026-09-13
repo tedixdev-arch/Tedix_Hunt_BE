@@ -3,7 +3,7 @@ export interface ApiEnvironment {
   host: string;
   port: number;
   webOrigin?: string;
-  mongoUri?: string;
+  databaseUrl?: string;
   jwtSecret: string;
   jwtExpiresIn: string;
   refreshTokenExpiresIn: string;
@@ -45,7 +45,7 @@ export const readEnvironment = (): ApiEnvironment => ({
   host: parseHost(process.env.API_HOST),
   port: parsePort(process.env.API_PORT),
   webOrigin: process.env.WEB_ORIGIN,
-  mongoUri: process.env.MONGODB_URI,
+  databaseUrl: process.env.DATABASE_URL,
   jwtSecret: process.env.JWT_SECRET ?? 'change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
   refreshTokenExpiresIn: process.env.REFRESH_EXPIRES_IN ?? '7d',
