@@ -61,4 +61,4 @@ jobs:
       - name: Install, build and restart
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd $DEPLOY_PATH && npm ci && npm run build && sudo -n /usr/bin/systemctl restart tedixhunt-api"
+            "cd $DEPLOY_PATH && npm ci && npm run build && printf '%s' '${{ github.sha }}' > dist/revision.txt && sudo -n /usr/bin/systemctl restart tedixhunt-api"
