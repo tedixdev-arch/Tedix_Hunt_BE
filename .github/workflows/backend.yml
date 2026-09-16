@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency: production-deploy
     env:
-      DEPLOY_HOST: 167.233.215.15
+      DEPLOY_HOST: tedixhunt-be-dev.anainfo.ai
       DEPLOY_USER: deploy
       DEPLOY_PATH: /var/www/Tedix_Hunt_BE
     steps:
