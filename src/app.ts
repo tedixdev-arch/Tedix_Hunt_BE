@@ -23,6 +23,10 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/health', healthRouter);
   app.use('/api/health', healthRouter);
 
+  app.get('/api/ping', (_request, response) => {
+    response.status(200).json({ pong: true, timestamp: new Date().toISOString() });
+  });
+
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationsRouter);
 
