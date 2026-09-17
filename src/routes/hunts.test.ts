@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   findUserById: vi.fn(),
   findHuntById: vi.fn(),
+  findHuntsForUser: vi.fn(),
   createHunt: vi.fn(),
   updateDraft: vi.fn(),
   transitionStatus: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('../models/User.js', () => ({ User: { findById: mocks.findUserById } }))
 vi.mock('../models/Hunt.js', () => ({
   Hunt: {
     findById: mocks.findHuntById,
+    findForUser: mocks.findHuntsForUser,
     createWithOrganizerRole: mocks.createHunt,
     updateDraft: mocks.updateDraft,
     transitionStatus: mocks.transitionStatus,
@@ -51,6 +53,7 @@ describe('Hunt routes', () => {
     vi.clearAllMocks();
     mocks.findUserById.mockResolvedValue(user);
     mocks.findHuntById.mockResolvedValue(hunt);
+    mocks.findHuntsForUser.mockResolvedValue([]);
     mocks.findOrganizationById.mockResolvedValue({ id: 'org-1' });
     mocks.isOwner.mockResolvedValue(false);
     mocks.isMember.mockResolvedValue(true);
@@ -58,6 +61,51 @@ describe('Hunt routes', () => {
     mocks.createHunt.mockResolvedValue(hunt);
     mocks.updateDraft.mockResolvedValue({ ...hunt, name: 'Renamed' });
     mocks.transitionStatus.mockImplementation(({ to }) => Promise.resolve({ ...hunt, status: to }));
+  });
+
+  it('requires authentication to list Hunts', async () => {
+    await request(app).get('/api/hunts').expect(401, { error: 'unauthorized' });
+    expect(mocks.findHuntsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['organizer', ['organizer']],
+    ['supervisor', ['supervisor']],
+    ['both roles', ['organizer', 'supervisor']],
+  ])('lists a Hunt once for a user with %s', async (_description, huntRoles) => {
+    mocks.findHuntsForUser.mockResolvedValueOnce([{ ...hunt, huntRoles }]);
+    const response = await request(app).get('/api/hunts').set('Authorization', auth).expect(200);
+
+    expect(response.body).toEqual([{ ...hunt, createdAt: now.toISOString(), updatedAt: now.toISOString(), huntRoles }]);
+    expect(mocks.findHuntsForUser).toHaveBeenCalledWith(user.id);
+  });
+
+  it.each(['creator', 'organizer'])('does not list Hunts from the global %s role alone', async (role) => {
+    mocks.findUserById.mockResolvedValueOnce({ ...user, roles: ['participant', role] });
+    await request(app).get('/api/hunts').set('Authorization', auth).expect(200, []);
+    expect(mocks.findHuntsForUser).toHaveBeenCalledWith(user.id);
+  });
+
+  it('returns an empty list for an unrelated authenticated user', async () => {
+    await request(app).get('/api/hunts').set('Authorization', auth).expect(200, []);
+  });
+
+  it('preserves persisted statuses and repository ordering in the list response', async () => {
+    const statuses = ['draft', 'published', 'active', 'paused', 'cancelled', 'finished'] as const;
+    const hunts = statuses.map((status, index) => ({
+      ...hunt,
+      id: `hunt-${index}`,
+      status,
+      updatedAt: new Date(now.getTime() - index * 1000),
+      createdAt: new Date(now.getTime() - index * 100),
+      huntRoles: ['organizer'],
+    }));
+    mocks.findHuntsForUser.mockResolvedValueOnce(hunts);
+
+    const response = await request(app).get('/api/hunts').set('Authorization', auth).expect(200);
+    expect(response.body.map(({ id, status }: { id: string; status: string }) => ({ id, status }))).toEqual(
+      hunts.map(({ id, status }) => ({ id, status })),
+    );
   });
 
   it.each([['creator'], ['organizer']])('allows an organization member with %s capability to create a draft', async (role) => {

@@ -75,6 +75,21 @@ const options: swaggerJsdoc.Options = {
             updatedAt: { type: 'string', format: 'date-time' },
           },
         },
+        HuntListItem: {
+          allOf: [
+            { $ref: '#/components/schemas/Hunt' },
+            {
+              type: 'object',
+              required: ['huntRoles'],
+              properties: {
+                huntRoles: {
+                  type: 'array',
+                  items: { type: 'string', enum: ['organizer', 'supervisor'] },
+                },
+              },
+            },
+          ],
+        },
       },
     },
   },
