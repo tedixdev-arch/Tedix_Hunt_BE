@@ -6,6 +6,7 @@ import { swaggerSpec } from './lib/swagger.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { organizationsRouter } from './routes/organizations.js';
+import { huntsRouter } from './routes/hunts.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -29,6 +30,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationsRouter);
+  app.use('/api/hunts', huntsRouter);
 
   app.get('/api/docs.json', (_request, response) => {
     response.json(swaggerSpec);

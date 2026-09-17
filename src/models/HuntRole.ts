@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../lib/postgres.js';
 
 export type HuntRole = 'organizer' | 'supervisor';
@@ -8,9 +9,14 @@ function assertRole(role: string): asserts role is HuntRole {
 }
 
 export const HuntRoles = {
-  async assign(huntId: string, userId: string, role: HuntRole): Promise<boolean> {
+  async assign(
+    huntId: string,
+    userId: string,
+    role: HuntRole,
+    client: Pick<PoolClient, 'query'> = pool,
+  ): Promise<boolean> {
     assertRole(role);
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO hunt_roles (hunt_id, user_id, role)
        VALUES ($1, $2, $3)
        ON CONFLICT (hunt_id, user_id, role) DO NOTHING`,
