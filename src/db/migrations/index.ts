@@ -7,15 +7,16 @@ export const discoverMigrations = async (directory: string): Promise<Migration[]
     .filter((filename) => /^\d{3}_[a-z0-9_]+\.js$/.test(filename))
     .sort((left, right) => left.localeCompare(right));
 
-  return Promise.all(
-    filenames.map(async (filename) => {
-      const module = (await import(pathToFileURL(`${directory}/${filename}`).href)) as {
-        default?: Migration;
-      };
-      if (!module.default) throw new Error(`Migration ${filename} has no default export.`);
-      return module.default;
-    }),
-  );
+  const migrations: Migration[] = [];
+  for (const filename of filenames) {
+    const module = (await import(pathToFileURL(`${directory}/${filename}`).href)) as {
+      default?: Migration;
+    };
+    if (!module.default) throw new Error(`Migration ${filename} has no default export.`);
+    migrations.push(module.default);
+  }
+
+  return migrations;
 };
 
 export type { Migration } from './types.js';

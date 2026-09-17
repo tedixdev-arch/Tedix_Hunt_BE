@@ -7,6 +7,10 @@ import { baselineMigration } from './migrations/001_baseline.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [baselineMigration];
+const trackedMigration: Migration = {
+  id: '002_test_tracking',
+  async up() {},
+};
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
@@ -52,13 +56,13 @@ describeWithDatabase('PostgreSQL migrations', () => {
 
   it('is idempotent and does not execute an already-applied migration again', async () => {
     let executions = 0;
-    const trackedMigration: Migration = {
+    const countingMigration: Migration = {
       id: '002_test_tracking',
       async up() {
         executions += 1;
       },
     };
-    const testMigrations = [...migrations, trackedMigration];
+    const testMigrations = [...migrations, countingMigration];
 
     await expect(runMigrations(client, testMigrations)).resolves.toEqual(['002_test_tracking']);
     await expect(runMigrations(client, testMigrations)).resolves.toEqual([]);
@@ -74,7 +78,9 @@ describeWithDatabase('PostgreSQL migrations', () => {
       },
     };
 
-    await expect(runMigrations(client, [...migrations, failingMigration])).rejects.toThrow(
+    await expect(
+      runMigrations(client, [...migrations, trackedMigration, failingMigration]),
+    ).rejects.toThrow(
       'expected migration failure',
     );
     const history = await client.query('SELECT 1 FROM schema_migrations WHERE id = $1', [
@@ -85,5 +91,13 @@ describeWithDatabase('PostgreSQL migrations', () => {
       `SELECT to_regclass('public.rolled_back_test') AS exists`,
     );
     expect(table.rows[0]?.exists).toBeNull();
+  });
+
+  it('fails when applied migration history is missing from the repository', async () => {
+    await client.query(`INSERT INTO schema_migrations (id) VALUES ('999_removed_migration')`);
+
+    await expect(runMigrations(client, [...migrations, trackedMigration])).rejects.toThrow(
+      'Database contains applied migration(s) missing from the repository: 999_removed_migration',
+    );
   });
 });

@@ -41,6 +41,15 @@ export const runMigrations = async (
 
     const result = await client.query<{ id: string }>('SELECT id FROM schema_migrations');
     const applied = new Set(result.rows.map(({ id }) => id));
+    const available = new Set(ordered.map(({ id }) => id));
+    const missing = [...applied].filter((id) => !available.has(id)).sort();
+
+    // An applied migration must remain in source control so database history stays auditable.
+    if (missing.length > 0) {
+      throw new Error(
+        `Database contains applied migration(s) missing from the repository: ${missing.join(', ')}`,
+      );
+    }
 
     for (const migration of ordered) {
       if (applied.has(migration.id)) continue;
