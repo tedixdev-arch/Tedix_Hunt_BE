@@ -4,11 +4,12 @@ import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrate.js';
 import { baselineMigration } from './migrations/001_baseline.js';
+import { userRolesMigration } from './migrations/002_user_roles.js';
 import type { Migration } from './migrations/index.js';
 
-const migrations = [baselineMigration];
+const migrations = [baselineMigration, userRolesMigration];
 const trackedMigration: Migration = {
-  id: '002_test_tracking',
+  id: '003_test_tracking',
   async up() {},
 };
 
@@ -25,7 +26,9 @@ describeWithDatabase('PostgreSQL migrations', () => {
     const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
     await client.query(await readFile(schemaPath, 'utf8'));
     await client.query(
-      `INSERT INTO users (email, role, name) VALUES ('existing@example.com', 'user', 'Existing User')`,
+      `INSERT INTO users (id, email, role, name) VALUES
+       ('00000000-0000-0000-0000-000000000001', 'participant@example.com', 'participant', 'Participant'),
+       ('00000000-0000-0000-0000-000000000002', 'creator@example.com', 'creator', 'Creator')`,
     );
   });
 
@@ -35,16 +38,44 @@ describeWithDatabase('PostgreSQL migrations', () => {
   });
 
   it('creates migration history and applies the non-destructive baseline', async () => {
-    await expect(runMigrations(client, migrations)).resolves.toEqual(['001_baseline']);
+    await expect(runMigrations(client, migrations)).resolves.toEqual([
+      '001_baseline',
+      '002_user_roles',
+    ]);
 
     const history = await client.query<{ id: string }>(
       'SELECT id FROM schema_migrations ORDER BY id',
     );
-    expect(history.rows).toEqual([{ id: '001_baseline' }]);
-    const user = await client.query<{ name: string }>(
-      `SELECT name FROM users WHERE email = 'existing@example.com'`,
+    expect(history.rows).toEqual([{ id: '001_baseline' }, { id: '002_user_roles' }]);
+    const users = await client.query<{ id: string; email: string; role: string }>(
+      `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
+       ORDER BY u.email`,
     );
-    expect(user.rows).toEqual([{ name: 'Existing User' }]);
+    expect(users.rows).toEqual([
+      {
+        id: '00000000-0000-0000-0000-000000000002',
+        email: 'creator@example.com',
+        role: 'creator',
+      },
+      {
+        id: '00000000-0000-0000-0000-000000000001',
+        email: 'participant@example.com',
+        role: 'participant',
+      },
+    ]);
+
+    await expect(
+      client.query(
+        `INSERT INTO user_roles (user_id, role)
+         VALUES ('00000000-0000-0000-0000-000000000001', 'participant')`,
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
+    await expect(
+      client.query(
+        `INSERT INTO user_roles (user_id, role)
+         VALUES ('00000000-0000-0000-0000-000000000099', 'participant')`,
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
 
     for (const table of ['users', 'organizations', 'organization_members', 'refresh_tokens']) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
@@ -57,21 +88,21 @@ describeWithDatabase('PostgreSQL migrations', () => {
   it('is idempotent and does not execute an already-applied migration again', async () => {
     let executions = 0;
     const countingMigration: Migration = {
-      id: '002_test_tracking',
+      id: '003_test_tracking',
       async up() {
         executions += 1;
       },
     };
     const testMigrations = [...migrations, countingMigration];
 
-    await expect(runMigrations(client, testMigrations)).resolves.toEqual(['002_test_tracking']);
+    await expect(runMigrations(client, testMigrations)).resolves.toEqual(['003_test_tracking']);
     await expect(runMigrations(client, testMigrations)).resolves.toEqual([]);
     expect(executions).toBe(1);
   });
 
   it('does not record a failed migration', async () => {
     const failingMigration: Migration = {
-      id: '003_test_failure',
+      id: '004_test_failure',
       async up(db) {
         await db.query('CREATE TABLE rolled_back_test (id INTEGER)');
         throw new Error('expected migration failure');

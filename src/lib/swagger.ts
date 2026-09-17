@@ -42,6 +42,10 @@ const options: swaggerJsdoc.Options = {
             email: { type: 'string', format: 'email' },
             name: { type: 'string' },
             role: { type: 'string', enum: ['creator', 'participant', 'guest'] },
+            roles: {
+              type: 'array',
+              items: { type: 'string', enum: ['participant', 'organizer', 'creator', 'admin'] },
+            },
             isGuest: { type: 'boolean' },
             tedixUserId: { type: 'string' },
             organizations: { type: 'array', items: { type: 'string' } },

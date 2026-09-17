@@ -1,13 +1,15 @@
 import { pool } from '../lib/postgres.js';
 
-export type Role = 'creator' | 'participant' | 'guest';
-export const USER_ROLES: readonly Role[] = ['creator', 'participant', 'guest'];
+import type { UserRole } from './UserRole.js';
+
+export type LegacyRole = 'creator' | 'participant' | 'guest';
 
 export interface IUser {
   id: string;
   email?: string | null;
   passwordHash?: string | null;
-  role: Role;
+  role: LegacyRole;
+  roles: UserRole[];
   name?: string | null;
   isGuest: boolean;
   tedixUserId?: string | null;
@@ -17,7 +19,7 @@ export interface IUser {
 export interface CreateUserInput {
   email?: string;
   passwordHash?: string;
-  role: Role;
+  role: Extract<UserRole, 'creator' | 'participant'>;
   name?: string;
   isGuest?: boolean;
   tedixUserId?: string;
@@ -27,14 +29,14 @@ export interface FindUserFilter {
   id?: string;
   email?: string;
   tedixUserId?: string;
-  role?: Role;
+  role?: Extract<UserRole, 'creator' | 'participant'>;
 }
 
 export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-function assertRole(role: string): asserts role is Role {
-  // These are the roles supported by the current account model. Authorization expansion is out of scope here.
-  if (!USER_ROLES.includes(role as Role)) throw new Error('invalid_user_role');
+function assertInitialRole(role: string): asserts role is CreateUserInput['role'] {
+  // Public registration can establish only its existing creator or participant capability.
+  if (role !== 'creator' && role !== 'participant') throw new Error('invalid_user_role');
 }
 
 const mapRow = (row: any): IUser => ({
@@ -42,6 +44,7 @@ const mapRow = (row: any): IUser => ({
   email: row.email,
   passwordHash: row.password_hash,
   role: row.role,
+  roles: row.roles ?? [],
   name: row.name,
   isGuest: row.is_guest,
   tedixUserId: row.tedix_user_id,
@@ -50,11 +53,17 @@ const mapRow = (row: any): IUser => ({
 
 export const User = {
   async create(input: CreateUserInput): Promise<IUser> {
-    assertRole(input.role);
+    assertInitialRole(input.role);
     const { rows } = await pool.query(
-      `INSERT INTO users (email, password_hash, role, name, is_guest, tedix_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
+      `WITH new_user AS (
+         INSERT INTO users (email, password_hash, role, name, is_guest, tedix_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *
+       ), assigned_role AS (
+         INSERT INTO user_roles (user_id, role)
+         SELECT id, $3 FROM new_user
+       )
+       SELECT new_user.*, ARRAY[$3]::text[] AS roles FROM new_user`,
       [
         input.email === undefined ? null : normalizeEmail(input.email),
         input.passwordHash ?? null,
@@ -85,20 +94,33 @@ export const User = {
     }
     if (filter.role !== undefined) {
       values.push(filter.role);
-      clauses.push(`role = $${values.length}`);
+      clauses.push(`EXISTS (
+        SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role = $${values.length}
+      )`);
     }
 
     if (clauses.length === 0) return null;
 
     const { rows } = await pool.query(
-      `SELECT * FROM users WHERE ${clauses.join(' AND ')} LIMIT 1`,
+      `SELECT users.*, ARRAY(
+         SELECT ur.role FROM user_roles ur WHERE ur.user_id = users.id ORDER BY ur.role
+       ) AS roles
+       FROM users WHERE ${clauses.join(' AND ')} LIMIT 1`,
       values,
     );
     return rows[0] ? mapRow(rows[0]) : null;
   },
 
   async findById(id: string): Promise<IUser | null> {
-    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1 LIMIT 1', [id]);
+    const { rows } = await pool.query(
+      `SELECT users.*, ARRAY(
+         SELECT ur.role FROM user_roles ur WHERE ur.user_id = users.id ORDER BY ur.role
+       ) AS roles
+       FROM users WHERE id = $1 LIMIT 1`,
+      [id],
+    );
     return rows[0] ? mapRow(rows[0]) : null;
   },
 };
+
+export { USER_ROLES } from './UserRole.js';

@@ -11,6 +11,7 @@ const storedRow = {
   email: 'person@example.com',
   password_hash: '$2a$10$stored-hash',
   role: 'participant',
+  roles: ['participant'],
   name: 'Person',
   is_guest: false,
   tedix_user_id: null,
@@ -64,7 +65,7 @@ describe('User persistence', () => {
   });
 
   it('documents supported roles and rejects unsupported roles before querying', async () => {
-    expect(USER_ROLES).toEqual(['creator', 'participant', 'guest']);
+    expect(USER_ROLES).toEqual(['participant', 'organizer', 'creator', 'admin']);
 
     await expect(User.create({ role: 'administrator' as never })).rejects.toThrow(
       'invalid_user_role',

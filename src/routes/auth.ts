@@ -15,6 +15,7 @@ const publicUser = (user: IUser) => ({
   email: user.email,
   name: user.name,
   role: user.role,
+  roles: user.roles,
   isGuest: user.isGuest,
   tedixUserId: user.tedixUserId,
   createdAt: user.createdAt,
@@ -50,64 +51,7 @@ const createTokens = async (userId: string) => {
  *     description: Creator, participant and guest authentication
  */
 
-/**
- * @openapi
- * /api/auth/creator/register:
- *   post:
- *     tags: [Auth]
- *     summary: Register a CREATOR account
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [email, password]
- *             properties:
- *               email: { type: string, format: email }
- *               password: { type: string, format: password }
- *               name: { type: string }
- *     responses:
- *       201:
- *         description: Creator account created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 user: { $ref: '#/components/schemas/User' }
- *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
- *       400:
- *         description: Missing email or password
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/Error' }
- *       409:
- *         description: Email already registered
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/Error' }
- */
-router.post('/creator/register', async (req, res, next) => {
-  const { email, password, name } = req.body;
-
-  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
-
-  const exists = await User.findOne({ email });
-  if (exists) return res.status(409).json({ error: 'email_taken' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  try {
-    const user = await User.create({ email, passwordHash, role: 'creator', name });
-    const tokens = await createTokens(user.id);
-    res.status(201).json({ user: publicUser(user), tokens });
-  } catch (error) {
-    // The database constraint is authoritative when concurrent registrations race.
-    if (isUniqueViolation(error)) return res.status(409).json({ error: 'email_taken' });
-    next(error);
-  }
-});
+// Creator capabilities are provisioned only by trusted internal/admin code; there is no public signup.
 
 /**
  * @openapi
