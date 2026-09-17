@@ -17,7 +17,7 @@ const start = async () => {
     console.log(`${signal} received. Shutting down TedixHunt API.`);
     void shutdown().catch((error: unknown) => {
       console.error('Failed to shut down TedixHunt API cleanly.', error);
-      process.exitCode = 1;
+      process.exit(1);
     });
   };
 
