@@ -68,7 +68,9 @@ export const Organization = {
       );
       const org = rows[0];
 
-      for (const memberId of input.members) {
+      // Owners are also members so every collaboration query has one consistent path.
+      const members = [...new Set([input.owner, ...input.members])];
+      for (const memberId of members) {
         await client.query(
           `INSERT INTO organization_members (organization_id, user_id)
            VALUES ($1, $2)
@@ -78,7 +80,7 @@ export const Organization = {
       }
 
       await client.query('COMMIT');
-      return mapRow(org, input.members);
+      return mapRow(org, members);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -121,6 +123,45 @@ export const Organization = {
     );
 
     return Promise.all(rows.map(async (row) => mapRow(row, await memberIds(row.id))));
+  },
+
+  async isOwner(userId: string, organizationId: string): Promise<boolean> {
+    const result = await pool.query(
+      'SELECT 1 FROM organizations WHERE id = $1 AND owner_id = $2',
+      [organizationId, userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+
+  async isMember(userId: string, organizationId: string): Promise<boolean> {
+    const result = await pool.query(
+      'SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [organizationId, userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+
+  async addMember(organizationId: string, userId: string): Promise<boolean> {
+    const result = await pool.query(
+      `INSERT INTO organization_members (organization_id, user_id)
+       VALUES ($1, $2)
+       ON CONFLICT (organization_id, user_id) DO NOTHING`,
+      [organizationId, userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+
+  async removeMember(organizationId: string, userId: string): Promise<boolean> {
+    const result = await pool.query(
+      `DELETE FROM organization_members om
+       WHERE om.organization_id = $1 AND om.user_id = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM organizations o
+           WHERE o.id = om.organization_id AND o.owner_id = om.user_id
+         )`,
+      [organizationId, userId],
+    );
+    return (result.rowCount ?? 0) > 0;
   },
 
   async update(id: string, changes: { name?: string; description?: string }): Promise<IOrganization | null> {
