@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   findUser: vi.fn(),
   findUserById: vi.fn(),
   createRefreshToken: vi.fn(),
+  consumeRefreshToken: vi.fn(),
+  deleteRefreshToken: vi.fn(),
   organizationsForUser: vi.fn(),
 }));
 
@@ -18,7 +20,11 @@ vi.mock('../models/User.js', () => ({
   },
 }));
 vi.mock('../models/RefreshToken.js', () => ({
-  RefreshToken: { create: mocks.createRefreshToken, findOne: vi.fn(), deleteOne: vi.fn() },
+  RefreshToken: {
+    create: mocks.createRefreshToken,
+    consume: mocks.consumeRefreshToken,
+    deleteByToken: mocks.deleteRefreshToken,
+  },
 }));
 vi.mock('../models/Organization.js', () => ({
   Organization: { findByOwnerOrMember: mocks.organizationsForUser },
@@ -47,6 +53,8 @@ describe('user account API', () => {
     mocks.findUser.mockResolvedValue(null);
     mocks.createUser.mockResolvedValue(registeredUser);
     mocks.createRefreshToken.mockResolvedValue({});
+    mocks.consumeRefreshToken.mockResolvedValue(null);
+    mocks.deleteRefreshToken.mockResolvedValue(false);
     mocks.organizationsForUser.mockResolvedValue([]);
   });
 
@@ -71,6 +79,29 @@ describe('user account API', () => {
       .send({ email: 'person@example.com', password: 'plain-secret' })
       .expect(409, { error: 'email_taken' });
     expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it('logs a creator in with valid credentials and rejects an invalid password', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    mocks.findUser.mockResolvedValue({ ...registeredUser, passwordHash });
+
+    const success = await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'PERSON@example.com', password: 'correct-password' })
+      .expect(200);
+    expect(success.body.tokens).toEqual({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+    expect(mocks.findUser).toHaveBeenCalledWith({
+      email: 'PERSON@example.com',
+      role: 'creator',
+    });
+
+    await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'person@example.com', password: 'wrong-password' })
+      .expect(401, { error: 'invalid_credentials' });
   });
 
   it('maps a database uniqueness race to the same safe response', async () => {
@@ -104,7 +135,7 @@ describe('user account API', () => {
 
   it('retrieves an existing user without exposing account secrets', async () => {
     mocks.findUserById.mockResolvedValue(registeredUser);
-    const token = signJwt({ sub: registeredUser.id });
+    const token = signJwt({ sub: registeredUser.id, type: 'access' });
 
     const response = await request(app)
       .get('/api/auth/me')
@@ -114,6 +145,116 @@ describe('user account API', () => {
     expect(response.body).toMatchObject({ id: registeredUser.id, isGuest: false });
     expect(response.body).not.toHaveProperty('passwordHash');
     expect(response.body).not.toHaveProperty('refreshToken');
+  });
+
+  it('rejects malformed and expired access tokens without leaking JWT details', async () => {
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer definitely-not-a-jwt')
+      .expect(401, { error: 'unauthorized' });
+
+    const expired = signJwt(
+      { sub: registeredUser.id, type: 'access' },
+      { expiresIn: -1 },
+    );
+    const response = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${expired}`)
+      .expect(401);
+    expect(response.body).toEqual({ error: 'unauthorized' });
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+  });
+
+  it('does not accept another signed token type as an access token', async () => {
+    const nonAccessToken = signJwt({ sub: registeredUser.id, type: 'refresh' });
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${nonAccessToken}`)
+      .expect(401, { error: 'unauthorized' });
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+  });
+
+  it('rotates a valid persisted refresh token and prevents reuse', async () => {
+    mocks.consumeRefreshToken
+      .mockResolvedValueOnce({
+        id: 'refresh-id',
+        user: registeredUser.id,
+        token: 'old-refresh',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt,
+      })
+      .mockResolvedValueOnce(null);
+    mocks.findUserById.mockResolvedValue(registeredUser);
+
+    const response = await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'old-refresh' })
+      .expect(200);
+    expect(response.body).toEqual({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+    expect(response.body.refreshToken).not.toBe('old-refresh');
+    expect(mocks.createRefreshToken).toHaveBeenCalledWith(
+      expect.objectContaining({ user: registeredUser.id, token: response.body.refreshToken }),
+    );
+
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'old-refresh' })
+      .expect(401, { error: 'invalid_refresh' });
+  });
+
+  it('rejects invalid and expired refresh tokens', async () => {
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'missing-token' })
+      .expect(401, { error: 'invalid_refresh' });
+
+    mocks.consumeRefreshToken.mockResolvedValue({
+      id: 'expired-id',
+      user: registeredUser.id,
+      token: 'expired-token',
+      expiresAt: new Date(Date.now() - 1_000),
+      createdAt,
+    });
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'expired-token' })
+      .expect(401, { error: 'refresh_expired' });
+    expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('logs out idempotently and makes the deleted refresh token unusable', async () => {
+    mocks.deleteRefreshToken.mockResolvedValue(true);
+    await request(app)
+      .post('/api/auth/logout')
+      .send({ refreshToken: 'refresh-to-revoke' })
+      .expect(200, { success: true });
+    expect(mocks.deleteRefreshToken).toHaveBeenCalledWith('refresh-to-revoke');
+
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'refresh-to-revoke' })
+      .expect(401, { error: 'invalid_refresh' });
+  });
+
+  it('supports participant password and Tedix-linked login', async () => {
+    const participant = { ...registeredUser, role: 'participant' as const };
+    const passwordHash = await bcrypt.hash('participant-password', 4);
+    mocks.findUser
+      .mockResolvedValueOnce({ ...participant, passwordHash })
+      .mockResolvedValueOnce({ ...participant, tedixUserId: 'tedix-123' });
+
+    await request(app)
+      .post('/api/auth/participant/login')
+      .send({ email: participant.email, password: 'participant-password' })
+      .expect(200);
+    await request(app)
+      .post('/api/auth/participant/login')
+      .send({ tedixUserId: 'tedix-123' })
+      .expect(200);
+    expect(mocks.createRefreshToken).toHaveBeenCalledTimes(2);
   });
 
   it('preserves the guest distinction', async () => {

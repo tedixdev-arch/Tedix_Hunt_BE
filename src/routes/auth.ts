@@ -1,6 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 import { signJwt } from '../lib/jwt.js';
 import { User, type IUser } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
@@ -23,25 +23,18 @@ const publicUser = (user: IUser) => ({
 const isUniqueViolation = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 
-const parseDurationToMs = (value: string) => {
-  if (value.endsWith('d')) {
-    const days = Number(value.slice(0, -1));
-    return days * 24 * 60 * 60 * 1000;
-  }
-  if (value.endsWith('m')) {
-    const mins = Number(value.slice(0, -1));
-    return mins * 60 * 1000;
-  }
-  return 0;
+const parseDurationToMs = (value: string): number => {
+  const match = /^(\d+)(ms|s|m|h|d)$/.exec(value);
+  if (!match) throw new Error('invalid_refresh_token_expiry');
+  const multipliers = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  return Number(match[1]) * multipliers[match[2] as keyof typeof multipliers];
 };
 
 const createTokens = async (userId: string) => {
-  const accessToken = signJwt({ sub: userId });
+  const accessToken = signJwt({ sub: userId, type: 'access' });
 
-  const refreshToken = signJwt(
-    { sub: userId },
-    { expiresIn: environment.refreshTokenExpiresIn as jwt.SignOptions['expiresIn'] },
-  );
+  // Refresh tokens are opaque, high-entropy credentials; only access tokens are JWTs.
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
 
   const expiresAt = new Date(Date.now() + parseDurationToMs(environment.refreshTokenExpiresIn));
 
@@ -335,7 +328,7 @@ router.post('/participant/login', async (req, res) => {
  */
 router.post('/guest', async (_req, res) => {
   const user = await User.create({ role: 'participant', isGuest: true });
-  const accessToken = signJwt({ sub: user.id }, { expiresIn: '1h' });
+  const accessToken = signJwt({ sub: user.id, type: 'access' }, { expiresIn: '1h' });
   res.status(201).json({ user: publicUser(user), tokens: { accessToken } });
 });
 
@@ -374,21 +367,35 @@ router.post('/guest', async (_req, res) => {
  */
 router.post('/refresh', async (req, res) => {
   const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(400).json({ error: 'invalid_input' });
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
 
-  const stored = await RefreshToken.findOne({ token: refreshToken });
+  // Atomically consume the token so two concurrent requests cannot both rotate it.
+  const stored = await RefreshToken.consume(refreshToken);
   if (!stored) return res.status(401).json({ error: 'invalid_refresh' });
 
   if (stored.expiresAt < new Date()) {
-    await RefreshToken.deleteOne(stored.id);
     return res.status(401).json({ error: 'refresh_expired' });
   }
 
   const userId = String(stored.user);
-  await RefreshToken.deleteOne(stored.id);
+  const user = await User.findById(userId);
+  if (!user || user.isGuest) return res.status(401).json({ error: 'invalid_refresh' });
 
   const tokens = await createTokens(userId);
   res.json(tokens);
+});
+
+/** Invalidates one refresh credential. Logout is idempotent to avoid revealing token state. */
+router.post('/logout', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+
+  await RefreshToken.deleteByToken(refreshToken);
+  return res.status(200).json({ success: true });
 });
 
 /**
