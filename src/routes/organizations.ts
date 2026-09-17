@@ -93,10 +93,10 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   const org = await Organization.findById(id, { populate: true });
   if (!org) return res.status(404).json({ error: 'not_found' });
 
-  const isOwner = String((org.owner as any)?.id ?? org.owner) === String(user.id);
-  const isMember = org.members.some(
-    (member: any) => String(member?.id ?? member) === String(user.id),
-  );
+  const [isOwner, isMember] = await Promise.all([
+    Organization.isOwner(user.id, id),
+    Organization.isMember(user.id, id),
+  ]);
   if (!isOwner && !isMember) return res.status(403).json({ error: 'forbidden' });
 
   res.json(org);
@@ -171,7 +171,9 @@ router.patch('/:id', requireAuth, requireRole('creator'), async (req: AuthReques
   const id = String(req.params.id);
   const org = await Organization.findById(id);
   if (!org) return res.status(404).json({ error: 'not_found' });
-  if (String(org.owner) !== String(user.id)) return res.status(403).json({ error: 'forbidden' });
+  if (!(await Organization.isOwner(user.id, id))) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
 
   const { name, description } = req.body;
   const updated = await Organization.update(id, { name, description });

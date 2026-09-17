@@ -100,6 +100,49 @@ describeWithDatabase('PostgreSQL migrations', () => {
     expect(executions).toBe(1);
   });
 
+  it('enforces organization membership uniqueness, foreign keys, and cascades', async () => {
+    const organizationId = '00000000-0000-0000-0000-000000000010';
+    const ownerId = '00000000-0000-0000-0000-000000000002';
+    const memberId = '00000000-0000-0000-0000-000000000001';
+    await client.query('BEGIN');
+    await client.query(
+      'INSERT INTO organizations (id, name, owner_id) VALUES ($1, $2, $3)',
+      [organizationId, 'Integrity test', ownerId],
+    );
+    await client.query(
+      'INSERT INTO organization_members (organization_id, user_id) VALUES ($1, $2)',
+      [organizationId, memberId],
+    );
+
+    await client.query('SAVEPOINT duplicate_membership');
+    await expect(
+      client.query(
+        'INSERT INTO organization_members (organization_id, user_id) VALUES ($1, $2)',
+        [organizationId, memberId],
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
+    await client.query('ROLLBACK TO SAVEPOINT duplicate_membership');
+
+    await client.query('DELETE FROM users WHERE id = $1', [memberId]);
+    const afterUserDelete = await client.query(
+      'SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [organizationId, memberId],
+    );
+    expect(afterUserDelete.rowCount).toBe(0);
+
+    await client.query(
+      'INSERT INTO organization_members (organization_id, user_id) VALUES ($1, $2)',
+      [organizationId, ownerId],
+    );
+    await client.query('DELETE FROM organizations WHERE id = $1', [organizationId]);
+    const afterOrganizationDelete = await client.query(
+      'SELECT 1 FROM organization_members WHERE organization_id = $1',
+      [organizationId],
+    );
+    expect(afterOrganizationDelete.rowCount).toBe(0);
+    await client.query('COMMIT');
+  });
+
   it('does not record a failed migration', async () => {
     const failingMigration: Migration = {
       id: '004_test_failure',
