@@ -55,11 +55,15 @@ export const createApp = (options: CreateAppOptions = {}) => {
     _next,
   ) => {
     const message = error instanceof Error ? error.message : 'Unexpected error';
+    const isPostgresError =
+      typeof error === 'object' && error !== null && 'code' in error &&
+      typeof error.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code);
 
     response.status(500).json({
       error: 'internal_server_error',
       message: 'An unexpected error occurred.',
-      ...(process.env.NODE_ENV === 'production' ? {} : { detail: message }),
+      // PostgreSQL diagnostics may contain schema or connection details and are never public.
+      ...(process.env.NODE_ENV === 'production' || isPostgresError ? {} : { detail: message }),
     });
   };
 

@@ -2,13 +2,26 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { signJwt } from '../lib/jwt.js';
-import { User } from '../models/User.js';
+import { User, type IUser } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
 import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = express.Router();
+
+const publicUser = (user: IUser) => ({
+  id: user.id,
+  email: user.email,
+  name: user.name,
+  role: user.role,
+  isGuest: user.isGuest,
+  tedixUserId: user.tedixUserId,
+  createdAt: user.createdAt,
+});
+
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 
 const parseDurationToMs = (value: string) => {
   if (value.endsWith('d')) {
@@ -82,7 +95,7 @@ const createTokens = async (userId: string) => {
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.post('/creator/register', async (req, res) => {
+router.post('/creator/register', async (req, res, next) => {
   const { email, password, name } = req.body;
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
@@ -92,11 +105,15 @@ router.post('/creator/register', async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  const user = await User.create({ email, passwordHash, role: 'creator', name });
-
-  const tokens = await createTokens(user.id);
-
-  res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+  try {
+    const user = await User.create({ email, passwordHash, role: 'creator', name });
+    const tokens = await createTokens(user.id);
+    res.status(201).json({ user: publicUser(user), tokens });
+  } catch (error) {
+    // The database constraint is authoritative when concurrent registrations race.
+    if (isUniqueViolation(error)) return res.status(409).json({ error: 'email_taken' });
+    next(error);
+  }
 });
 
 /**
@@ -148,7 +165,7 @@ router.post('/creator/login', async (req, res) => {
 
   const tokens = await createTokens(user.id);
 
-  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+  res.json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -195,9 +212,16 @@ router.post('/participant/register', async (req, res) => {
     const exists = await User.findOne({ tedixUserId });
     if (exists) return res.status(409).json({ error: 'tedix_account_linked' });
 
-    const user = await User.create({ role: 'participant', name, tedixUserId });
-    const tokens = await createTokens(user.id);
-    return res.status(201).json({ user: { id: user.id, name: user.name, role: user.role, tedixUserId: user.tedixUserId }, tokens });
+    try {
+      const user = await User.create({ role: 'participant', name, tedixUserId });
+      const tokens = await createTokens(user.id);
+      return res.status(201).json({ user: publicUser(user), tokens });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return res.status(409).json({ error: 'tedix_account_linked' });
+      }
+      throw error;
+    }
   }
 
   // participants may register with or without email/password
@@ -206,15 +230,20 @@ router.post('/participant/register', async (req, res) => {
     if (exists) return res.status(409).json({ error: 'email_taken' });
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ email, passwordHash, role: 'participant', name });
-    const tokens = await createTokens(user.id);
-    return res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+    try {
+      const user = await User.create({ email, passwordHash, role: 'participant', name });
+      const tokens = await createTokens(user.id);
+      return res.status(201).json({ user: publicUser(user), tokens });
+    } catch (error) {
+      if (isUniqueViolation(error)) return res.status(409).json({ error: 'email_taken' });
+      throw error;
+    }
   }
 
   // otherwise create a participant without credentials (linked account flow handled elsewhere)
   const user = await User.create({ role: 'participant', name });
   const tokens = await createTokens(user.id);
-  return res.status(201).json({ user: { id: user.id, name: user.name, role: user.role }, tokens });
+  return res.status(201).json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -267,7 +296,7 @@ router.post('/participant/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
     const tokens = await createTokens(user.id);
-    return res.json({ user: { id: user.id, name: user.name, role: user.role, tedixUserId: user.tedixUserId }, tokens });
+    return res.json({ user: publicUser(user), tokens });
   }
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
@@ -280,7 +309,7 @@ router.post('/participant/login', async (req, res) => {
 
   const tokens = await createTokens(user.id);
 
-  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+  res.json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -307,7 +336,7 @@ router.post('/participant/login', async (req, res) => {
 router.post('/guest', async (_req, res) => {
   const user = await User.create({ role: 'participant', isGuest: true });
   const accessToken = signJwt({ sub: user.id }, { expiresIn: '1h' });
-  res.status(201).json({ user: { id: user.id, role: user.role, isGuest: true }, tokens: { accessToken } });
+  res.status(201).json({ user: publicUser(user), tokens: { accessToken } });
 });
 
 /**
@@ -386,10 +415,7 @@ router.get('/me', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user;
   const organizations = await Organization.findByOwnerOrMember(user.id);
   res.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
+    ...publicUser(user),
     organizations: organizations.map((org) => org.id),
   });
 });
