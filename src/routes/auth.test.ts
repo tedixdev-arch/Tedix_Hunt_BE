@@ -39,6 +39,7 @@ const registeredUser = {
   email: 'person@example.com',
   passwordHash: '$2a$10$database-hash',
   role: 'creator',
+  roles: ['creator'],
   name: 'Person',
   isGuest: false,
   tedixUserId: null,
@@ -60,14 +61,19 @@ describe('user account API', () => {
 
   it('hashes a registered user password and never returns its hash', async () => {
     const response = await request(app)
-      .post('/api/auth/creator/register')
+      .post('/api/auth/participant/register')
       .send({ email: 'person@example.com', password: 'plain-secret', name: 'Person' })
       .expect(201);
 
     const createInput = mocks.createUser.mock.calls[0][0];
+    expect(createInput.role).toBe('participant');
     expect(createInput.passwordHash).not.toBe('plain-secret');
     await expect(bcrypt.compare('plain-secret', createInput.passwordHash)).resolves.toBe(true);
-    expect(response.body.user).toMatchObject({ isGuest: false, role: 'creator' });
+    expect(response.body.user).toMatchObject({
+      isGuest: false,
+      role: 'creator',
+      roles: ['creator'],
+    });
     expect(response.body.user).not.toHaveProperty('passwordHash');
   });
 
@@ -75,10 +81,18 @@ describe('user account API', () => {
     mocks.findUser.mockResolvedValue(registeredUser);
 
     await request(app)
-      .post('/api/auth/creator/register')
+      .post('/api/auth/participant/register')
       .send({ email: 'person@example.com', password: 'plain-secret' })
       .expect(409, { error: 'email_taken' });
     expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it('does not expose public privileged-role assignment endpoints', async () => {
+    await request(app)
+      .post('/api/auth/creator/register')
+      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .expect(404);
+    await request(app).post('/api/auth/roles').send({ role: 'admin' }).expect(404);
   });
 
   it('logs a creator in with valid credentials and rejects an invalid password', async () => {
@@ -108,7 +122,7 @@ describe('user account API', () => {
     mocks.createUser.mockRejectedValue(Object.assign(new Error('private database detail'), { code: '23505' }));
 
     const response = await request(app)
-      .post('/api/auth/creator/register')
+      .post('/api/auth/participant/register')
       .send({ email: 'person@example.com', password: 'plain-secret' })
       .expect(409);
 
@@ -122,7 +136,7 @@ describe('user account API', () => {
     );
 
     const response = await request(app)
-      .post('/api/auth/creator/register')
+      .post('/api/auth/participant/register')
       .send({ email: 'person@example.com', password: 'plain-secret' })
       .expect(500);
 
@@ -142,7 +156,11 @@ describe('user account API', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    expect(response.body).toMatchObject({ id: registeredUser.id, isGuest: false });
+    expect(response.body).toMatchObject({
+      id: registeredUser.id,
+      isGuest: false,
+      roles: ['creator'],
+    });
     expect(response.body).not.toHaveProperty('passwordHash');
     expect(response.body).not.toHaveProperty('refreshToken');
   });
@@ -240,7 +258,7 @@ describe('user account API', () => {
   });
 
   it('supports participant password and Tedix-linked login', async () => {
-    const participant = { ...registeredUser, role: 'participant' as const };
+    const participant = { ...registeredUser, role: 'participant' as const, roles: ['participant'] };
     const passwordHash = await bcrypt.hash('participant-password', 4);
     mocks.findUser
       .mockResolvedValueOnce({ ...participant, passwordHash })
@@ -263,13 +281,18 @@ describe('user account API', () => {
       email: null,
       passwordHash: null,
       role: 'participant',
+      roles: ['participant'],
       isGuest: true,
     });
 
     const response = await request(app).post('/api/auth/guest').expect(201);
 
     expect(mocks.createUser).toHaveBeenCalledWith({ role: 'participant', isGuest: true });
-    expect(response.body.user).toMatchObject({ role: 'participant', isGuest: true });
+    expect(response.body.user).toMatchObject({
+      role: 'participant',
+      roles: ['participant'],
+      isGuest: true,
+    });
     expect(response.body.tokens).not.toHaveProperty('refreshToken');
   });
 });
