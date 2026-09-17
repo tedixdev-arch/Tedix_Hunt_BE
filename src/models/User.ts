@@ -1,6 +1,7 @@
 import { pool } from '../lib/postgres.js';
 
 export type Role = 'creator' | 'participant' | 'guest';
+export const USER_ROLES: readonly Role[] = ['creator', 'participant', 'guest'];
 
 export interface IUser {
   id: string;
@@ -29,6 +30,13 @@ export interface FindUserFilter {
   role?: Role;
 }
 
+export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+
+function assertRole(role: string): asserts role is Role {
+  // These are the roles supported by the current account model. Authorization expansion is out of scope here.
+  if (!USER_ROLES.includes(role as Role)) throw new Error('invalid_user_role');
+}
+
 const mapRow = (row: any): IUser => ({
   id: row.id,
   email: row.email,
@@ -42,12 +50,13 @@ const mapRow = (row: any): IUser => ({
 
 export const User = {
   async create(input: CreateUserInput): Promise<IUser> {
+    assertRole(input.role);
     const { rows } = await pool.query(
       `INSERT INTO users (email, password_hash, role, name, is_guest, tedix_user_id)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
-        input.email ?? null,
+        input.email === undefined ? null : normalizeEmail(input.email),
         input.passwordHash ?? null,
         input.role,
         input.name ?? null,
@@ -67,7 +76,7 @@ export const User = {
       clauses.push(`id = $${values.length}`);
     }
     if (filter.email !== undefined) {
-      values.push(filter.email);
+      values.push(normalizeEmail(filter.email));
       clauses.push(`email = $${values.length}`);
     }
     if (filter.tedixUserId !== undefined) {
