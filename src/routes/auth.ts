@@ -363,7 +363,7 @@ router.post('/logout', async (req, res) => {
  *             schema: { $ref: '#/components/schemas/Error' }
  */
 router.get('/me', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
+  const user = req.user!;
   const organizations = await Organization.findByOwnerOrMember(user.id);
   res.json({
     ...publicUser(user),

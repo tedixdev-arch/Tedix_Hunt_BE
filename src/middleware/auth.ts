@@ -1,9 +1,11 @@
 import { Request, RequestHandler } from 'express';
 import { verifyJwt } from '../lib/jwt.js';
 import { User } from '../models/User.js';
+import type { IUser } from '../models/User.js';
+import type { UserRole } from '../models/UserRole.js';
 
 export interface AuthRequest extends Request {
-  user?: any;
+  user?: IUser;
 }
 
 export const requireAuth: RequestHandler = async (req: AuthRequest, res, next) => {
@@ -31,3 +33,18 @@ export const requireAuth: RequestHandler = async (req: AuthRequest, res, next) =
     return res.status(401).json({ error: 'unauthorized' });
   }
 };
+
+export const requireAnyRole = (requiredRoles: readonly UserRole[]): RequestHandler =>
+  (req: AuthRequest, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+
+    // Guests are participant identities and cannot exercise privileged capabilities.
+    const roles: readonly UserRole[] = req.user.isGuest ? ['participant'] : req.user.roles;
+    if (!requiredRoles.some((role) => roles.includes(role))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    next();
+  };
+
+export const requireRole = (role: UserRole): RequestHandler => requireAnyRole([role]);

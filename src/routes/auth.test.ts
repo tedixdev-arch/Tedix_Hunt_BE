@@ -118,6 +118,27 @@ describe('user account API', () => {
       .expect(401, { error: 'invalid_credentials' });
   });
 
+  it('logs in a creator whose legacy role remains participant', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    mocks.findUser.mockResolvedValue({
+      ...registeredUser,
+      role: 'participant',
+      roles: ['participant', 'creator'],
+      passwordHash,
+    });
+
+    const response = await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'person@example.com', password: 'correct-password' })
+      .expect(200);
+
+    expect(mocks.findUser).toHaveBeenCalledWith({ email: 'person@example.com', role: 'creator' });
+    expect(response.body.user).toMatchObject({
+      role: 'participant',
+      roles: ['participant', 'creator'],
+    });
+  });
+
   it('maps a database uniqueness race to the same safe response', async () => {
     mocks.createUser.mockRejectedValue(Object.assign(new Error('private database detail'), { code: '23505' }));
 
