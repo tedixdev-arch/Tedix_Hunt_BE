@@ -31,6 +31,20 @@ const lifecycleActions: Record<string, { from: readonly HuntStatus[]; to: HuntSt
 /**
  * @openapi
  * /api/hunts:
+ *   get:
+ *     tags: [Hunts]
+ *     summary: List manageable Hunts
+ *     description: Returns only Hunts where the authenticated user is a Hunt-specific organizer or supervisor.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Accessible Hunts, ordered by most recently updated and then created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items: { $ref: '#/components/schemas/HuntListItem' }
+ *       401: { $ref: '#/components/responses/HuntUnauthorized' }
  *   post:
  *     tags: [Hunts]
  *     summary: Create a Hunt draft
@@ -53,6 +67,10 @@ const lifecycleActions: Record<string, { from: readonly HuntStatus[]; to: HuntSt
  *       403: { $ref: '#/components/responses/HuntForbidden' }
  *       404: { $ref: '#/components/responses/HuntNotFound' }
  */
+router.get('/', requireAuth, async (req: AuthRequest, res) => {
+  return res.json(await Hunt.findForUser(req.user!.id));
+});
+
 router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (req: AuthRequest, res) => {
   const organizationId = typeof req.body.organizationId === 'string' ? req.body.organizationId : '';
   const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';

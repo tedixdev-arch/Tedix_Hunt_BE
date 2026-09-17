@@ -85,6 +85,34 @@ describe('core Hunt persistence', () => {
     await expect(Hunt.findById('hunt-1')).resolves.toMatchObject({ id: 'hunt-1' });
   });
 
+  it('lists each accessible Hunt once with its roles in deterministic order', async () => {
+    const older = new Date('2026-09-16T12:00:00Z');
+    query.mockResolvedValueOnce({ rows: [{
+      id: 'hunt-1',
+      organization_id: 'org-1',
+      created_by_user_id: 'user-2',
+      name: 'Shared Hunt',
+      status: 'paused',
+      created_at: older,
+      updated_at: createdAt,
+      hunt_roles: ['organizer', 'supervisor'],
+    }] });
+
+    await expect(Hunt.findForUser('user-1')).resolves.toEqual([{
+      id: 'hunt-1', organizationId: 'org-1', createdByUserId: 'user-2', name: 'Shared Hunt',
+      status: 'paused', createdAt: older, updatedAt: createdAt,
+      huntRoles: ['organizer', 'supervisor'],
+    }]);
+    expect(query).toHaveBeenCalledWith(expect.stringMatching(
+      /JOIN hunt_roles[\s\S]*WHERE hr\.user_id = \$1[\s\S]*GROUP BY h\.id[\s\S]*ORDER BY h\.updated_at DESC, h\.created_at DESC/,
+    ), ['user-1']);
+  });
+
+  it('returns an empty Hunt list when the user has no Hunt-specific roles', async () => {
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(Hunt.findForUser('user-1')).resolves.toEqual([]);
+  });
+
   it('enrolls idempotently and finds a Hunt participant', async () => {
     const row = { id: 'participant-1', hunt_id: 'hunt-1', user_id: 'user-2', joined_at: createdAt };
     query.mockResolvedValueOnce({ rows: [row] }).mockResolvedValueOnce({ rows: [row] });

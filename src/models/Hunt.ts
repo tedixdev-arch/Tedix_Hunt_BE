@@ -1,5 +1,5 @@
 import { pool } from '../lib/postgres.js';
-import { HuntRoles } from './HuntRole.js';
+import { HuntRoles, type HuntRole } from './HuntRole.js';
 
 export type HuntStatus = 'draft' | 'published' | 'active' | 'paused' | 'cancelled' | 'finished';
 
@@ -11,6 +11,10 @@ export interface IHunt {
   status: HuntStatus;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface IHuntListItem extends IHunt {
+  huntRoles: HuntRole[];
 }
 
 export interface CreateHuntInput {
@@ -50,6 +54,20 @@ export const Hunt = {
   async findById(id: string): Promise<IHunt | null> {
     const { rows } = await pool.query('SELECT * FROM hunts WHERE id = $1 LIMIT 1', [id]);
     return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async findForUser(userId: string): Promise<IHuntListItem[]> {
+    const { rows } = await pool.query(
+      `SELECT h.*,
+              array_agg(hr.role ORDER BY CASE hr.role WHEN 'organizer' THEN 1 ELSE 2 END) AS hunt_roles
+       FROM hunts h
+       JOIN hunt_roles hr ON hr.hunt_id = h.id
+       WHERE hr.user_id = $1
+       GROUP BY h.id
+       ORDER BY h.updated_at DESC, h.created_at DESC`,
+      [userId],
+    );
+    return rows.map((row) => ({ ...mapRow(row), huntRoles: row.hunt_roles }));
   },
 
   async createWithOrganizerRole(input: Omit<CreateHuntInput, 'status'>): Promise<IHunt> {
