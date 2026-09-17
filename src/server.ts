@@ -1,9 +1,8 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { environment } from './config/environment.js';
-import { connectPostgres } from './lib/postgres.js';
-
-const shutdownTimeoutMs = 5_000;
+import { connectPostgres, disconnectPostgres } from './lib/postgres.js';
+import { createGracefulShutdown } from './lib/shutdown.js';
 
 const start = async () => {
   await connectPostgres();
@@ -13,22 +12,17 @@ const start = async () => {
     console.log(`TedixHunt API listening on ${environment.host}:${environment.port}`);
   });
 
-  const shutdown = (signal: NodeJS.Signals) => {
+  const shutdown = createGracefulShutdown(server, disconnectPostgres);
+  const handleSignal = (signal: NodeJS.Signals) => {
     console.log(`${signal} received. Shutting down TedixHunt API.`);
-
-    const timeout = setTimeout(() => {
-      console.error('Timed out while shutting down TedixHunt API.');
-      process.exit(1);
-    }, shutdownTimeoutMs);
-
-    server.close(() => {
-      clearTimeout(timeout);
-      process.exit(0);
+    void shutdown().catch((error: unknown) => {
+      console.error('Failed to shut down TedixHunt API cleanly.', error);
+      process.exitCode = 1;
     });
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', handleSignal);
+  process.on('SIGINT', handleSignal);
 };
 
 start().catch((err) => {
