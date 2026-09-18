@@ -139,6 +139,127 @@ describe('user account API', () => {
     });
   });
 
+  describe('organizer login', () => {
+    const password = 'organizer-password';
+
+    const organizer = async (roles: string[], role = 'participant') => ({
+      ...registeredUser,
+      role,
+      roles,
+      passwordHash: await bcrypt.hash(password, 4),
+    });
+
+    it('authenticates organizer-only accounts and returns the public user and normal tokens', async () => {
+      const user = await organizer(['organizer']);
+      mocks.findUser.mockResolvedValue(user);
+
+      const response = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: ' PERSON@EXAMPLE.COM ', password })
+        .expect(200);
+
+      expect(mocks.findUser).toHaveBeenCalledWith({ email: ' PERSON@EXAMPLE.COM ' });
+      expect(response.body.user).toMatchObject({
+        id: user.id,
+        role: 'participant',
+        roles: ['organizer'],
+      });
+      expect(response.body.user).not.toHaveProperty('passwordHash');
+      expect(response.body.tokens).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+      });
+      expect(mocks.createRefreshToken).toHaveBeenCalledWith(
+        expect.objectContaining({ user: user.id, token: response.body.tokens.refreshToken }),
+      );
+    });
+
+    it.each([
+      ['creator legacy role', ['creator', 'organizer'], 'creator'],
+      ['admin legacy role', ['admin', 'organizer'], 'creator'],
+    ])('authenticates a multi-role organizer with a %s', async (_label, roles, role) => {
+      mocks.findUser.mockResolvedValue(await organizer(roles, role));
+
+      const response = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(200);
+
+      expect(response.body.user).toMatchObject({ role, roles });
+    });
+
+    it.each([
+      ['creator', ['creator']],
+      ['participant', ['participant']],
+      ['admin', ['admin']],
+      ['guest', []],
+    ])('rejects a %s account without the organizer capability', async (_label, roles) => {
+      mocks.findUser.mockResolvedValue(await organizer(roles));
+
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(401, { error: 'invalid_credentials' });
+
+      expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('uses the same invalid-credentials response for wrong passwords and unknown accounts', async () => {
+      mocks.findUser
+        .mockResolvedValueOnce(await organizer(['organizer']))
+        .mockResolvedValueOnce(null);
+
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password: 'wrong-password' })
+        .expect(401, { error: 'invalid_credentials' });
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: 'unknown@example.com', password })
+        .expect(401, { error: 'invalid_credentials' });
+    });
+
+    it.each([
+      [{ password }],
+      [{ email: registeredUser.email }],
+    ])('rejects missing credentials with invalid_input', async (body) => {
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send(body)
+        .expect(400, { error: 'invalid_input' });
+
+      expect(mocks.findUser).not.toHaveBeenCalled();
+    });
+
+    it('uses the existing refresh-token rotation flow for organizer sessions', async () => {
+      const user = await organizer(['organizer']);
+      mocks.findUser.mockResolvedValue(user);
+      const login = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(200);
+
+      mocks.consumeRefreshToken.mockResolvedValue({
+        id: 'organizer-refresh-id',
+        user: user.id,
+        token: login.body.tokens.refreshToken,
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt,
+      });
+      mocks.findUserById.mockResolvedValue(user);
+
+      const refreshed = await request(app)
+        .post('/api/auth/refresh')
+        .send({ refreshToken: login.body.tokens.refreshToken })
+        .expect(200);
+
+      expect(refreshed.body).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+      });
+    });
+  });
+
   it('maps a database uniqueness race to the same safe response', async () => {
     mocks.createUser.mockRejectedValue(Object.assign(new Error('private database detail'), { code: '23505' }));
 
