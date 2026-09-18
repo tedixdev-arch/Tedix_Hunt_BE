@@ -62,6 +62,56 @@ describe('reward metadata and Hunt reward routes', () => {
       'achievement', 'digital_certificate', 'profile_badge',
       'hunt_passport_collectible', 'partner_digital_benefit',
     ]);
+    expect(response.body.specialAwardDefinitions).toEqual([
+      {
+        key: 'team-precision', scope: 'team', name: 'Team Precision',
+        rule: 'Highest correct team answers ÷ submitted team answers.',
+        description: 'Recognizes accurate collective decisions across the Hunt.',
+        eligibility: 'Complete at least 70% of team challenges.',
+      },
+      {
+        key: 'everyone-contributed', scope: 'team', name: 'Everyone Contributed',
+        rule: 'Highest percentage of team stages where every active member contributed.',
+        description: 'Recognizes balanced participation, not one dominant player.',
+        eligibility: 'At least three completed team stages.',
+      },
+      {
+        key: 'strong-comeback', scope: 'team', name: 'Strong Comeback',
+        rule: 'Most challenges solved after an incorrect attempt without revealing the solution.',
+        description: 'Recognizes constructive recovery when the first approach fails.',
+        eligibility: 'Complete the Hunt without abandoning a team stage.',
+      },
+      {
+        key: 'consistent-team', scope: 'team', name: 'Consistent Team',
+        rule: 'Highest percentage of checkpoints with no skipped personal or team contribution.',
+        description: 'Recognizes reliable participation throughout the whole Hunt.',
+        eligibility: 'Complete at least 70% of checkpoints.',
+      },
+      {
+        key: 'personal-precision', scope: 'personal', name: 'Personal Precision',
+        rule: 'Highest correct first attempts ÷ personal challenges attempted.',
+        description: 'Recognizes careful and accurate individual problem solving.',
+        eligibility: 'Complete at least 70% of assigned personal challenges.',
+      },
+      {
+        key: 'persistent-solver', scope: 'personal', name: 'Persistent Solver',
+        rule: 'Most personal challenges solved after a wrong attempt without revealing the solution.',
+        description: 'Recognizes persistence and learning from an unsuccessful attempt.',
+        eligibility: 'Complete at least three personal challenges.',
+      },
+      {
+        key: 'smart-help', scope: 'personal', name: 'Smart Help Use',
+        rule: 'Most challenges solved after a hint without revealing the solution.',
+        description: 'Recognizes effective use of help while preserving ownership of the answer.',
+        eligibility: 'At least one hint-assisted correct solution.',
+      },
+      {
+        key: 'reliable-contributor', scope: 'personal', name: 'Reliable Contributor',
+        rule: 'Highest percentage of assigned challenges completed and contributions submitted.',
+        description: 'Recognizes dependable participation at every team stage.',
+        eligibility: 'Complete at least 70% of assigned personal challenges.',
+      },
+    ]);
     expect(JSON.stringify(response.body)).not.toMatch(/stock|inventoryQuantity|available/i);
   });
 
