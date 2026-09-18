@@ -157,6 +157,58 @@ const options: swaggerJsdoc.Options = {
             checkpointOrders: { type: 'array', items: { type: 'object', required: ['key', 'label'], properties: { key: { type: 'string', enum: ['recommended'] }, label: { type: 'string' } } } },
           },
         },
+        RewardDetails: {
+          type: 'object',
+          required: ['provider', 'kind', 'quantity'],
+          properties: {
+            provider: { type: 'string', enum: ['organizer', 'tedix_inventory'] },
+            kind: { type: 'string', enum: ['physical', 'virtual'] },
+            category: { type: 'string', nullable: true, enum: ['achievement', 'digital_certificate', 'profile_badge', 'hunt_passport_collectible', 'partner_digital_benefit'] },
+            name: { type: 'string', nullable: true },
+            description: { type: 'string', nullable: true },
+            quantity: { type: 'integer', minimum: 1 },
+          },
+        },
+        LeaderboardRewardInput: {
+          allOf: [
+            { $ref: '#/components/schemas/RewardDetails' },
+            { type: 'object', required: ['place'], properties: { place: { type: 'integer', minimum: 1, maximum: 50 } } },
+          ],
+        },
+        SpecialAwardInput: {
+          allOf: [
+            { $ref: '#/components/schemas/RewardDetails' },
+            { type: 'object', required: ['definitionKey'], properties: { definitionKey: { type: 'string', description: 'Backend-controlled key from /api/reward-options' } } },
+          ],
+        },
+        LeaderboardReward: {
+          allOf: [
+            { $ref: '#/components/schemas/LeaderboardRewardInput' },
+            { type: 'object', required: ['id', 'huntId'], properties: { id: { type: 'string', format: 'uuid' }, huntId: { type: 'string', format: 'uuid' } } },
+          ],
+        },
+        SpecialAward: {
+          allOf: [
+            { $ref: '#/components/schemas/SpecialAwardInput' },
+            { type: 'object', required: ['id', 'huntId'], properties: { id: { type: 'string', format: 'uuid' }, huntId: { type: 'string', format: 'uuid' } } },
+          ],
+        },
+        HuntRewards: {
+          type: 'object', required: ['leaderboard', 'specialAwards'],
+          properties: {
+            leaderboard: { type: 'array', items: { $ref: '#/components/schemas/LeaderboardReward' } },
+            specialAwards: { type: 'array', items: { $ref: '#/components/schemas/SpecialAward' } },
+          },
+        },
+        RewardOptions: {
+          type: 'object', required: ['providers', 'kinds', 'virtualCategories', 'specialAwardDefinitions'],
+          properties: {
+            providers: { type: 'array', items: { type: 'object', required: ['key', 'label'], properties: { key: { type: 'string', enum: ['organizer', 'tedix_inventory'] }, label: { type: 'string' } } } },
+            kinds: { type: 'array', items: { type: 'object', required: ['key', 'label'], properties: { key: { type: 'string', enum: ['physical', 'virtual'] }, label: { type: 'string' } } } },
+            virtualCategories: { type: 'array', items: { type: 'object', required: ['key', 'label'], properties: { key: { type: 'string', enum: ['achievement', 'digital_certificate', 'profile_badge', 'hunt_passport_collectible', 'partner_digital_benefit'] }, label: { type: 'string' } } } },
+            specialAwardDefinitions: { type: 'array', items: { type: 'object', required: ['key', 'scope', 'name', 'rule', 'description', 'eligibility'], properties: { key: { type: 'string' }, scope: { type: 'string', enum: ['team', 'personal'] }, name: { type: 'string' }, rule: { type: 'string' }, description: { type: 'string' }, eligibility: { type: 'string' } } } },
+          },
+        },
       },
     },
   },
