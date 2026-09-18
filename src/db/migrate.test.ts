@@ -9,11 +9,13 @@ import { coreHuntRecordsMigration } from './migrations/003_core_hunt_records.js'
 import { huntGeneralSetupMigration } from './migrations/004_hunt_general_setup.js';
 import { huntTemplateSelectionMigration } from './migrations/005_hunt_template_selection.js';
 import { huntPilotOptionsMigration } from './migrations/006_hunt_pilot_options.js';
+import { huntAccessCodeMigration } from './migrations/007_hunt_access_code.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
   baselineMigration, userRolesMigration, coreHuntRecordsMigration,
   huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
+  huntAccessCodeMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -63,12 +65,14 @@ describeWithDatabase('PostgreSQL migrations', () => {
     );
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
+      '007_hunt_access_code',
     ]);
 
     const existing = await client.query(
       `SELECT country, region, city, start_date, start_time, timezone,
               duration_minutes, capacity, contact_name, template_key, template_version,
-              template_snapshot, hunt_format, team_size, access_mode, difficulty, checkpoint_order
+              template_snapshot, hunt_format, team_size, access_mode, difficulty, checkpoint_order,
+              access_code
        FROM hunts WHERE id = '00000000-0000-0000-0000-000000000091'`,
     );
     expect(existing.rows).toEqual([{
@@ -76,8 +80,28 @@ describeWithDatabase('PostgreSQL migrations', () => {
       timezone: null, duration_minutes: null, capacity: null, contact_name: null,
       template_key: null, template_version: null, template_snapshot: null,
       hunt_format: null, team_size: null, access_mode: null, difficulty: null,
-      checkpoint_order: null,
+      checkpoint_order: null, access_code: null,
     }]);
+
+    await client.query(
+      `UPDATE hunts SET access_code = '7KPM4XQ2'
+       WHERE id = '00000000-0000-0000-0000-000000000091'`,
+    );
+    await expect(client.query(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status, access_code)
+       VALUES ('00000000-0000-0000-0000-000000000090',
+               '00000000-0000-0000-0000-000000000002', 'Duplicate code', 'published', '7KPM4XQ2')`,
+    )).rejects.toMatchObject({ code: '23505' });
+    await expect(client.query(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status, access_code)
+       VALUES ('00000000-0000-0000-0000-000000000090',
+               '00000000-0000-0000-0000-000000000002', 'Invalid code', 'published', 'SIGNAL26')`,
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(client.query(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status, access_code)
+       VALUES ('00000000-0000-0000-0000-000000000090',
+               '00000000-0000-0000-0000-000000000002', 'Valid code', 'published', 'M8R2HD7W')`,
+    )).resolves.toMatchObject({ rowCount: 1 });
 
     const history = await client.query<{ id: string }>(
       'SELECT id FROM schema_migrations ORDER BY id',
@@ -89,6 +113,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '004_hunt_general_setup' },
       { id: '005_hunt_template_selection' },
       { id: '006_hunt_pilot_options' },
+      { id: '007_hunt_access_code' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id

@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   createHunt: vi.fn(),
   updateDraft: vi.fn(),
   transitionStatus: vi.fn(),
+  ensureAccessCode: vi.fn(),
+  findByAccessCode: vi.fn(),
   hasHuntRole: vi.fn(),
   findOrganizationById: vi.fn(),
   isOwner: vi.fn(),
@@ -22,6 +24,8 @@ vi.mock('../models/Hunt.js', () => ({
     createWithOrganizerRole: mocks.createHunt,
     updateDraft: mocks.updateDraft,
     transitionStatus: mocks.transitionStatus,
+    ensureAccessCode: mocks.ensureAccessCode,
+    findByAccessCode: mocks.findByAccessCode,
   },
 }));
 vi.mock('../models/HuntRole.js', () => ({ HuntRoles: { hasRole: mocks.hasHuntRole } }));
@@ -53,6 +57,7 @@ const hunt = {
   },
   format: 'team' as const, teamSize: 4, accessMode: 'invitation_only' as const,
   difficulty: 'easy' as const, checkpointOrder: 'recommended' as const,
+  accessCode: null,
   createdAt: now, updatedAt: now,
 };
 const auth = `Bearer ${signJwt({ sub: user.id, type: 'access' })}`;
@@ -72,6 +77,8 @@ describe('Hunt routes', () => {
     mocks.createHunt.mockResolvedValue(hunt);
     mocks.updateDraft.mockResolvedValue({ ...hunt, name: 'Renamed' });
     mocks.transitionStatus.mockImplementation(({ to }) => Promise.resolve({ ...hunt, status: to }));
+    mocks.ensureAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
+    mocks.findByAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
   });
 
   it('requires authentication to list Hunts', async () => {
@@ -394,6 +401,66 @@ describe('Hunt routes', () => {
     await request(app).post('/api/hunts/hunt-1/cancel').set('Authorization', auth).expect(200);
     expect(mocks.transitionStatus).toHaveBeenCalledWith({
       id: 'hunt-1', from: ['draft', 'published', 'active', 'paused'], to: 'cancelled',
+    });
+  });
+
+  it.each(['published', 'active', 'paused'])('creates stable access for an organizer on a %s Hunt', async (status) => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
+    const response = await request(app).post('/api/hunts/hunt-1/access')
+      .set('Authorization', auth).expect(200);
+    expect(response.body).toEqual({ huntId: 'hunt-1', code: '7KPM4XQ2' });
+    expect(mocks.ensureAccessCode).toHaveBeenCalledWith('hunt-1');
+  });
+
+  it('returns the same persisted code on repeated access requests', async () => {
+    mocks.findHuntById.mockResolvedValue({ ...hunt, status: 'published' });
+    const first = await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth).expect(200);
+    const second = await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth).expect(200);
+    expect(first.body.code).toBe('7KPM4XQ2');
+    expect(second.body).toEqual(first.body);
+  });
+
+  it.each(['draft', 'cancelled', 'finished'])('rejects access creation on a %s Hunt', async (status) => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
+    await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth)
+      .expect(409, { error: 'invalid_hunt_state' });
+    expect(mocks.ensureAccessCode).not.toHaveBeenCalled();
+  });
+
+  it('requires a Hunt-specific organizer for access creation', async () => {
+    await request(app).post('/api/hunts/hunt-1/access').expect(401, { error: 'unauthorized' });
+    mocks.hasHuntRole.mockResolvedValueOnce(false);
+    await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth)
+      .expect(403, { error: 'forbidden' });
+  });
+
+  it('returns not found before authorizing access creation for an unknown Hunt', async () => {
+    mocks.findHuntById.mockResolvedValueOnce(null);
+    await request(app).post('/api/hunts/missing/access').set('Authorization', auth)
+      .expect(404, { error: 'not_found' });
+    expect(mocks.hasHuntRole).not.toHaveBeenCalled();
+  });
+
+  it('publicly resolves normalized access codes with only safe fields', async () => {
+    const response = await request(app).get('/api/hunt-access/%207kpm4xq2%20').expect(200);
+    expect(response.body).toEqual({
+      huntId: 'hunt-1', code: '7KPM4XQ2', name: 'City Hunt', status: 'published',
+    });
+    expect(Object.keys(response.body).sort()).toEqual(['code', 'huntId', 'name', 'status']);
+    expect(mocks.findByAccessCode).toHaveBeenCalledWith('7KPM4XQ2');
+  });
+
+  it('returns not found for malformed and unknown public access codes', async () => {
+    await request(app).get('/api/hunt-access/SIGNAL26').expect(404, { error: 'not_found' });
+    expect(mocks.findByAccessCode).not.toHaveBeenCalled();
+    mocks.findByAccessCode.mockResolvedValueOnce(null);
+    await request(app).get('/api/hunt-access/M8R2HD7W').expect(404, { error: 'not_found' });
+  });
+
+  it.each(['cancelled', 'finished'])('resolves an existing code after the Hunt is %s', async (status) => {
+    mocks.findByAccessCode.mockResolvedValueOnce({ ...hunt, status, accessCode: '7KPM4XQ2' });
+    await request(app).get('/api/hunt-access/7KPM4XQ2').expect(200, {
+      huntId: 'hunt-1', code: '7KPM4XQ2', name: 'City Hunt', status,
     });
   });
 });

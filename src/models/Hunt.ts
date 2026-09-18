@@ -1,6 +1,9 @@
 import { pool } from '../lib/postgres.js';
 import { HuntRoles, type HuntRole } from './HuntRole.js';
 import type { HuntTemplateSnapshot } from '../domain/huntTemplates.js';
+import { generateHuntAccessCode } from '../domain/huntAccess.js';
+
+const isUniqueViolation = (error: unknown): boolean => (error as { code?: string })?.code === '23505';
 
 export type HuntStatus = 'draft' | 'published' | 'active' | 'paused' | 'cancelled' | 'finished';
 
@@ -27,6 +30,7 @@ export interface IHunt {
   accessMode: 'invitation_only' | null;
   difficulty: 'easy' | null;
   checkpointOrder: 'recommended' | null;
+  accessCode: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -92,6 +96,7 @@ const mapRow = (row: any): IHunt => ({
   accessMode: row.access_mode ?? null,
   difficulty: row.difficulty ?? null,
   checkpointOrder: row.checkpoint_order ?? null,
+  accessCode: row.access_code ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -110,6 +115,37 @@ export const Hunt = {
   async findById(id: string): Promise<IHunt | null> {
     const { rows } = await pool.query('SELECT * FROM hunts WHERE id = $1 LIMIT 1', [id]);
     return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async findByAccessCode(code: string): Promise<IHunt | null> {
+    const { rows } = await pool.query('SELECT * FROM hunts WHERE access_code = $1 LIMIT 1', [code]);
+    return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async ensureAccessCode(
+    id: string,
+    generator: () => string = generateHuntAccessCode,
+    maxAttempts = 5,
+  ): Promise<IHunt | null> {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const code = generator();
+      try {
+        // The conditional update and unique constraint make concurrent creation and collisions safe.
+        const { rows } = await pool.query(
+          `UPDATE hunts SET access_code = $2, updated_at = now()
+           WHERE id = $1 AND access_code IS NULL
+             AND status = ANY($3::text[])
+           RETURNING *`,
+          [id, code, ['published', 'active', 'paused']],
+        );
+        if (rows[0]) return mapRow(rows[0]);
+        return Hunt.findById(id);
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        if (attempt === maxAttempts - 1) throw new Error('hunt_access_code_generation_failed');
+      }
+    }
+    throw new Error('hunt_access_code_generation_failed');
   },
 
   async findForUser(userId: string): Promise<IHuntListItem[]> {

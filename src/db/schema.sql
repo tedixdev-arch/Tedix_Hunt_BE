@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS hunts (
   access_mode TEXT CHECK (access_mode IS NULL OR access_mode IN ('invitation_only')),
   difficulty TEXT CHECK (difficulty IS NULL OR difficulty IN ('easy')),
   checkpoint_order TEXT CHECK (checkpoint_order IS NULL OR checkpoint_order IN ('recommended')),
+  access_code TEXT UNIQUE CHECK (access_code IS NULL OR access_code ~ '^[A-HJ-NP-Z2-9]{8}$'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -256,6 +256,37 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * @openapi
+ * /api/hunts/{id}/access:
+ *   post:
+ *     tags: [Hunts]
+ *     summary: Create or retrieve stable participant access
+ *     description: Requires the Hunt-specific organizer role. Creates access only for published, active, or paused Hunts; repeated requests return the same code. Supervisors cannot generate access.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     responses:
+ *       200: { description: Stable Hunt access code (no frontend URL), content: { application/json: { schema: { $ref: '#/components/schemas/HuntAccess' } } } }
+ *       401: { $ref: '#/components/responses/HuntUnauthorized' }
+ *       403: { $ref: '#/components/responses/HuntForbidden' }
+ *       404: { $ref: '#/components/responses/HuntNotFound' }
+ *       409: { $ref: '#/components/responses/InvalidHuntState' }
+ */
+router.post('/:id/access', requireAuth, async (req: AuthRequest, res) => {
+  const id = String(req.params.id);
+  const hunt = await Hunt.findById(id);
+  if (!hunt) return res.status(404).json({ error: 'not_found' });
+  if (!(await HuntRoles.hasRole(id, req.user!.id, 'organizer'))) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  if (!['published', 'active', 'paused'].includes(hunt.status)) {
+    return res.status(409).json({ error: 'invalid_hunt_state' });
+  }
+  const accessedHunt = await Hunt.ensureAccessCode(id);
+  if (!accessedHunt?.accessCode) return res.status(409).json({ error: 'invalid_hunt_state' });
+  return res.json({ huntId: accessedHunt.id, code: accessedHunt.accessCode });
+});
+
+/**
+ * @openapi
  * /api/hunts/{id}/publish:
  *   post:
  *     tags: [Hunts]

@@ -105,6 +105,7 @@ describe('core Hunt persistence', () => {
       durationMinutes: null, capacity: null, contactName: null,
       templateKey: null, templateVersion: null, templateSnapshot: null,
       format: null, teamSize: null, accessMode: null, difficulty: null, checkpointOrder: null,
+      accessCode: null,
       huntRoles: ['organizer', 'supervisor'],
     }]);
     expect(query).toHaveBeenCalledWith(expect.stringMatching(
@@ -179,6 +180,49 @@ describe('core Hunt persistence', () => {
       expect.stringMatching(/difficulty = \$2, checkpoint_order = \$3[\s\S]*WHERE id = \$1 AND status = 'draft'/),
       ['hunt-1', 'easy', 'recommended'],
     );
+  });
+
+  it('maps and finds a Hunt by its access code', async () => {
+    query.mockResolvedValueOnce({ rows: [{
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'published', access_code: '7KPM4XQ2', created_at: createdAt, updated_at: createdAt,
+    }] });
+    await expect(Hunt.findByAccessCode('7KPM4XQ2')).resolves.toMatchObject({ accessCode: '7KPM4XQ2' });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('access_code = $1'), ['7KPM4XQ2']);
+  });
+
+  it('persists access idempotently and retries database-enforced collisions', async () => {
+    const collision = Object.assign(new Error('duplicate'), { code: '23505' });
+    const row = {
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'published', access_code: 'M8R2HD7W', created_at: createdAt, updated_at: createdAt,
+    };
+    query.mockRejectedValueOnce(collision).mockResolvedValueOnce({ rows: [row] });
+    const codes = ['7KPM4XQ2', 'M8R2HD7W'];
+    await expect(Hunt.ensureAccessCode('hunt-1', () => codes.shift()!)).resolves.toMatchObject({
+      accessCode: 'M8R2HD7W',
+    });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the persisted code when a concurrent request already created it', async () => {
+    const row = {
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'active', access_code: '7KPM4XQ2', created_at: createdAt, updated_at: createdAt,
+    };
+    query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [row] });
+    await expect(Hunt.ensureAccessCode('hunt-1', () => 'M8R2HD7W')).resolves.toMatchObject({
+      accessCode: '7KPM4XQ2',
+    });
+  });
+
+  it('bounds access-code collision retries', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      query.mockRejectedValueOnce(Object.assign(new Error('duplicate'), { code: '23505' }));
+    }
+    await expect(Hunt.ensureAccessCode('hunt-1', () => '7KPM4XQ2', 5))
+      .rejects.toThrow('hunt_access_code_generation_failed');
+    expect(query).toHaveBeenCalledTimes(5);
   });
 
   it('enrolls idempotently and finds a Hunt participant', async () => {
