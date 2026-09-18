@@ -5,6 +5,7 @@ import { HuntRoles } from '../models/HuntRole.js';
 import { Organization } from '../models/Organization.js';
 import { findHuntTemplate } from '../domain/huntTemplates.js';
 import { supportedHuntOptionValues } from '../domain/huntOptions.js';
+import { validateHuntForPublish } from '../domain/huntReadiness.js';
 
 const router = express.Router();
 
@@ -90,6 +91,20 @@ const parseDraftUpdate = (body: unknown): UpdateHuntGeneralSetupInput | null => 
  *   - name: Hunts
  *     description: Hunt drafts and lifecycle
  * components:
+ *   schemas:
+ *     HuntReadinessIssue:
+ *       type: object
+ *       required: [section, field, message]
+ *       properties:
+ *         section: { type: string, enum: [general, template, options] }
+ *         field: { type: string }
+ *         message: { type: string }
+ *     HuntNotReadyError:
+ *       type: object
+ *       required: [error, issues]
+ *       properties:
+ *         error: { type: string, enum: [hunt_not_ready] }
+ *         issues: { type: array, items: { $ref: '#/components/schemas/HuntReadinessIssue' } }
  *   responses:
  *     HuntUnauthorized: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  *     HuntForbidden: { description: Hunt access denied, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -245,7 +260,7 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
  *   post:
  *     tags: [Hunts]
  *     summary: Publish a draft Hunt (draft to published)
- *     description: Requires the Hunt-specific organizer role and the required current state.
+ *     description: Requires the Hunt-specific organizer role, draft state, and complete persisted General Setup, template snapshot, and supported pilot options.
  *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     responses:
@@ -254,6 +269,9 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
  *       403: { $ref: '#/components/responses/HuntForbidden' }
  *       404: { $ref: '#/components/responses/HuntNotFound' }
  *       409: { $ref: '#/components/responses/InvalidHuntState' }
+ *       422:
+ *         description: Hunt exists and is a draft but its required persisted setup is incomplete
+ *         content: { application/json: { schema: { $ref: '#/components/schemas/HuntNotReadyError' } } }
  */
 /**
  * @openapi
@@ -343,6 +361,14 @@ router.post('/:id/:action', requireAuth, async (req: AuthRequest, res) => {
   if (!hunt) return res.status(404).json({ error: 'not_found' });
   if (!(await HuntRoles.hasRole(id, req.user!.id, 'organizer'))) {
     return res.status(403).json({ error: 'forbidden' });
+  }
+  if (String(req.params.action) === 'publish' && hunt.status !== 'draft') {
+    return res.status(409).json({ error: 'invalid_hunt_state' });
+  }
+  if (String(req.params.action) === 'publish') {
+    // Publishing is authoritative on persisted setup; frontend readiness is UX only.
+    const readiness = validateHuntForPublish(hunt);
+    if (!readiness.ready) return res.status(422).json({ error: 'hunt_not_ready', issues: readiness.issues });
   }
   const updated = await Hunt.transitionStatus({ id, ...action });
   if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });
