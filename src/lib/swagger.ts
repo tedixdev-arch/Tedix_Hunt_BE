@@ -98,6 +98,7 @@ const options: swaggerJsdoc.Options = {
             accessMode: { type: 'string', enum: ['invitation_only'], nullable: true, description: 'Currently supported pilot access mode' },
             difficulty: { type: 'string', enum: ['easy'], nullable: true, description: 'Currently supported pilot difficulty' },
             checkpointOrder: { type: 'string', enum: ['recommended'], nullable: true, description: 'Currently supported pilot route ordering mode' },
+            accessCode: { type: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$', nullable: true },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },
           },
@@ -116,6 +117,24 @@ const options: swaggerJsdoc.Options = {
               },
             },
           ],
+        },
+        HuntAccess: {
+          type: 'object',
+          required: ['huntId', 'code'],
+          properties: {
+            huntId: { type: 'string', format: 'uuid' },
+            code: { type: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$', example: '7KPM4XQ2' },
+          },
+        },
+        HuntAccessResolution: {
+          type: 'object',
+          required: ['huntId', 'code', 'name', 'status'],
+          properties: {
+            huntId: { type: 'string', format: 'uuid' },
+            code: { type: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$', example: '7KPM4XQ2' },
+            name: { type: 'string' },
+            status: { type: 'string', enum: ['published', 'active', 'paused', 'cancelled', 'finished'] },
+          },
         },
         HuntTemplateMetadata: {
           type: 'object',

@@ -12,7 +12,7 @@ const completeHunt: IHunt = {
     theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
   },
   format: 'team', teamSize: 4, accessMode: 'invitation_only', difficulty: 'easy',
-  checkpointOrder: 'recommended', createdAt: new Date(), updatedAt: new Date(),
+  checkpointOrder: 'recommended', accessCode: null, createdAt: new Date(), updatedAt: new Date(),
 };
 
 describe('validateHuntForPublish', () => {
