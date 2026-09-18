@@ -10,12 +10,13 @@ import { huntGeneralSetupMigration } from './migrations/004_hunt_general_setup.j
 import { huntTemplateSelectionMigration } from './migrations/005_hunt_template_selection.js';
 import { huntPilotOptionsMigration } from './migrations/006_hunt_pilot_options.js';
 import { huntAccessCodeMigration } from './migrations/007_hunt_access_code.js';
+import { huntRewardsMigration } from './migrations/008_hunt_rewards.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
   baselineMigration, userRolesMigration, coreHuntRecordsMigration,
   huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
-  huntAccessCodeMigration,
+  huntAccessCodeMigration, huntRewardsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -65,7 +66,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     );
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
-      '007_hunt_access_code',
+      '007_hunt_access_code', '008_hunt_rewards',
     ]);
 
     const existing = await client.query(
@@ -114,6 +115,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '005_hunt_template_selection' },
       { id: '006_hunt_pilot_options' },
       { id: '007_hunt_access_code' },
+      { id: '008_hunt_rewards' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -155,6 +157,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'teams',
       'team_members',
       'hunt_roles',
+      'hunt_leaderboard_rewards',
+      'hunt_special_awards',
     ]) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
         `public.${table}`,
@@ -176,6 +180,69 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await expect(runMigrations(client, testMigrations)).resolves.toEqual(['006_test_tracking']);
     await expect(runMigrations(client, testMigrations)).resolves.toEqual([]);
     expect(executions).toBe(1);
+  });
+
+  it('enforces reward constraints, uniqueness, and Hunt cascade deletion', async () => {
+    const huntId = '00000000-0000-0000-0000-000000000091';
+    const validDetails = [huntId, 'organizer', 'physical', null, 'Book voucher', null, 1];
+    await client.query(
+      `INSERT INTO hunt_leaderboard_rewards
+         (hunt_id, place, provider, kind, category, name, description, quantity)
+       VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`, validDetails,
+    );
+    await expect(client.query(
+      `INSERT INTO hunt_leaderboard_rewards
+         (hunt_id, place, provider, kind, category, name, description, quantity)
+       VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`, validDetails,
+    )).rejects.toMatchObject({ code: '23505' });
+
+    for (const [column, value] of [
+      ['place', 0], ['place', 51], ['quantity', 0], ['provider', 'sponsor'],
+      ['kind', 'cash'], ['category', 'unknown'],
+    ]) {
+      await expect(client.query(
+        `INSERT INTO hunt_leaderboard_rewards
+           (hunt_id, place, provider, kind, category, name, quantity)
+         VALUES ($1, 2, 'organizer', 'physical', NULL, 'Prize', 1) RETURNING id`, [huntId],
+      ).then(async ({ rows }) => {
+        await client.query(`UPDATE hunt_leaderboard_rewards SET ${column} = $2 WHERE id = $1`, [rows[0].id, value]);
+      })).rejects.toMatchObject({ code: '23514' });
+      await client.query('DELETE FROM hunt_leaderboard_rewards WHERE hunt_id = $1 AND place = 2', [huntId]);
+    }
+
+    await client.query(
+      `INSERT INTO hunt_special_awards
+         (hunt_id, definition_key, provider, kind, category, name, quantity)
+       VALUES ($1, 'team-precision', 'tedix_inventory', 'virtual', 'profile_badge', NULL, 1)`, [huntId],
+    );
+    await expect(client.query(
+      `INSERT INTO hunt_special_awards
+         (hunt_id, definition_key, provider, kind, category, name, quantity)
+       VALUES ($1, 'team-precision', 'tedix_inventory', 'virtual', 'achievement', NULL, 1)`, [huntId],
+    )).rejects.toMatchObject({ code: '23505' });
+
+    await client.query(
+      `INSERT INTO hunts (id, organization_id, created_by_user_id, name, status)
+       VALUES ('00000000-0000-0000-0000-000000000099',
+               '00000000-0000-0000-0000-000000000090',
+               '00000000-0000-0000-0000-000000000002', 'Cascade rewards', 'draft')`,
+    );
+    await client.query(
+      `INSERT INTO hunt_leaderboard_rewards
+         (hunt_id, place, provider, kind, name, quantity)
+       VALUES ('00000000-0000-0000-0000-000000000099', 1, 'organizer', 'physical', 'Prize', 1)`,
+    );
+    await client.query(
+      `INSERT INTO hunt_special_awards
+         (hunt_id, definition_key, provider, kind, name, quantity)
+       VALUES ('00000000-0000-0000-0000-000000000099', 'team-precision', 'organizer', 'physical', 'Prize', 1)`,
+    );
+    await client.query("DELETE FROM hunts WHERE id = '00000000-0000-0000-0000-000000000099'");
+    const cascade = await client.query(
+      `SELECT (SELECT count(*) FROM hunt_leaderboard_rewards WHERE hunt_id = '00000000-0000-0000-0000-000000000099') AS leaderboard,
+              (SELECT count(*) FROM hunt_special_awards WHERE hunt_id = '00000000-0000-0000-0000-000000000099') AS special`,
+    );
+    expect(cascade.rows[0]).toEqual({ leaderboard: '0', special: '0' });
   });
 
   it('enforces Hunt records, same-Hunt team membership, roles, and cascades', async () => {

@@ -10,6 +10,8 @@ import { huntsRouter } from './routes/hunts.js';
 import { huntTemplatesRouter } from './routes/huntTemplates.js';
 import { huntOptionsRouter } from './routes/huntOptions.js';
 import { huntAccessRouter } from './routes/huntAccess.js';
+import { rewardOptionsRouter } from './routes/rewardOptions.js';
+import { huntRewardsRouter } from './routes/huntRewards.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -36,6 +38,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/hunt-templates', huntTemplatesRouter);
   app.use('/api/hunt-options', huntOptionsRouter);
   app.use('/api/hunt-access', huntAccessRouter);
+  app.use('/api/reward-options', rewardOptionsRouter);
+  app.use('/api/hunts/:id/rewards', huntRewardsRouter);
   app.use('/api/hunts', huntsRouter);
 
   app.get('/api/docs.json', (_request, response) => {
