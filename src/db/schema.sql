@@ -41,6 +41,15 @@ CREATE TABLE IF NOT EXISTS hunts (
   status TEXT NOT NULL CHECK (
     status IN ('draft', 'published', 'active', 'paused', 'cancelled', 'finished')
   ),
+  country TEXT,
+  region TEXT,
+  city TEXT,
+  start_date DATE,
+  start_time TIME,
+  timezone TEXT,
+  duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes >= 1),
+  capacity INTEGER CHECK (capacity IS NULL OR capacity >= 1),
+  contact_name TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

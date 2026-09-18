@@ -6,11 +6,12 @@ import { runMigrations } from './migrate.js';
 import { baselineMigration } from './migrations/001_baseline.js';
 import { userRolesMigration } from './migrations/002_user_roles.js';
 import { coreHuntRecordsMigration } from './migrations/003_core_hunt_records.js';
+import { huntGeneralSetupMigration } from './migrations/004_hunt_general_setup.js';
 import type { Migration } from './migrations/index.js';
 
-const migrations = [baselineMigration, userRolesMigration, coreHuntRecordsMigration];
+const migrations = [baselineMigration, userRolesMigration, coreHuntRecordsMigration, huntGeneralSetupMigration];
 const trackedMigration: Migration = {
-  id: '004_test_tracking',
+  id: '005_test_tracking',
   async up() {},
 };
 
@@ -24,12 +25,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
   beforeAll(async () => {
     client = await pool.connect();
     await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
-    const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
+    const schemaPath = fileURLToPath(new URL('./pre_migration_baseline.sql', import.meta.url));
     await client.query(await readFile(schemaPath, 'utf8'));
-    // The baseline tables model an existing prototype database; migration 003 must add Hunt tables.
-    await client.query(
-      'DROP TABLE team_members, hunt_roles, teams, hunt_participants, hunts CASCADE',
-    );
     await client.query(
       `INSERT INTO users (id, email, role, name) VALUES
        ('00000000-0000-0000-0000-000000000001', 'participant@example.com', 'participant', 'Participant'),
@@ -43,11 +40,33 @@ describeWithDatabase('PostgreSQL migrations', () => {
   });
 
   it('creates migration history and applies the non-destructive baseline', async () => {
-    await expect(runMigrations(client, migrations)).resolves.toEqual([
+    await expect(runMigrations(client, migrations.slice(0, 3))).resolves.toEqual([
       '001_baseline',
       '002_user_roles',
       '003_core_hunt_records',
     ]);
+    await client.query(
+      `INSERT INTO organizations (id, name, owner_id)
+       VALUES ('00000000-0000-0000-0000-000000000090', 'Existing organization',
+               '00000000-0000-0000-0000-000000000002')`,
+    );
+    await client.query(
+      `INSERT INTO hunts (id, organization_id, created_by_user_id, name, status)
+       VALUES ('00000000-0000-0000-0000-000000000091',
+               '00000000-0000-0000-0000-000000000090',
+               '00000000-0000-0000-0000-000000000002', 'Existing Hunt', 'draft')`,
+    );
+    await expect(runMigrations(client, migrations)).resolves.toEqual(['004_hunt_general_setup']);
+
+    const existing = await client.query(
+      `SELECT country, region, city, start_date, start_time, timezone,
+              duration_minutes, capacity, contact_name
+       FROM hunts WHERE id = '00000000-0000-0000-0000-000000000091'`,
+    );
+    expect(existing.rows).toEqual([{
+      country: null, region: null, city: null, start_date: null, start_time: null,
+      timezone: null, duration_minutes: null, capacity: null, contact_name: null,
+    }]);
 
     const history = await client.query<{ id: string }>(
       'SELECT id FROM schema_migrations ORDER BY id',
@@ -56,6 +75,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '001_baseline' },
       { id: '002_user_roles' },
       { id: '003_core_hunt_records' },
+      { id: '004_hunt_general_setup' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -108,14 +128,14 @@ describeWithDatabase('PostgreSQL migrations', () => {
   it('is idempotent and does not execute an already-applied migration again', async () => {
     let executions = 0;
     const countingMigration: Migration = {
-      id: '004_test_tracking',
+      id: '005_test_tracking',
       async up() {
         executions += 1;
       },
     };
     const testMigrations = [...migrations, countingMigration];
 
-    await expect(runMigrations(client, testMigrations)).resolves.toEqual(['004_test_tracking']);
+    await expect(runMigrations(client, testMigrations)).resolves.toEqual(['005_test_tracking']);
     await expect(runMigrations(client, testMigrations)).resolves.toEqual([]);
     expect(executions).toBe(1);
   });
@@ -173,6 +193,21 @@ describeWithDatabase('PostgreSQL migrations', () => {
       [creatorId],
       '23503',
     );
+    await client.query(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status, country, region, city,
+                          start_date, start_time, timezone, duration_minutes, capacity, contact_name)
+       VALUES ($1, $2, 'General Setup', 'draft', 'Romania', 'Cluj', 'Cluj Napoca',
+               '2026-09-12', '10:00:00', 'Europe/Bucharest', 90, 24, 'Ana Pop')`,
+      [organizationA, creatorId],
+    );
+    for (const [column, value] of [['duration_minutes', 0], ['duration_minutes', -1], ['capacity', 0], ['capacity', -1]]) {
+      await expectConstraint(
+        `INSERT INTO hunts (organization_id, created_by_user_id, name, status, ${column})
+         VALUES ($1, $2, 'Invalid General Setup', 'draft', $3)`,
+        [organizationA, creatorId, value],
+        '23514',
+      );
+    }
     await expectConstraint(
       `INSERT INTO hunts (organization_id, created_by_user_id, name, status)
        VALUES ($1, '99999999-0000-0000-0000-000000000002', 'Invalid user', 'draft')`,
@@ -314,7 +349,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
 
   it('does not record a failed migration', async () => {
     const failingMigration: Migration = {
-      id: '005_test_failure',
+      id: '006_test_failure',
       async up(db) {
         await db.query('CREATE TABLE rolled_back_test (id INTEGER)');
         throw new Error('expected migration failure');

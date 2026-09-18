@@ -101,6 +101,8 @@ describe('core Hunt persistence', () => {
     await expect(Hunt.findForUser('user-1')).resolves.toEqual([{
       id: 'hunt-1', organizationId: 'org-1', createdByUserId: 'user-2', name: 'Shared Hunt',
       status: 'paused', createdAt: older, updatedAt: createdAt,
+      country: null, region: null, city: null, startDate: null, startTime: null, timezone: null,
+      durationMinutes: null, capacity: null, contactName: null,
       huntRoles: ['organizer', 'supervisor'],
     }]);
     expect(query).toHaveBeenCalledWith(expect.stringMatching(
@@ -111,6 +113,29 @@ describe('core Hunt persistence', () => {
   it('returns an empty Hunt list when the user has no Hunt-specific roles', async () => {
     query.mockResolvedValueOnce({ rows: [] });
     await expect(Hunt.findForUser('user-1')).resolves.toEqual([]);
+  });
+
+  it('maps General Setup and safely updates only supplied draft fields', async () => {
+    const updatedAt = new Date('2026-09-17T13:00:00Z');
+    const row = {
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'draft', country: 'Romania', region: 'Cluj', city: 'Cluj Napoca',
+      start_date: '2026-09-12', start_time: '10:00:00', timezone: 'Europe/Bucharest',
+      duration_minutes: 90, capacity: 24, contact_name: 'Ana Pop',
+      created_at: createdAt, updated_at: updatedAt,
+    };
+    query.mockResolvedValueOnce({ rows: [row] });
+
+    await expect(Hunt.updateDraft('hunt-1', { city: 'Cluj Napoca', durationMinutes: 90 }))
+      .resolves.toMatchObject({
+        city: 'Cluj Napoca', startDate: '2026-09-12', startTime: '10:00:00',
+        timezone: 'Europe/Bucharest', durationMinutes: 90, capacity: 24,
+        contactName: 'Ana Pop', updatedAt,
+      });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(/SET city = \$2, duration_minutes = \$3, updated_at = now\(\)[\s\S]*WHERE id = \$1 AND status = 'draft'/),
+      ['hunt-1', 'Cluj Napoca', 90],
+    );
   });
 
   it('enrolls idempotently and finds a Hunt participant', async () => {
