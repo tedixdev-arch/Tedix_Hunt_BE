@@ -22,6 +22,11 @@ export interface IHunt {
   templateKey: string | null;
   templateVersion: number | null;
   templateSnapshot: HuntTemplateSnapshot | null;
+  format: 'team' | null;
+  teamSize: number | null;
+  accessMode: 'invitation_only' | null;
+  difficulty: 'easy' | null;
+  checkpointOrder: 'recommended' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,6 +62,11 @@ export interface UpdateHuntGeneralSetupInput {
   templateKey?: string;
   templateVersion?: number;
   templateSnapshot?: HuntTemplateSnapshot;
+  format?: 'team';
+  teamSize?: 4;
+  accessMode?: 'invitation_only';
+  difficulty?: 'easy';
+  checkpointOrder?: 'recommended';
 }
 
 const mapRow = (row: any): IHunt => ({
@@ -77,6 +87,11 @@ const mapRow = (row: any): IHunt => ({
   templateKey: row.template_key ?? null,
   templateVersion: row.template_version ?? null,
   templateSnapshot: row.template_snapshot ?? null,
+  format: row.hunt_format ?? null,
+  teamSize: row.team_size ?? null,
+  accessMode: row.access_mode ?? null,
+  difficulty: row.difficulty ?? null,
+  checkpointOrder: row.checkpoint_order ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -139,6 +154,8 @@ export const Hunt = {
       capacity: 'capacity', contactName: 'contact_name',
       templateKey: 'template_key', templateVersion: 'template_version',
       templateSnapshot: 'template_snapshot',
+      format: 'hunt_format', teamSize: 'team_size', accessMode: 'access_mode',
+      difficulty: 'difficulty', checkpointOrder: 'checkpoint_order',
     };
     const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, unknown][];
     const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);

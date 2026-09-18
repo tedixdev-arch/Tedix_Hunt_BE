@@ -8,11 +8,12 @@ import { userRolesMigration } from './migrations/002_user_roles.js';
 import { coreHuntRecordsMigration } from './migrations/003_core_hunt_records.js';
 import { huntGeneralSetupMigration } from './migrations/004_hunt_general_setup.js';
 import { huntTemplateSelectionMigration } from './migrations/005_hunt_template_selection.js';
+import { huntPilotOptionsMigration } from './migrations/006_hunt_pilot_options.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
   baselineMigration, userRolesMigration, coreHuntRecordsMigration,
-  huntGeneralSetupMigration, huntTemplateSelectionMigration,
+  huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -61,19 +62,21 @@ describeWithDatabase('PostgreSQL migrations', () => {
                '00000000-0000-0000-0000-000000000002', 'Existing Hunt', 'draft')`,
     );
     await expect(runMigrations(client, migrations)).resolves.toEqual([
-      '004_hunt_general_setup', '005_hunt_template_selection',
+      '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
     ]);
 
     const existing = await client.query(
       `SELECT country, region, city, start_date, start_time, timezone,
               duration_minutes, capacity, contact_name, template_key, template_version,
-              template_snapshot
+              template_snapshot, hunt_format, team_size, access_mode, difficulty, checkpoint_order
        FROM hunts WHERE id = '00000000-0000-0000-0000-000000000091'`,
     );
     expect(existing.rows).toEqual([{
       country: null, region: null, city: null, start_date: null, start_time: null,
       timezone: null, duration_minutes: null, capacity: null, contact_name: null,
       template_key: null, template_version: null, template_snapshot: null,
+      hunt_format: null, team_size: null, access_mode: null, difficulty: null,
+      checkpoint_order: null,
     }]);
 
     const history = await client.query<{ id: string }>(
@@ -85,6 +88,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '003_core_hunt_records' },
       { id: '004_hunt_general_setup' },
       { id: '005_hunt_template_selection' },
+      { id: '006_hunt_pilot_options' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -223,6 +227,23 @@ describeWithDatabase('PostgreSQL migrations', () => {
       [organizationA, creatorId],
       '23514',
     );
+    await client.query(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status, hunt_format,
+                          team_size, access_mode, difficulty, checkpoint_order)
+       VALUES ($1, $2, 'Pilot options', 'draft', 'team', 4, 'invitation_only', 'easy', 'recommended')`,
+      [organizationA, creatorId],
+    );
+    for (const [column, value] of [
+      ['hunt_format', 'single'], ['team_size', 3], ['team_size', 5], ['access_mode', 'open'],
+      ['difficulty', 'medium'], ['difficulty', 'advanced'], ['checkpoint_order', 'short'],
+    ]) {
+      await expectConstraint(
+        `INSERT INTO hunts (organization_id, created_by_user_id, name, status, ${column})
+         VALUES ($1, $2, 'Unsupported pilot option', 'draft', $3)`,
+        [organizationA, creatorId, value],
+        '23514',
+      );
+    }
     await expectConstraint(
       `INSERT INTO hunts (organization_id, created_by_user_id, name, status)
        VALUES ($1, '99999999-0000-0000-0000-000000000002', 'Invalid user', 'draft')`,

@@ -216,6 +216,42 @@ describe('Hunt routes', () => {
     });
   });
 
+  it('saves the supported General 2 and General 3 pilot options in partial updates', async () => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth).send({
+      format: 'team', teamSize: 4, accessMode: 'invitation_only',
+    }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenLastCalledWith('hunt-1', {
+      format: 'team', teamSize: 4, accessMode: 'invitation_only',
+    });
+
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth).send({
+      difficulty: 'easy', checkpointOrder: 'recommended',
+    }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenLastCalledWith('hunt-1', {
+      difficulty: 'easy', checkpointOrder: 'recommended',
+    });
+  });
+
+  it.each([
+    [{ format: 'single' }], [{ teamSize: 3 }], [{ teamSize: 5 }],
+    [{ accessMode: 'open' }], [{ difficulty: 'medium' }], [{ difficulty: 'advanced' }],
+    [{ checkpointOrder: 'short' }],
+  ])('rejects unsupported prototype option %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('applies organizer and draft rules to pilot options', async () => {
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ format: 'team' }).expect(403);
+    mocks.hasHuntRole.mockResolvedValue(true);
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status: 'published' });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ format: 'team' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
   it.each([
     [{ templateKey: 'unknown' }],
     [{ templateKey: '' }],
@@ -256,6 +292,17 @@ describe('Hunt routes', () => {
       key: 'signal-cluj-napoca', version: 1,
       displayName: 'Signal: Cluj Napoca', theme: 'Smart Theme (Signal)',
     }]);
+  });
+
+  it('lists only supported pilot options for authenticated users', async () => {
+    await request(app).get('/api/hunt-options').expect(401, { error: 'unauthorized' });
+    await request(app).get('/api/hunt-options').set('Authorization', auth).expect(200, {
+      formats: [{ key: 'team', label: 'Team Hunters' }],
+      teamSizes: [4],
+      accessModes: [{ key: 'invitation_only', label: 'Invitation-only' }],
+      difficulties: [{ key: 'easy', label: 'Easy' }],
+      checkpointOrders: [{ key: 'recommended', label: 'Recommended route' }],
+    });
   });
 
   it.each([

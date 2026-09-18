@@ -104,6 +104,7 @@ describe('core Hunt persistence', () => {
       country: null, region: null, city: null, startDate: null, startTime: null, timezone: null,
       durationMinutes: null, capacity: null, contactName: null,
       templateKey: null, templateVersion: null, templateSnapshot: null,
+      format: null, teamSize: null, accessMode: null, difficulty: null, checkpointOrder: null,
       huntRoles: ['organizer', 'supervisor'],
     }]);
     expect(query).toHaveBeenCalledWith(expect.stringMatching(
@@ -158,6 +159,25 @@ describe('core Hunt persistence', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringMatching(/template_key = \$2, template_version = \$3, template_snapshot = \$4[\s\S]*status = 'draft'/),
       ['hunt-1', snapshot.key, 1, snapshot],
+    );
+  });
+
+  it('maps and partially updates supported pilot options only on a draft', async () => {
+    query.mockResolvedValueOnce({ rows: [{
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'draft', hunt_format: 'team', team_size: 4, access_mode: 'invitation_only',
+      difficulty: 'easy', checkpoint_order: 'recommended', created_at: createdAt, updated_at: createdAt,
+    }] });
+
+    await expect(Hunt.updateDraft('hunt-1', {
+      difficulty: 'easy', checkpointOrder: 'recommended',
+    })).resolves.toMatchObject({
+      format: 'team', teamSize: 4, accessMode: 'invitation_only', difficulty: 'easy',
+      checkpointOrder: 'recommended',
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(/difficulty = \$2, checkpoint_order = \$3[\s\S]*WHERE id = \$1 AND status = 'draft'/),
+      ['hunt-1', 'easy', 'recommended'],
     );
   });
 

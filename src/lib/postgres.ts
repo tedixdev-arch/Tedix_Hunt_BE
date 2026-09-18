@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS hunts (
   template_key TEXT,
   template_version INTEGER CHECK (template_version IS NULL OR template_version >= 1),
   template_snapshot JSONB,
+  hunt_format TEXT CHECK (hunt_format IS NULL OR hunt_format IN ('team')),
+  team_size INTEGER CHECK (team_size IS NULL OR team_size = 4),
+  access_mode TEXT CHECK (access_mode IS NULL OR access_mode IN ('invitation_only')),
+  difficulty TEXT CHECK (difficulty IS NULL OR difficulty IN ('easy')),
+  checkpoint_order TEXT CHECK (checkpoint_order IS NULL OR checkpoint_order IN ('recommended')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
