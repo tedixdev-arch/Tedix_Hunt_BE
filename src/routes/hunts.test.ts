@@ -43,7 +43,17 @@ const user = {
 };
 const hunt = {
   id: 'hunt-1', organizationId: 'org-1', createdByUserId: user.id, name: 'City Hunt',
-  status: 'draft' as const, createdAt: now, updatedAt: now,
+  status: 'draft' as const,
+  country: 'Romania', region: null, city: 'Cluj Napoca', startDate: '2026-09-12',
+  startTime: '10:00:00', timezone: 'Europe/Bucharest', durationMinutes: 90,
+  capacity: 24, contactName: 'Ana Pop', templateKey: 'signal-cluj-napoca', templateVersion: 1,
+  templateSnapshot: {
+    key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
+    theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
+  },
+  format: 'team' as const, teamSize: 4, accessMode: 'invitation_only' as const,
+  difficulty: 'easy' as const, checkpointOrder: 'recommended' as const,
+  createdAt: now, updatedAt: now,
 };
 const auth = `Bearer ${signJwt({ sub: user.id, type: 'access' })}`;
 const app = createApp();
@@ -51,6 +61,7 @@ const app = createApp();
 describe('Hunt routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.transitionStatus.mockReset();
     mocks.findUserById.mockResolvedValue(user);
     mocks.findHuntById.mockResolvedValue(hunt);
     mocks.findHuntsForUser.mockResolvedValue([]);
@@ -331,7 +342,7 @@ describe('Hunt routes', () => {
   });
 
   it.each([
-    ['start', 'draft'], ['pause', 'published'], ['publish', 'paused'], ['start', 'finished'],
+    ['start', 'draft'], ['pause', 'published'], ['publish', 'paused'], ['publish', 'active'], ['start', 'finished'],
     ['start', 'cancelled'], ['publish', 'published'], ['finish', 'finished'],
   ])('rejects %s from %s with a conflict', async (action, status) => {
     mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
@@ -344,5 +355,45 @@ describe('Hunt routes', () => {
     mocks.hasHuntRole.mockResolvedValue(false);
     await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth).expect(403);
     expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not let a Hunt supervisor publish', async () => {
+    mocks.hasHuntRole.mockImplementation((_huntId, _userId, role) => role === 'supervisor');
+    await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth)
+      .expect(403, { error: 'forbidden' });
+    expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incomplete draft with safe readiness issues', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({
+      ...hunt, name: ' ', startDate: null, capacity: 0, contactName: null,
+    });
+    const response = await request(app).post('/api/hunts/hunt-1/publish')
+      .set('Authorization', auth).expect(422);
+
+    expect(response.body).toEqual({
+      error: 'hunt_not_ready',
+      issues: [
+        { section: 'general', field: 'name', message: 'Add a Hunt name' },
+        { section: 'general', field: 'startDate', message: 'Add a Hunt date' },
+        { section: 'general', field: 'capacity', message: 'Add a valid capacity' },
+        { section: 'general', field: 'contactName', message: 'Add a local contact' },
+      ],
+    });
+    expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('keeps the conditional publish transition as the final race check', async () => {
+    mocks.transitionStatus.mockResolvedValueOnce(null);
+    await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth)
+      .expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('allows an incomplete draft to be cancelled without publish validation', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, country: null, templateSnapshot: null });
+    await request(app).post('/api/hunts/hunt-1/cancel').set('Authorization', auth).expect(200);
+    expect(mocks.transitionStatus).toHaveBeenCalledWith({
+      id: 'hunt-1', from: ['draft', 'published', 'active', 'paused'], to: 'cancelled',
+    });
   });
 });
