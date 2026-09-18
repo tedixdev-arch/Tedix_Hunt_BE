@@ -151,7 +151,7 @@ describe('Hunt routes', () => {
   it('lets only its organizer rename a draft', async () => {
     await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
       .send({ name: ' Renamed ' }).expect(200);
-    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', 'Renamed');
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', { name: 'Renamed' });
     mocks.hasHuntRole.mockResolvedValue(false);
     await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
       .send({ name: 'No' }).expect(403);
@@ -173,6 +173,38 @@ describe('Hunt routes', () => {
     mocks.updateDraft.mockResolvedValueOnce(null);
     await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
       .send({ name: 'No' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('partially updates valid General Setup and returns it from GET', async () => {
+    const setup = {
+      country: 'Romania', region: 'Cluj', city: 'Cluj Napoca', startDate: '2026-09-12',
+      startTime: '10:00:00', timezone: 'Europe/Bucharest', durationMinutes: 90,
+      capacity: 24, contactName: 'Ana Pop',
+    };
+    mocks.updateDraft.mockResolvedValueOnce({ ...hunt, ...setup });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ city: '  Cluj Napoca ', startTime: '10:00', durationMinutes: 90 })
+      .expect(200);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
+      city: 'Cluj Napoca', startTime: '10:00:00', durationMinutes: 90,
+    });
+
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, ...setup });
+    const response = await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    expect(response.body).toMatchObject(setup);
+  });
+
+  it.each([
+    [{ unknown: 'value' }],
+    [{ startDate: '2026-02-30' }],
+    [{ startTime: '24:00' }],
+    [{ timezone: '+03:00' }],
+    [{ durationMinutes: 0 }],
+    [{ capacity: -1 }],
+  ])('rejects invalid General Setup input %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
   });
 
   it.each([

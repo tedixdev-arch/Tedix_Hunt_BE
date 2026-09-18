@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAnyRole, requireAuth, type AuthRequest } from '../middleware/auth.js';
-import { Hunt, type HuntStatus } from '../models/Hunt.js';
+import { Hunt, type HuntStatus, type UpdateHuntGeneralSetupInput } from '../models/Hunt.js';
 import { HuntRoles } from '../models/HuntRole.js';
 import { Organization } from '../models/Organization.js';
 
@@ -13,6 +13,60 @@ const lifecycleActions: Record<string, { from: readonly HuntStatus[]; to: HuntSt
   resume: { from: ['paused'], to: 'active' },
   cancel: { from: ['draft', 'published', 'active', 'paused'], to: 'cancelled' },
   finish: { from: ['active', 'paused'], to: 'finished' },
+};
+
+const updateFields = new Set([
+  'name', 'country', 'region', 'city', 'startDate', 'startTime', 'timezone',
+  'durationMinutes', 'capacity', 'contactName',
+]);
+
+const validDate = (value: string): boolean => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime())
+    && date.getUTCFullYear() === Number(match[1])
+    && date.getUTCMonth() + 1 === Number(match[2])
+    && date.getUTCDate() === Number(match[3]);
+};
+
+const validTimezone = (value: string): boolean => {
+  if (/^[+-]\d{2}:\d{2}$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const parseDraftUpdate = (body: unknown): UpdateHuntGeneralSetupInput | null => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const values = body as Record<string, unknown>;
+  const keys = Object.keys(values);
+  if (keys.length === 0 || keys.some((key) => !updateFields.has(key))) return null;
+
+  const update: UpdateHuntGeneralSetupInput = {};
+  for (const key of keys) {
+    const value = values[key];
+    if (['name', 'country', 'region', 'city', 'contactName'].includes(key)) {
+      if (typeof value !== 'string' || !value.trim()) return null;
+      (update as Record<string, unknown>)[key] = value.trim();
+    } else if (key === 'startDate') {
+      if (typeof value !== 'string' || !validDate(value)) return null;
+      update.startDate = value;
+    } else if (key === 'startTime') {
+      if (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) return null;
+      update.startTime = value.length === 5 ? `${value}:00` : value;
+    } else if (key === 'timezone') {
+      if (typeof value !== 'string' || !value.trim() || !validTimezone(value.trim())) return null;
+      update.timezone = value.trim();
+    } else if (key === 'durationMinutes' || key === 'capacity') {
+      if (!Number.isInteger(value) || (value as number) < 1) return null;
+      update[key] = value as number;
+    }
+  }
+  return update;
 };
 
 /**
@@ -105,8 +159,8 @@ router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (r
  *       404: { $ref: '#/components/responses/HuntNotFound' }
  *   patch:
  *     tags: [Hunts]
- *     summary: Rename a draft Hunt
- *     description: Only a Hunt-specific organizer may rename a Hunt, and only while it is a draft. Status cannot be patched.
+ *     summary: Partially update a draft Hunt's General Setup
+ *     description: Only a Hunt-specific organizer may update supplied General Setup fields, and only while the Hunt is a draft.
  *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     requestBody:
@@ -115,8 +169,18 @@ router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (r
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name]
- *             properties: { name: { type: string } }
+ *             minProperties: 1
+ *             properties:
+ *               name: { type: string }
+ *               country: { type: string }
+ *               region: { type: string }
+ *               city: { type: string }
+ *               startDate: { type: string, format: date }
+ *               startTime: { type: string, description: Local time in HH:MM or HH:MM:SS format }
+ *               timezone: { type: string, example: Europe/Bucharest, description: IANA timezone }
+ *               durationMinutes: { type: integer, minimum: 1 }
+ *               capacity: { type: integer, minimum: 1 }
+ *               contactName: { type: string }
  *             additionalProperties: false
  *     responses:
  *       200: { description: Updated Hunt, content: { application/json: { schema: { $ref: '#/components/schemas/Hunt' } } } }
@@ -146,13 +210,10 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   if (!(await HuntRoles.hasRole(id, req.user!.id, 'organizer'))) {
     return res.status(403).json({ error: 'forbidden' });
   }
-  const keys = Object.keys(req.body);
-  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-  if (keys.length !== 1 || keys[0] !== 'name' || !name) {
-    return res.status(400).json({ error: 'invalid_input' });
-  }
+  const update = parseDraftUpdate(req.body);
+  if (!update) return res.status(400).json({ error: 'invalid_input' });
   if (hunt.status !== 'draft') return res.status(409).json({ error: 'invalid_hunt_state' });
-  const updated = await Hunt.updateDraft(id, name);
+  const updated = await Hunt.updateDraft(id, update);
   if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });
   return res.json(updated);
 });

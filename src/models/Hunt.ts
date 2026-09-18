@@ -9,6 +9,15 @@ export interface IHunt {
   createdByUserId: string;
   name: string;
   status: HuntStatus;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  startDate: string | null;
+  startTime: string | null;
+  timezone: string | null;
+  durationMinutes: number | null;
+  capacity: number | null;
+  contactName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,12 +39,34 @@ export interface TransitionHuntInput {
   to: HuntStatus;
 }
 
+export interface UpdateHuntGeneralSetupInput {
+  name?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  startDate?: string;
+  startTime?: string;
+  timezone?: string;
+  durationMinutes?: number;
+  capacity?: number;
+  contactName?: string;
+}
+
 const mapRow = (row: any): IHunt => ({
   id: row.id,
   organizationId: row.organization_id,
   createdByUserId: row.created_by_user_id,
   name: row.name,
   status: row.status,
+  country: row.country ?? null,
+  region: row.region ?? null,
+  city: row.city ?? null,
+  startDate: row.start_date ?? null,
+  startTime: row.start_time ?? null,
+  timezone: row.timezone ?? null,
+  durationMinutes: row.duration_minutes ?? null,
+  capacity: row.capacity ?? null,
+  contactName: row.contact_name ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -91,12 +122,19 @@ export const Hunt = {
     }
   },
 
-  async updateDraft(id: string, name: string): Promise<IHunt | null> {
+  async updateDraft(id: string, input: UpdateHuntGeneralSetupInput): Promise<IHunt | null> {
+    const columns: Record<keyof UpdateHuntGeneralSetupInput, string> = {
+      name: 'name', country: 'country', region: 'region', city: 'city', startDate: 'start_date',
+      startTime: 'start_time', timezone: 'timezone', durationMinutes: 'duration_minutes',
+      capacity: 'capacity', contactName: 'contact_name',
+    };
+    const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, string | number][];
+    const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);
     const { rows } = await pool.query(
-      `UPDATE hunts SET name = $2, updated_at = now()
+      `UPDATE hunts SET ${assignments.join(', ')}, updated_at = now()
        WHERE id = $1 AND status = 'draft'
        RETURNING *`,
-      [id, name],
+      [id, ...entries.map(([, value]) => value)],
     );
     return rows[0] ? mapRow(rows[0]) : null;
   },
