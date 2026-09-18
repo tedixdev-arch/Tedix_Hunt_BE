@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS hunts (
   duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes >= 1),
   capacity INTEGER CHECK (capacity IS NULL OR capacity >= 1),
   contact_name TEXT,
+  template_key TEXT,
+  template_version INTEGER CHECK (template_version IS NULL OR template_version >= 1),
+  template_snapshot JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

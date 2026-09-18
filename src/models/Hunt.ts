@@ -1,5 +1,6 @@
 import { pool } from '../lib/postgres.js';
 import { HuntRoles, type HuntRole } from './HuntRole.js';
+import type { HuntTemplateSnapshot } from '../domain/huntTemplates.js';
 
 export type HuntStatus = 'draft' | 'published' | 'active' | 'paused' | 'cancelled' | 'finished';
 
@@ -18,6 +19,9 @@ export interface IHunt {
   durationMinutes: number | null;
   capacity: number | null;
   contactName: string | null;
+  templateKey: string | null;
+  templateVersion: number | null;
+  templateSnapshot: HuntTemplateSnapshot | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +54,9 @@ export interface UpdateHuntGeneralSetupInput {
   durationMinutes?: number;
   capacity?: number;
   contactName?: string;
+  templateKey?: string;
+  templateVersion?: number;
+  templateSnapshot?: HuntTemplateSnapshot;
 }
 
 const mapRow = (row: any): IHunt => ({
@@ -67,6 +74,9 @@ const mapRow = (row: any): IHunt => ({
   durationMinutes: row.duration_minutes ?? null,
   capacity: row.capacity ?? null,
   contactName: row.contact_name ?? null,
+  templateKey: row.template_key ?? null,
+  templateVersion: row.template_version ?? null,
+  templateSnapshot: row.template_snapshot ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -127,8 +137,10 @@ export const Hunt = {
       name: 'name', country: 'country', region: 'region', city: 'city', startDate: 'start_date',
       startTime: 'start_time', timezone: 'timezone', durationMinutes: 'duration_minutes',
       capacity: 'capacity', contactName: 'contact_name',
+      templateKey: 'template_key', templateVersion: 'template_version',
+      templateSnapshot: 'template_snapshot',
     };
-    const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, string | number][];
+    const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, unknown][];
     const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);
     const { rows } = await pool.query(
       `UPDATE hunts SET ${assignments.join(', ')}, updated_at = now()

@@ -103,6 +103,7 @@ describe('core Hunt persistence', () => {
       status: 'paused', createdAt: older, updatedAt: createdAt,
       country: null, region: null, city: null, startDate: null, startTime: null, timezone: null,
       durationMinutes: null, capacity: null, contactName: null,
+      templateKey: null, templateVersion: null, templateSnapshot: null,
       huntRoles: ['organizer', 'supervisor'],
     }]);
     expect(query).toHaveBeenCalledWith(expect.stringMatching(
@@ -135,6 +136,28 @@ describe('core Hunt persistence', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringMatching(/SET city = \$2, duration_minutes = \$3, updated_at = now\(\)[\s\S]*WHERE id = \$1 AND status = 'draft'/),
       ['hunt-1', 'Cluj Napoca', 90],
+    );
+  });
+
+  it('atomically stores a backend template selection only on a draft', async () => {
+    const snapshot = {
+      key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
+      theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
+    };
+    query.mockResolvedValueOnce({ rows: [{
+      id: 'hunt-1', organization_id: 'org-1', created_by_user_id: 'user-1', name: 'City Hunt',
+      status: 'draft', template_key: snapshot.key, template_version: 1,
+      template_snapshot: snapshot, created_at: createdAt, updated_at: createdAt,
+    }] });
+
+    await expect(Hunt.updateDraft('hunt-1', {
+      templateKey: snapshot.key, templateVersion: snapshot.version, templateSnapshot: snapshot,
+    })).resolves.toMatchObject({
+      templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(/template_key = \$2, template_version = \$3, template_snapshot = \$4[\s\S]*status = 'draft'/),
+      ['hunt-1', snapshot.key, 1, snapshot],
     );
   });
 

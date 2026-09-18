@@ -7,6 +7,7 @@ import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { organizationsRouter } from './routes/organizations.js';
 import { huntsRouter } from './routes/hunts.js';
+import { huntTemplatesRouter } from './routes/huntTemplates.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -30,6 +31,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationsRouter);
+  app.use('/api/hunt-templates', huntTemplatesRouter);
   app.use('/api/hunts', huntsRouter);
 
   app.get('/api/docs.json', (_request, response) => {
