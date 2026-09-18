@@ -25,12 +25,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
   beforeAll(async () => {
     client = await pool.connect();
     await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
-    const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
+    const schemaPath = fileURLToPath(new URL('./pre_migration_baseline.sql', import.meta.url));
     await client.query(await readFile(schemaPath, 'utf8'));
-    // The baseline tables model an existing prototype database; migration 003 must add Hunt tables.
-    await client.query(
-      'DROP TABLE team_members, hunt_roles, teams, hunt_participants, hunts CASCADE',
-    );
     await client.query(
       `INSERT INTO users (id, email, role, name) VALUES
        ('00000000-0000-0000-0000-000000000001', 'participant@example.com', 'participant', 'Participant'),
