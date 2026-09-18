@@ -107,6 +107,61 @@ router.post('/creator/login', async (req, res) => {
 
 /**
  * @openapi
+ * /api/auth/organizer/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Organizer login
+ *     description: Authenticates users whose authoritative roles include the Organizer capability.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200:
+ *         description: Authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user: { $ref: '#/components/schemas/User' }
+ *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
+ *       400:
+ *         description: Missing email or password
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ */
+router.post('/organizer/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
+
+  const user = await User.findOne({ email });
+  if (!user || !user.roles.includes('organizer')) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+
+  const ok = await bcrypt.compare(password, user.passwordHash ?? '');
+  if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+
+  const tokens = await createTokens(user.id);
+
+  res.json({ user: publicUser(user), tokens });
+});
+
+/**
+ * @openapi
  * /api/auth/participant/register:
  *   post:
  *     tags: [Auth]
