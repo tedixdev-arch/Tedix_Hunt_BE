@@ -194,6 +194,70 @@ describe('Hunt routes', () => {
     expect(response.body).toMatchObject(setup);
   });
 
+  it('selects the approved template using the backend version and snapshot', async () => {
+    const snapshot = {
+      key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
+      theme: 'Smart Theme (Signal)', checkpointNames: [
+        'Matthias Rex Statue', 'Stone Gate', 'Clock Tower', 'Fountain Court',
+        'Lantern Lane', 'North Passage', 'City Wall · FinishPoint',
+      ],
+    };
+    mocks.updateDraft.mockResolvedValueOnce({
+      ...hunt, templateKey: snapshot.key, templateVersion: snapshot.version, templateSnapshot: snapshot,
+    });
+
+    const response = await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: snapshot.key }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
+      templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
+    });
+    expect(response.body).toMatchObject({
+      templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
+    });
+  });
+
+  it.each([
+    [{ templateKey: 'unknown' }],
+    [{ templateKey: '' }],
+    [{ templateVersion: 99 }],
+    [{ templateSnapshot: {} }],
+  ])('rejects client-controlled or unknown template input %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('rejects template selection by supervisors and on non-draft Hunts', async () => {
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'signal-cluj-napoca' }).expect(403);
+
+    mocks.hasHuntRole.mockResolvedValue(true);
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status: 'published' });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'signal-cluj-napoca' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('returns persisted template selection from GET', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({
+      ...hunt, templateKey: 'signal-cluj-napoca', templateVersion: 1,
+      templateSnapshot: { key: 'signal-cluj-napoca', version: 1 },
+    });
+    const response = await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    expect(response.body).toMatchObject({
+      templateKey: 'signal-cluj-napoca', templateVersion: 1,
+      templateSnapshot: { key: 'signal-cluj-napoca', version: 1 },
+    });
+  });
+
+  it('lists approved template metadata for authenticated users only', async () => {
+    await request(app).get('/api/hunt-templates').expect(401, { error: 'unauthorized' });
+    await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200, [{
+      key: 'signal-cluj-napoca', version: 1,
+      displayName: 'Signal: Cluj Napoca', theme: 'Smart Theme (Signal)',
+    }]);
+  });
+
   it.each([
     [{ unknown: 'value' }],
     [{ startDate: '2026-02-30' }],
