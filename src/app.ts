@@ -26,6 +26,14 @@ export const createApp = (options: CreateAppOptions = {}) => {
     app.use(cors({ origin: environment.webOrigin }));
   }
 
+  app.get('/', (_request, response) => {
+    response.status(200).json({
+      name: 'Tedix Hunt API',
+      status: 'ok',
+      docs: '/api/docs',
+    });
+  });
+
   app.use('/health', healthRouter);
   app.use('/api/health', healthRouter);
 
