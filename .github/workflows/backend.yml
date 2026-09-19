@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -34,11 +35,11 @@ jobs:
       - run: npm run build
       - run: npm test
 
-  deploy:
+  deploy-dev:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    concurrency: production-deploy
+    concurrency: dev-deploy
     env:
       DEPLOY_HOST: tedixhunt-be-dev.anainfo.ai
       DEPLOY_USER: deploy
@@ -49,6 +50,36 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      - name: Sync code to server
+        run: |
+          rsync -az --delete \
+            --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
+            --exclude '.env' --exclude 'tsconfig.tsbuildinfo' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+      - name: Install, build and restart
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd $DEPLOY_PATH && npm ci && npm run build && sudo -n /usr/bin/systemctl restart tedixhunt-api"
+
+  deploy-production:
+    needs: test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency: production-deploy
+    environment: production
+    env:
+      DEPLOY_HOST: 77.42.79.192
+      DEPLOY_USER: deploy
+      DEPLOY_PATH: /var/www/Tedix_Hunt_BE
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY_PRODUCTION }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
       - name: Sync code to server
