@@ -11,12 +11,13 @@ import { huntTemplateSelectionMigration } from './migrations/005_hunt_template_s
 import { huntPilotOptionsMigration } from './migrations/006_hunt_pilot_options.js';
 import { huntAccessCodeMigration } from './migrations/007_hunt_access_code.js';
 import { huntRewardsMigration } from './migrations/008_hunt_rewards.js';
+import { organizerApplicationsMigration } from './migrations/009_organizer_applications.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
   baselineMigration, userRolesMigration, coreHuntRecordsMigration,
   huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
-  huntAccessCodeMigration, huntRewardsMigration,
+  huntAccessCodeMigration, huntRewardsMigration, organizerApplicationsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -66,7 +67,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     );
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
-      '007_hunt_access_code', '008_hunt_rewards',
+      '007_hunt_access_code', '008_hunt_rewards', '009_organizer_applications',
     ]);
 
     const existing = await client.query(
@@ -116,6 +117,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '006_hunt_pilot_options' },
       { id: '007_hunt_access_code' },
       { id: '008_hunt_rewards' },
+      { id: '009_organizer_applications' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -159,12 +161,33 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'hunt_roles',
       'hunt_leaderboard_rewards',
       'hunt_special_awards',
+      'organizer_applications',
     ]) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
         `public.${table}`,
       ]);
       expect(result.rows[0]?.exists).toBe(table);
     }
+  });
+
+  it('defaults Organizer applications to pending and enforces its enum constraints', async () => {
+    const inserted = await client.query<{ status: string }>(
+      `INSERT INTO organizer_applications
+         (name, email, organization_name, organization_type, reason)
+       VALUES ('Applicant', 'applicant@example.com', 'School', 'school', 'Host Hunts')
+       RETURNING status`,
+    );
+    expect(inserted.rows[0]?.status).toBe('pending');
+
+    await expect(client.query(
+      `INSERT INTO organizer_applications
+         (name, email, organization_name, organization_type, reason)
+       VALUES ('Applicant', 'applicant@example.com', 'School', 'company', 'Host Hunts')`,
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(client.query(
+      `UPDATE organizer_applications SET status = 'reviewing'
+       WHERE email = 'applicant@example.com'`,
+    )).rejects.toMatchObject({ code: '23514' });
   });
 
   it('is idempotent and does not execute an already-applied migration again', async () => {
