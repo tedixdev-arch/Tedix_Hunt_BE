@@ -1,8 +1,8 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 import { signJwt } from '../lib/jwt.js';
-import { User } from '../models/User.js';
+import { User, type IUser } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
 import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
@@ -10,25 +10,32 @@ import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = express.Router();
 
-const parseDurationToMs = (value: string) => {
-  if (value.endsWith('d')) {
-    const days = Number(value.slice(0, -1));
-    return days * 24 * 60 * 60 * 1000;
-  }
-  if (value.endsWith('m')) {
-    const mins = Number(value.slice(0, -1));
-    return mins * 60 * 1000;
-  }
-  return 0;
+const publicUser = (user: IUser) => ({
+  id: user.id,
+  email: user.email,
+  name: user.name,
+  role: user.role,
+  roles: user.roles,
+  isGuest: user.isGuest,
+  tedixUserId: user.tedixUserId,
+  createdAt: user.createdAt,
+});
+
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
+
+const parseDurationToMs = (value: string): number => {
+  const match = /^(\d+)(ms|s|m|h|d)$/.exec(value);
+  if (!match) throw new Error('invalid_refresh_token_expiry');
+  const multipliers = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  return Number(match[1]) * multipliers[match[2] as keyof typeof multipliers];
 };
 
 const createTokens = async (userId: string) => {
-  const accessToken = signJwt({ sub: userId });
+  const accessToken = signJwt({ sub: userId, type: 'access' });
 
-  const refreshToken = signJwt(
-    { sub: userId },
-    { expiresIn: environment.refreshTokenExpiresIn as jwt.SignOptions['expiresIn'] },
-  );
+  // Refresh tokens are opaque, high-entropy credentials; only access tokens are JWTs.
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
 
   const expiresAt = new Date(Date.now() + parseDurationToMs(environment.refreshTokenExpiresIn));
 
@@ -44,60 +51,7 @@ const createTokens = async (userId: string) => {
  *     description: Creator, participant and guest authentication
  */
 
-/**
- * @openapi
- * /api/auth/creator/register:
- *   post:
- *     tags: [Auth]
- *     summary: Register a CREATOR account
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [email, password]
- *             properties:
- *               email: { type: string, format: email }
- *               password: { type: string, format: password }
- *               name: { type: string }
- *     responses:
- *       201:
- *         description: Creator account created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 user: { $ref: '#/components/schemas/User' }
- *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
- *       400:
- *         description: Missing email or password
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/Error' }
- *       409:
- *         description: Email already registered
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/Error' }
- */
-router.post('/creator/register', async (req, res) => {
-  const { email, password, name } = req.body;
-
-  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
-
-  const exists = await User.findOne({ email });
-  if (exists) return res.status(409).json({ error: 'email_taken' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  const user = await User.create({ email, passwordHash, role: 'creator', name });
-
-  const tokens = await createTokens(user.id);
-
-  res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
-});
+// Creator capabilities are provisioned only by trusted internal/admin code; there is no public signup.
 
 /**
  * @openapi
@@ -148,7 +102,62 @@ router.post('/creator/login', async (req, res) => {
 
   const tokens = await createTokens(user.id);
 
-  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+  res.json({ user: publicUser(user), tokens });
+});
+
+/**
+ * @openapi
+ * /api/auth/organizer/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Organizer login
+ *     description: Authenticates users whose authoritative roles include the Organizer capability.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200:
+ *         description: Authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user: { $ref: '#/components/schemas/User' }
+ *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
+ *       400:
+ *         description: Missing email or password
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ */
+router.post('/organizer/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
+
+  const user = await User.findOne({ email });
+  if (!user || !user.roles.includes('organizer')) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+
+  const ok = await bcrypt.compare(password, user.passwordHash ?? '');
+  if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+
+  const tokens = await createTokens(user.id);
+
+  res.json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -195,9 +204,16 @@ router.post('/participant/register', async (req, res) => {
     const exists = await User.findOne({ tedixUserId });
     if (exists) return res.status(409).json({ error: 'tedix_account_linked' });
 
-    const user = await User.create({ role: 'participant', name, tedixUserId });
-    const tokens = await createTokens(user.id);
-    return res.status(201).json({ user: { id: user.id, name: user.name, role: user.role, tedixUserId: user.tedixUserId }, tokens });
+    try {
+      const user = await User.create({ role: 'participant', name, tedixUserId });
+      const tokens = await createTokens(user.id);
+      return res.status(201).json({ user: publicUser(user), tokens });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return res.status(409).json({ error: 'tedix_account_linked' });
+      }
+      throw error;
+    }
   }
 
   // participants may register with or without email/password
@@ -206,15 +222,20 @@ router.post('/participant/register', async (req, res) => {
     if (exists) return res.status(409).json({ error: 'email_taken' });
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ email, passwordHash, role: 'participant', name });
-    const tokens = await createTokens(user.id);
-    return res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+    try {
+      const user = await User.create({ email, passwordHash, role: 'participant', name });
+      const tokens = await createTokens(user.id);
+      return res.status(201).json({ user: publicUser(user), tokens });
+    } catch (error) {
+      if (isUniqueViolation(error)) return res.status(409).json({ error: 'email_taken' });
+      throw error;
+    }
   }
 
   // otherwise create a participant without credentials (linked account flow handled elsewhere)
   const user = await User.create({ role: 'participant', name });
   const tokens = await createTokens(user.id);
-  return res.status(201).json({ user: { id: user.id, name: user.name, role: user.role }, tokens });
+  return res.status(201).json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -267,7 +288,7 @@ router.post('/participant/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
     const tokens = await createTokens(user.id);
-    return res.json({ user: { id: user.id, name: user.name, role: user.role, tedixUserId: user.tedixUserId }, tokens });
+    return res.json({ user: publicUser(user), tokens });
   }
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
@@ -280,7 +301,7 @@ router.post('/participant/login', async (req, res) => {
 
   const tokens = await createTokens(user.id);
 
-  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, tokens });
+  res.json({ user: publicUser(user), tokens });
 });
 
 /**
@@ -306,8 +327,8 @@ router.post('/participant/login', async (req, res) => {
  */
 router.post('/guest', async (_req, res) => {
   const user = await User.create({ role: 'participant', isGuest: true });
-  const accessToken = signJwt({ sub: user.id }, { expiresIn: '1h' });
-  res.status(201).json({ user: { id: user.id, role: user.role, isGuest: true }, tokens: { accessToken } });
+  const accessToken = signJwt({ sub: user.id, type: 'access' }, { expiresIn: '1h' });
+  res.status(201).json({ user: publicUser(user), tokens: { accessToken } });
 });
 
 /**
@@ -345,21 +366,35 @@ router.post('/guest', async (_req, res) => {
  */
 router.post('/refresh', async (req, res) => {
   const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(400).json({ error: 'invalid_input' });
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
 
-  const stored = await RefreshToken.findOne({ token: refreshToken });
+  // Atomically consume the token so two concurrent requests cannot both rotate it.
+  const stored = await RefreshToken.consume(refreshToken);
   if (!stored) return res.status(401).json({ error: 'invalid_refresh' });
 
   if (stored.expiresAt < new Date()) {
-    await RefreshToken.deleteOne(stored.id);
     return res.status(401).json({ error: 'refresh_expired' });
   }
 
   const userId = String(stored.user);
-  await RefreshToken.deleteOne(stored.id);
+  const user = await User.findById(userId);
+  if (!user || user.isGuest) return res.status(401).json({ error: 'invalid_refresh' });
 
   const tokens = await createTokens(userId);
   res.json(tokens);
+});
+
+/** Invalidates one refresh credential. Logout is idempotent to avoid revealing token state. */
+router.post('/logout', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+
+  await RefreshToken.deleteByToken(refreshToken);
+  return res.status(200).json({ success: true });
 });
 
 /**
@@ -383,13 +418,10 @@ router.post('/refresh', async (req, res) => {
  *             schema: { $ref: '#/components/schemas/Error' }
  */
 router.get('/me', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
+  const user = req.user!;
   const organizations = await Organization.findByOwnerOrMember(user.id);
   res.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
+    ...publicUser(user),
     organizations: organizations.map((org) => org.id),
   });
 });

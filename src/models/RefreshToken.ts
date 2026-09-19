@@ -40,6 +40,20 @@ export const RefreshToken = {
     return rows[0] ? mapRow(rows[0]) : null;
   },
 
+  async consume(token: string): Promise<IRefreshToken | null> {
+    // DELETE ... RETURNING makes rotation single-use even when refresh requests race.
+    const { rows } = await pool.query(
+      'DELETE FROM refresh_tokens WHERE token = $1 RETURNING *',
+      [token],
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async deleteByToken(token: string): Promise<boolean> {
+    const result = await pool.query('DELETE FROM refresh_tokens WHERE token = $1', [token]);
+    return (result.rowCount ?? 0) > 0;
+  },
+
   async deleteOne(id: string): Promise<void> {
     await pool.query('DELETE FROM refresh_tokens WHERE id = $1', [id]);
   },

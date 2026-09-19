@@ -1,0 +1,466 @@
+import request from 'supertest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  findUserById: vi.fn(),
+  findHuntById: vi.fn(),
+  findHuntsForUser: vi.fn(),
+  createHunt: vi.fn(),
+  updateDraft: vi.fn(),
+  transitionStatus: vi.fn(),
+  ensureAccessCode: vi.fn(),
+  findByAccessCode: vi.fn(),
+  hasHuntRole: vi.fn(),
+  findOrganizationById: vi.fn(),
+  isOwner: vi.fn(),
+  isMember: vi.fn(),
+}));
+
+vi.mock('../models/User.js', () => ({ User: { findById: mocks.findUserById } }));
+vi.mock('../models/Hunt.js', () => ({
+  Hunt: {
+    findById: mocks.findHuntById,
+    findForUser: mocks.findHuntsForUser,
+    createWithOrganizerRole: mocks.createHunt,
+    updateDraft: mocks.updateDraft,
+    transitionStatus: mocks.transitionStatus,
+    ensureAccessCode: mocks.ensureAccessCode,
+    findByAccessCode: mocks.findByAccessCode,
+  },
+}));
+vi.mock('../models/HuntRole.js', () => ({ HuntRoles: { hasRole: mocks.hasHuntRole } }));
+vi.mock('../models/Organization.js', () => ({
+  Organization: {
+    findById: mocks.findOrganizationById,
+    isOwner: mocks.isOwner,
+    isMember: mocks.isMember,
+  },
+}));
+
+import { createApp } from '../app.js';
+import { signJwt } from '../lib/jwt.js';
+
+const now = new Date('2026-09-17T12:00:00Z');
+const user = {
+  id: 'user-1', email: 'creator@example.com', passwordHash: null, role: 'participant' as const,
+  roles: ['participant', 'creator'], name: 'Creator', isGuest: false, tedixUserId: null, createdAt: now,
+};
+const hunt = {
+  id: 'hunt-1', organizationId: 'org-1', createdByUserId: user.id, name: 'City Hunt',
+  status: 'draft' as const,
+  country: 'Romania', region: null, city: 'Cluj Napoca', startDate: '2026-09-12',
+  startTime: '10:00:00', timezone: 'Europe/Bucharest', durationMinutes: 90,
+  capacity: 24, contactName: 'Ana Pop', templateKey: 'signal-cluj-napoca', templateVersion: 1,
+  templateSnapshot: {
+    key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
+    theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
+  },
+  format: 'team' as const, teamSize: 4, accessMode: 'invitation_only' as const,
+  difficulty: 'easy' as const, checkpointOrder: 'recommended' as const,
+  accessCode: null,
+  createdAt: now, updatedAt: now,
+};
+const auth = `Bearer ${signJwt({ sub: user.id, type: 'access' })}`;
+const app = createApp();
+
+describe('Hunt routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transitionStatus.mockReset();
+    mocks.findUserById.mockResolvedValue(user);
+    mocks.findHuntById.mockResolvedValue(hunt);
+    mocks.findHuntsForUser.mockResolvedValue([]);
+    mocks.findOrganizationById.mockResolvedValue({ id: 'org-1' });
+    mocks.isOwner.mockResolvedValue(false);
+    mocks.isMember.mockResolvedValue(true);
+    mocks.hasHuntRole.mockImplementation((_huntId, _userId, role) => role === 'organizer');
+    mocks.createHunt.mockResolvedValue(hunt);
+    mocks.updateDraft.mockResolvedValue({ ...hunt, name: 'Renamed' });
+    mocks.transitionStatus.mockImplementation(({ to }) => Promise.resolve({ ...hunt, status: to }));
+    mocks.ensureAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
+    mocks.findByAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
+  });
+
+  it('requires authentication to list Hunts', async () => {
+    await request(app).get('/api/hunts').expect(401, { error: 'unauthorized' });
+    expect(mocks.findHuntsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['organizer', ['organizer']],
+    ['supervisor', ['supervisor']],
+    ['both roles', ['organizer', 'supervisor']],
+  ])('lists a Hunt once for a user with %s', async (_description, huntRoles) => {
+    mocks.findHuntsForUser.mockResolvedValueOnce([{ ...hunt, huntRoles }]);
+    const response = await request(app).get('/api/hunts').set('Authorization', auth).expect(200);
+
+    expect(response.body).toEqual([{ ...hunt, createdAt: now.toISOString(), updatedAt: now.toISOString(), huntRoles }]);
+    expect(mocks.findHuntsForUser).toHaveBeenCalledWith(user.id);
+  });
+
+  it.each(['creator', 'organizer'])('does not list Hunts from the global %s role alone', async (role) => {
+    mocks.findUserById.mockResolvedValueOnce({ ...user, roles: ['participant', role] });
+    await request(app).get('/api/hunts').set('Authorization', auth).expect(200, []);
+    expect(mocks.findHuntsForUser).toHaveBeenCalledWith(user.id);
+  });
+
+  it('returns an empty list for an unrelated authenticated user', async () => {
+    await request(app).get('/api/hunts').set('Authorization', auth).expect(200, []);
+  });
+
+  it('preserves persisted statuses and repository ordering in the list response', async () => {
+    const statuses = ['draft', 'published', 'active', 'paused', 'cancelled', 'finished'] as const;
+    const hunts = statuses.map((status, index) => ({
+      ...hunt,
+      id: `hunt-${index}`,
+      status,
+      updatedAt: new Date(now.getTime() - index * 1000),
+      createdAt: new Date(now.getTime() - index * 100),
+      huntRoles: ['organizer'],
+    }));
+    mocks.findHuntsForUser.mockResolvedValueOnce(hunts);
+
+    const response = await request(app).get('/api/hunts').set('Authorization', auth).expect(200);
+    expect(response.body.map(({ id, status }: { id: string; status: string }) => ({ id, status }))).toEqual(
+      hunts.map(({ id, status }) => ({ id, status })),
+    );
+  });
+
+  it.each([['creator'], ['organizer']])('allows an organization member with %s capability to create a draft', async (role) => {
+    mocks.findUserById.mockResolvedValue({ ...user, roles: ['participant', role] });
+    const response = await request(app).post('/api/hunts').set('Authorization', auth)
+      .send({ organizationId: 'org-1', name: '  City Hunt  ', status: 'active' }).expect(201);
+    expect(response.body.status).toBe('draft');
+    expect(mocks.createHunt).toHaveBeenCalledWith({
+      organizationId: 'org-1', createdByUserId: user.id, name: 'City Hunt',
+    });
+  });
+
+  it('rejects participant-only users and unrelated creators', async () => {
+    mocks.findUserById.mockResolvedValueOnce({ ...user, roles: ['participant'] });
+    await request(app).post('/api/hunts').set('Authorization', auth)
+      .send({ organizationId: 'org-1', name: 'Hunt' }).expect(403);
+    mocks.isMember.mockResolvedValueOnce(false);
+    await request(app).post('/api/hunts').set('Authorization', auth)
+      .send({ organizationId: 'org-1', name: 'Hunt' }).expect(403);
+  });
+
+  it('validates create input and reports an unknown organization', async () => {
+    await request(app).post('/api/hunts').set('Authorization', auth)
+      .send({ organizationId: 'org-1', name: '  ' }).expect(400);
+    mocks.findOrganizationById.mockResolvedValueOnce(null);
+    await request(app).post('/api/hunts').set('Authorization', auth)
+      .send({ organizationId: 'missing', name: 'Hunt' }).expect(404);
+  });
+
+  it('allows organizers and supervisors to read but rejects unrelated users', async () => {
+    await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    mocks.hasHuntRole.mockResolvedValue(false);
+    await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(403);
+  });
+
+  it('returns 404 for an unknown Hunt', async () => {
+    mocks.findHuntById.mockResolvedValue(null);
+    await request(app).get('/api/hunts/missing').set('Authorization', auth).expect(404);
+  });
+
+  it('lets only its organizer rename a draft', async () => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: ' Renamed ' }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', { name: 'Renamed' });
+    mocks.hasHuntRole.mockResolvedValue(false);
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: 'No' }).expect(403);
+  });
+
+  it('rejects supervisor draft updates and direct status patches', async () => {
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: 'No' }).expect(403);
+    mocks.hasHuntRole.mockResolvedValue(true);
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: 'No', status: 'published' }).expect(400);
+  });
+
+  it('rejects draft updates after publication, including a concurrent state change', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status: 'published' });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: 'No' }).expect(409, { error: 'invalid_hunt_state' });
+    mocks.updateDraft.mockResolvedValueOnce(null);
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ name: 'No' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('partially updates valid General Setup and returns it from GET', async () => {
+    const setup = {
+      country: 'Romania', region: 'Cluj', city: 'Cluj Napoca', startDate: '2026-09-12',
+      startTime: '10:00:00', timezone: 'Europe/Bucharest', durationMinutes: 90,
+      capacity: 24, contactName: 'Ana Pop',
+    };
+    mocks.updateDraft.mockResolvedValueOnce({ ...hunt, ...setup });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ city: '  Cluj Napoca ', startTime: '10:00', durationMinutes: 90 })
+      .expect(200);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
+      city: 'Cluj Napoca', startTime: '10:00:00', durationMinutes: 90,
+    });
+
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, ...setup });
+    const response = await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    expect(response.body).toMatchObject(setup);
+  });
+
+  it('selects the approved template using the backend version and snapshot', async () => {
+    const snapshot = {
+      key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
+      theme: 'Smart Theme (Signal)', checkpointNames: [
+        'Matthias Rex Statue', 'Stone Gate', 'Clock Tower', 'Fountain Court',
+        'Lantern Lane', 'North Passage', 'City Wall · FinishPoint',
+      ],
+    };
+    mocks.updateDraft.mockResolvedValueOnce({
+      ...hunt, templateKey: snapshot.key, templateVersion: snapshot.version, templateSnapshot: snapshot,
+    });
+
+    const response = await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: snapshot.key }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
+      templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
+    });
+    expect(response.body).toMatchObject({
+      templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
+    });
+  });
+
+  it('saves the supported General 2 and General 3 pilot options in partial updates', async () => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth).send({
+      format: 'team', teamSize: 4, accessMode: 'invitation_only',
+    }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenLastCalledWith('hunt-1', {
+      format: 'team', teamSize: 4, accessMode: 'invitation_only',
+    });
+
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth).send({
+      difficulty: 'easy', checkpointOrder: 'recommended',
+    }).expect(200);
+    expect(mocks.updateDraft).toHaveBeenLastCalledWith('hunt-1', {
+      difficulty: 'easy', checkpointOrder: 'recommended',
+    });
+  });
+
+  it.each([
+    [{ format: 'single' }], [{ teamSize: 3 }], [{ teamSize: 5 }],
+    [{ accessMode: 'open' }], [{ difficulty: 'medium' }], [{ difficulty: 'advanced' }],
+    [{ checkpointOrder: 'short' }],
+  ])('rejects unsupported prototype option %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('applies organizer and draft rules to pilot options', async () => {
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ format: 'team' }).expect(403);
+    mocks.hasHuntRole.mockResolvedValue(true);
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status: 'published' });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ format: 'team' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it.each([
+    [{ templateKey: 'unknown' }],
+    [{ templateKey: '' }],
+    [{ templateVersion: 99 }],
+    [{ templateSnapshot: {} }],
+  ])('rejects client-controlled or unknown template input %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('rejects template selection by supervisors and on non-draft Hunts', async () => {
+    mocks.hasHuntRole.mockImplementation((_h, _u, role) => role === 'supervisor');
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'signal-cluj-napoca' }).expect(403);
+
+    mocks.hasHuntRole.mockResolvedValue(true);
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status: 'published' });
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'signal-cluj-napoca' }).expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('returns persisted template selection from GET', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({
+      ...hunt, templateKey: 'signal-cluj-napoca', templateVersion: 1,
+      templateSnapshot: { key: 'signal-cluj-napoca', version: 1 },
+    });
+    const response = await request(app).get('/api/hunts/hunt-1').set('Authorization', auth).expect(200);
+    expect(response.body).toMatchObject({
+      templateKey: 'signal-cluj-napoca', templateVersion: 1,
+      templateSnapshot: { key: 'signal-cluj-napoca', version: 1 },
+    });
+  });
+
+  it('lists approved template metadata for authenticated users only', async () => {
+    await request(app).get('/api/hunt-templates').expect(401, { error: 'unauthorized' });
+    await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200, [{
+      key: 'signal-cluj-napoca', version: 1,
+      displayName: 'Signal: Cluj Napoca', theme: 'Smart Theme (Signal)',
+    }]);
+  });
+
+  it('lists only supported pilot options for authenticated users', async () => {
+    await request(app).get('/api/hunt-options').expect(401, { error: 'unauthorized' });
+    await request(app).get('/api/hunt-options').set('Authorization', auth).expect(200, {
+      formats: [{ key: 'team', label: 'Team Hunters' }],
+      teamSizes: [4],
+      accessModes: [{ key: 'invitation_only', label: 'Invitation-only' }],
+      difficulties: [{ key: 'easy', label: 'Easy' }],
+      checkpointOrders: [{ key: 'recommended', label: 'Recommended route' }],
+    });
+  });
+
+  it.each([
+    [{ unknown: 'value' }],
+    [{ startDate: '2026-02-30' }],
+    [{ startTime: '24:00' }],
+    [{ timezone: '+03:00' }],
+    [{ durationMinutes: 0 }],
+    [{ capacity: -1 }],
+  ])('rejects invalid General Setup input %#', async (body) => {
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send(body).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['publish', ['draft'], 'published'],
+    ['start', ['published'], 'active'],
+    ['pause', ['active'], 'paused'],
+    ['resume', ['paused'], 'active'],
+    ['finish', ['active', 'paused'], 'finished'],
+    ['cancel', ['draft', 'published', 'active', 'paused'], 'cancelled'],
+  ])('applies the %s lifecycle transition conditionally', async (action, from, to) => {
+    await request(app).post(`/api/hunts/hunt-1/${action}`).set('Authorization', auth).expect(200);
+    expect(mocks.transitionStatus).toHaveBeenCalledWith({ id: 'hunt-1', from, to });
+  });
+
+  it.each([
+    ['start', 'draft'], ['pause', 'published'], ['publish', 'paused'], ['publish', 'active'], ['start', 'finished'],
+    ['start', 'cancelled'], ['publish', 'published'], ['finish', 'finished'],
+  ])('rejects %s from %s with a conflict', async (action, status) => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
+    mocks.transitionStatus.mockResolvedValueOnce(null);
+    await request(app).post(`/api/hunts/hunt-1/${action}`).set('Authorization', auth)
+      .expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('prevents supervisors and unrelated global creators from lifecycle control', async () => {
+    mocks.hasHuntRole.mockResolvedValue(false);
+    await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth).expect(403);
+    expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not let a Hunt supervisor publish', async () => {
+    mocks.hasHuntRole.mockImplementation((_huntId, _userId, role) => role === 'supervisor');
+    await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth)
+      .expect(403, { error: 'forbidden' });
+    expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incomplete draft with safe readiness issues', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({
+      ...hunt, name: ' ', startDate: null, capacity: 0, contactName: null,
+    });
+    const response = await request(app).post('/api/hunts/hunt-1/publish')
+      .set('Authorization', auth).expect(422);
+
+    expect(response.body).toEqual({
+      error: 'hunt_not_ready',
+      issues: [
+        { section: 'general', field: 'name', message: 'Add a Hunt name' },
+        { section: 'general', field: 'startDate', message: 'Add a Hunt date' },
+        { section: 'general', field: 'capacity', message: 'Add a valid capacity' },
+        { section: 'general', field: 'contactName', message: 'Add a local contact' },
+      ],
+    });
+    expect(mocks.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it('keeps the conditional publish transition as the final race check', async () => {
+    mocks.transitionStatus.mockResolvedValueOnce(null);
+    await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth)
+      .expect(409, { error: 'invalid_hunt_state' });
+  });
+
+  it('allows an incomplete draft to be cancelled without publish validation', async () => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, country: null, templateSnapshot: null });
+    await request(app).post('/api/hunts/hunt-1/cancel').set('Authorization', auth).expect(200);
+    expect(mocks.transitionStatus).toHaveBeenCalledWith({
+      id: 'hunt-1', from: ['draft', 'published', 'active', 'paused'], to: 'cancelled',
+    });
+  });
+
+  it.each(['published', 'active', 'paused'])('creates stable access for an organizer on a %s Hunt', async (status) => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
+    const response = await request(app).post('/api/hunts/hunt-1/access')
+      .set('Authorization', auth).expect(200);
+    expect(response.body).toEqual({ huntId: 'hunt-1', code: '7KPM4XQ2' });
+    expect(mocks.ensureAccessCode).toHaveBeenCalledWith('hunt-1');
+  });
+
+  it('returns the same persisted code on repeated access requests', async () => {
+    mocks.findHuntById.mockResolvedValue({ ...hunt, status: 'published' });
+    const first = await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth).expect(200);
+    const second = await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth).expect(200);
+    expect(first.body.code).toBe('7KPM4XQ2');
+    expect(second.body).toEqual(first.body);
+  });
+
+  it.each(['draft', 'cancelled', 'finished'])('rejects access creation on a %s Hunt', async (status) => {
+    mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
+    await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth)
+      .expect(409, { error: 'invalid_hunt_state' });
+    expect(mocks.ensureAccessCode).not.toHaveBeenCalled();
+  });
+
+  it('requires a Hunt-specific organizer for access creation', async () => {
+    await request(app).post('/api/hunts/hunt-1/access').expect(401, { error: 'unauthorized' });
+    mocks.hasHuntRole.mockResolvedValueOnce(false);
+    await request(app).post('/api/hunts/hunt-1/access').set('Authorization', auth)
+      .expect(403, { error: 'forbidden' });
+  });
+
+  it('returns not found before authorizing access creation for an unknown Hunt', async () => {
+    mocks.findHuntById.mockResolvedValueOnce(null);
+    await request(app).post('/api/hunts/missing/access').set('Authorization', auth)
+      .expect(404, { error: 'not_found' });
+    expect(mocks.hasHuntRole).not.toHaveBeenCalled();
+  });
+
+  it('publicly resolves normalized access codes with only safe fields', async () => {
+    const response = await request(app).get('/api/hunt-access/%207kpm4xq2%20').expect(200);
+    expect(response.body).toEqual({
+      huntId: 'hunt-1', code: '7KPM4XQ2', name: 'City Hunt', status: 'published',
+    });
+    expect(Object.keys(response.body).sort()).toEqual(['code', 'huntId', 'name', 'status']);
+    expect(mocks.findByAccessCode).toHaveBeenCalledWith('7KPM4XQ2');
+  });
+
+  it('returns not found for malformed and unknown public access codes', async () => {
+    await request(app).get('/api/hunt-access/SIGNAL26').expect(404, { error: 'not_found' });
+    expect(mocks.findByAccessCode).not.toHaveBeenCalled();
+    mocks.findByAccessCode.mockResolvedValueOnce(null);
+    await request(app).get('/api/hunt-access/M8R2HD7W').expect(404, { error: 'not_found' });
+  });
+
+  it.each(['cancelled', 'finished'])('resolves an existing code after the Hunt is %s', async (status) => {
+    mocks.findByAccessCode.mockResolvedValueOnce({ ...hunt, status, accessCode: '7KPM4XQ2' });
+    await request(app).get('/api/hunt-access/7KPM4XQ2').expect(200, {
+      huntId: 'hunt-1', code: '7KPM4XQ2', name: 'City Hunt', status,
+    });
+  });
+});

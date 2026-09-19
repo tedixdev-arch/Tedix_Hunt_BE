@@ -33,6 +33,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Prepare disposable database baseline
+        env:
+          PGPASSWORD: disposable-ci-only
+        run: psql -h 127.0.0.1 -U tedix_test -d tedix_test -f src/db/pre_migration_baseline.sql
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: npm run migrate
       - run: npm test
 
   deploy-dev:
@@ -59,10 +67,10 @@ jobs:
             --exclude '.env' --exclude 'tsconfig.tsbuildinfo' \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-      - name: Install, build and restart
+      - name: Install, build, migrate and restart
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd $DEPLOY_PATH && npm ci && npm run build && sudo -n /usr/bin/systemctl restart tedixhunt-api"
+            "cd $DEPLOY_PATH && npm ci && npm run build && npm run migrate && printf '%s' '${{ github.sha }}' > dist/revision.txt && sudo -n /usr/bin/systemctl restart tedixhunt-api"
 
   deploy-production:
     needs: test
@@ -89,7 +97,7 @@ jobs:
             --exclude '.env' --exclude 'tsconfig.tsbuildinfo' \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-      - name: Install, build and restart
+      - name: Install, build, migrate and restart
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd $DEPLOY_PATH && npm ci && npm run build && sudo -n /usr/bin/systemctl restart tedixhunt-api"
+            "cd $DEPLOY_PATH && npm ci && npm run build && npm run migrate && printf '%s' '${{ github.sha }}' > dist/revision.txt && sudo -n /usr/bin/systemctl restart tedixhunt-api"

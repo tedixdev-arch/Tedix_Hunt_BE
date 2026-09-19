@@ -1,0 +1,440 @@
+import request from 'supertest';
+import bcrypt from 'bcryptjs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  createUser: vi.fn(),
+  findUser: vi.fn(),
+  findUserById: vi.fn(),
+  createRefreshToken: vi.fn(),
+  consumeRefreshToken: vi.fn(),
+  deleteRefreshToken: vi.fn(),
+  organizationsForUser: vi.fn(),
+}));
+
+vi.mock('../models/User.js', () => ({
+  User: {
+    create: mocks.createUser,
+    findOne: mocks.findUser,
+    findById: mocks.findUserById,
+  },
+}));
+vi.mock('../models/RefreshToken.js', () => ({
+  RefreshToken: {
+    create: mocks.createRefreshToken,
+    consume: mocks.consumeRefreshToken,
+    deleteByToken: mocks.deleteRefreshToken,
+  },
+}));
+vi.mock('../models/Organization.js', () => ({
+  Organization: { findByOwnerOrMember: mocks.organizationsForUser },
+}));
+
+import { createApp } from '../app.js';
+import { signJwt } from '../lib/jwt.js';
+
+const createdAt = new Date('2026-01-02T03:04:05Z');
+const registeredUser = {
+  id: '7dc65d7e-cd31-4205-b92d-c716a7ae494a',
+  email: 'person@example.com',
+  passwordHash: '$2a$10$database-hash',
+  role: 'creator',
+  roles: ['creator'],
+  name: 'Person',
+  isGuest: false,
+  tedixUserId: null,
+  createdAt,
+};
+
+describe('user account API', () => {
+  const app = createApp();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findUser.mockResolvedValue(null);
+    mocks.createUser.mockResolvedValue(registeredUser);
+    mocks.createRefreshToken.mockResolvedValue({});
+    mocks.consumeRefreshToken.mockResolvedValue(null);
+    mocks.deleteRefreshToken.mockResolvedValue(false);
+    mocks.organizationsForUser.mockResolvedValue([]);
+  });
+
+  it('hashes a registered user password and never returns its hash', async () => {
+    const response = await request(app)
+      .post('/api/auth/participant/register')
+      .send({ email: 'person@example.com', password: 'plain-secret', name: 'Person' })
+      .expect(201);
+
+    const createInput = mocks.createUser.mock.calls[0][0];
+    expect(createInput.role).toBe('participant');
+    expect(createInput.passwordHash).not.toBe('plain-secret');
+    await expect(bcrypt.compare('plain-secret', createInput.passwordHash)).resolves.toBe(true);
+    expect(response.body.user).toMatchObject({
+      isGuest: false,
+      role: 'creator',
+      roles: ['creator'],
+    });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('rejects an existing email cleanly', async () => {
+    mocks.findUser.mockResolvedValue(registeredUser);
+
+    await request(app)
+      .post('/api/auth/participant/register')
+      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .expect(409, { error: 'email_taken' });
+    expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it('does not expose public privileged-role assignment endpoints', async () => {
+    await request(app)
+      .post('/api/auth/creator/register')
+      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .expect(404);
+    await request(app).post('/api/auth/roles').send({ role: 'admin' }).expect(404);
+  });
+
+  it('logs a creator in with valid credentials and rejects an invalid password', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    mocks.findUser.mockResolvedValue({ ...registeredUser, passwordHash });
+
+    const success = await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'PERSON@example.com', password: 'correct-password' })
+      .expect(200);
+    expect(success.body.tokens).toEqual({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+    expect(mocks.findUser).toHaveBeenCalledWith({
+      email: 'PERSON@example.com',
+      role: 'creator',
+    });
+
+    await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'person@example.com', password: 'wrong-password' })
+      .expect(401, { error: 'invalid_credentials' });
+  });
+
+  it('logs in a creator whose legacy role remains participant', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    mocks.findUser.mockResolvedValue({
+      ...registeredUser,
+      role: 'participant',
+      roles: ['participant', 'creator'],
+      passwordHash,
+    });
+
+    const response = await request(app)
+      .post('/api/auth/creator/login')
+      .send({ email: 'person@example.com', password: 'correct-password' })
+      .expect(200);
+
+    expect(mocks.findUser).toHaveBeenCalledWith({ email: 'person@example.com', role: 'creator' });
+    expect(response.body.user).toMatchObject({
+      role: 'participant',
+      roles: ['participant', 'creator'],
+    });
+  });
+
+  describe('organizer login', () => {
+    const password = 'organizer-password';
+
+    const organizer = async (roles: string[], role = 'participant') => ({
+      ...registeredUser,
+      role,
+      roles,
+      passwordHash: await bcrypt.hash(password, 4),
+    });
+
+    it('authenticates organizer-only accounts and returns the public user and normal tokens', async () => {
+      const user = await organizer(['organizer']);
+      mocks.findUser.mockResolvedValue(user);
+
+      const response = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: ' PERSON@EXAMPLE.COM ', password })
+        .expect(200);
+
+      expect(mocks.findUser).toHaveBeenCalledWith({ email: ' PERSON@EXAMPLE.COM ' });
+      expect(response.body.user).toMatchObject({
+        id: user.id,
+        role: 'participant',
+        roles: ['organizer'],
+      });
+      expect(response.body.user).not.toHaveProperty('passwordHash');
+      expect(response.body.tokens).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+      });
+      expect(mocks.createRefreshToken).toHaveBeenCalledWith(
+        expect.objectContaining({ user: user.id, token: response.body.tokens.refreshToken }),
+      );
+    });
+
+    it.each([
+      ['creator legacy role', ['creator', 'organizer'], 'creator'],
+      ['admin legacy role', ['admin', 'organizer'], 'creator'],
+    ])('authenticates a multi-role organizer with a %s', async (_label, roles, role) => {
+      mocks.findUser.mockResolvedValue(await organizer(roles, role));
+
+      const response = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(200);
+
+      expect(response.body.user).toMatchObject({ role, roles });
+    });
+
+    it.each([
+      ['creator', ['creator']],
+      ['participant', ['participant']],
+      ['admin', ['admin']],
+      ['guest', []],
+    ])('rejects a %s account without the organizer capability', async (_label, roles) => {
+      mocks.findUser.mockResolvedValue(await organizer(roles));
+
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(401, { error: 'invalid_credentials' });
+
+      expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('uses the same invalid-credentials response for wrong passwords and unknown accounts', async () => {
+      mocks.findUser
+        .mockResolvedValueOnce(await organizer(['organizer']))
+        .mockResolvedValueOnce(null);
+
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password: 'wrong-password' })
+        .expect(401, { error: 'invalid_credentials' });
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: 'unknown@example.com', password })
+        .expect(401, { error: 'invalid_credentials' });
+    });
+
+    it.each([
+      [{ password }],
+      [{ email: registeredUser.email }],
+    ])('rejects missing credentials with invalid_input', async (body) => {
+      await request(app)
+        .post('/api/auth/organizer/login')
+        .send(body)
+        .expect(400, { error: 'invalid_input' });
+
+      expect(mocks.findUser).not.toHaveBeenCalled();
+    });
+
+    it('uses the existing refresh-token rotation flow for organizer sessions', async () => {
+      const user = await organizer(['organizer']);
+      mocks.findUser.mockResolvedValue(user);
+      const login = await request(app)
+        .post('/api/auth/organizer/login')
+        .send({ email: registeredUser.email, password })
+        .expect(200);
+
+      mocks.consumeRefreshToken.mockResolvedValue({
+        id: 'organizer-refresh-id',
+        user: user.id,
+        token: login.body.tokens.refreshToken,
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt,
+      });
+      mocks.findUserById.mockResolvedValue(user);
+
+      const refreshed = await request(app)
+        .post('/api/auth/refresh')
+        .send({ refreshToken: login.body.tokens.refreshToken })
+        .expect(200);
+
+      expect(refreshed.body).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+      });
+    });
+  });
+
+  it('maps a database uniqueness race to the same safe response', async () => {
+    mocks.createUser.mockRejectedValue(Object.assign(new Error('private database detail'), { code: '23505' }));
+
+    const response = await request(app)
+      .post('/api/auth/participant/register')
+      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .expect(409);
+
+    expect(response.body).toEqual({ error: 'email_taken' });
+    expect(JSON.stringify(response.body)).not.toContain('database');
+  });
+
+  it('does not expose unexpected PostgreSQL errors', async () => {
+    mocks.createUser.mockRejectedValue(
+      Object.assign(new Error('connection to DATABASE_URL failed'), { code: '08006' }),
+    );
+
+    const response = await request(app)
+      .post('/api/auth/participant/register')
+      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .expect(500);
+
+    expect(response.body).toEqual({
+      error: 'internal_server_error',
+      message: 'An unexpected error occurred.',
+    });
+    expect(JSON.stringify(response.body)).not.toContain('DATABASE_URL');
+  });
+
+  it('retrieves an existing user without exposing account secrets', async () => {
+    mocks.findUserById.mockResolvedValue(registeredUser);
+    const token = signJwt({ sub: registeredUser.id, type: 'access' });
+
+    const response = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      id: registeredUser.id,
+      isGuest: false,
+      roles: ['creator'],
+    });
+    expect(response.body).not.toHaveProperty('passwordHash');
+    expect(response.body).not.toHaveProperty('refreshToken');
+  });
+
+  it('rejects malformed and expired access tokens without leaking JWT details', async () => {
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer definitely-not-a-jwt')
+      .expect(401, { error: 'unauthorized' });
+
+    const expired = signJwt(
+      { sub: registeredUser.id, type: 'access' },
+      { expiresIn: -1 },
+    );
+    const response = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${expired}`)
+      .expect(401);
+    expect(response.body).toEqual({ error: 'unauthorized' });
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+  });
+
+  it('does not accept another signed token type as an access token', async () => {
+    const nonAccessToken = signJwt({ sub: registeredUser.id, type: 'refresh' });
+    await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${nonAccessToken}`)
+      .expect(401, { error: 'unauthorized' });
+    expect(mocks.findUserById).not.toHaveBeenCalled();
+  });
+
+  it('rotates a valid persisted refresh token and prevents reuse', async () => {
+    mocks.consumeRefreshToken
+      .mockResolvedValueOnce({
+        id: 'refresh-id',
+        user: registeredUser.id,
+        token: 'old-refresh',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt,
+      })
+      .mockResolvedValueOnce(null);
+    mocks.findUserById.mockResolvedValue(registeredUser);
+
+    const response = await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'old-refresh' })
+      .expect(200);
+    expect(response.body).toEqual({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+    expect(response.body.refreshToken).not.toBe('old-refresh');
+    expect(mocks.createRefreshToken).toHaveBeenCalledWith(
+      expect.objectContaining({ user: registeredUser.id, token: response.body.refreshToken }),
+    );
+
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'old-refresh' })
+      .expect(401, { error: 'invalid_refresh' });
+  });
+
+  it('rejects invalid and expired refresh tokens', async () => {
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'missing-token' })
+      .expect(401, { error: 'invalid_refresh' });
+
+    mocks.consumeRefreshToken.mockResolvedValue({
+      id: 'expired-id',
+      user: registeredUser.id,
+      token: 'expired-token',
+      expiresAt: new Date(Date.now() - 1_000),
+      createdAt,
+    });
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'expired-token' })
+      .expect(401, { error: 'refresh_expired' });
+    expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('logs out idempotently and makes the deleted refresh token unusable', async () => {
+    mocks.deleteRefreshToken.mockResolvedValue(true);
+    await request(app)
+      .post('/api/auth/logout')
+      .send({ refreshToken: 'refresh-to-revoke' })
+      .expect(200, { success: true });
+    expect(mocks.deleteRefreshToken).toHaveBeenCalledWith('refresh-to-revoke');
+
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'refresh-to-revoke' })
+      .expect(401, { error: 'invalid_refresh' });
+  });
+
+  it('supports participant password and Tedix-linked login', async () => {
+    const participant = { ...registeredUser, role: 'participant' as const, roles: ['participant'] };
+    const passwordHash = await bcrypt.hash('participant-password', 4);
+    mocks.findUser
+      .mockResolvedValueOnce({ ...participant, passwordHash })
+      .mockResolvedValueOnce({ ...participant, tedixUserId: 'tedix-123' });
+
+    await request(app)
+      .post('/api/auth/participant/login')
+      .send({ email: participant.email, password: 'participant-password' })
+      .expect(200);
+    await request(app)
+      .post('/api/auth/participant/login')
+      .send({ tedixUserId: 'tedix-123' })
+      .expect(200);
+    expect(mocks.createRefreshToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the guest distinction', async () => {
+    mocks.createUser.mockResolvedValue({
+      ...registeredUser,
+      email: null,
+      passwordHash: null,
+      role: 'participant',
+      roles: ['participant'],
+      isGuest: true,
+    });
+
+    const response = await request(app).post('/api/auth/guest').expect(201);
+
+    expect(mocks.createUser).toHaveBeenCalledWith({ role: 'participant', isGuest: true });
+    expect(response.body.user).toMatchObject({
+      role: 'participant',
+      roles: ['participant'],
+      isGuest: true,
+    });
+    expect(response.body.tokens).not.toHaveProperty('refreshToken');
+  });
+});

@@ -6,6 +6,12 @@ import { swaggerSpec } from './lib/swagger.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { organizationsRouter } from './routes/organizations.js';
+import { huntsRouter } from './routes/hunts.js';
+import { huntTemplatesRouter } from './routes/huntTemplates.js';
+import { huntOptionsRouter } from './routes/huntOptions.js';
+import { huntAccessRouter } from './routes/huntAccess.js';
+import { rewardOptionsRouter } from './routes/rewardOptions.js';
+import { huntRewardsRouter } from './routes/huntRewards.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -29,6 +35,12 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationsRouter);
+  app.use('/api/hunt-templates', huntTemplatesRouter);
+  app.use('/api/hunt-options', huntOptionsRouter);
+  app.use('/api/hunt-access', huntAccessRouter);
+  app.use('/api/reward-options', rewardOptionsRouter);
+  app.use('/api/hunts/:id/rewards', huntRewardsRouter);
+  app.use('/api/hunts', huntsRouter);
 
   app.get('/api/docs.json', (_request, response) => {
     response.json(swaggerSpec);
@@ -55,11 +67,15 @@ export const createApp = (options: CreateAppOptions = {}) => {
     _next,
   ) => {
     const message = error instanceof Error ? error.message : 'Unexpected error';
+    const isPostgresError =
+      typeof error === 'object' && error !== null && 'code' in error &&
+      typeof error.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code);
 
     response.status(500).json({
       error: 'internal_server_error',
       message: 'An unexpected error occurred.',
-      ...(process.env.NODE_ENV === 'production' ? {} : { detail: message }),
+      // PostgreSQL diagnostics may contain schema or connection details and are never public.
+      ...(process.env.NODE_ENV === 'production' || isPostgresError ? {} : { detail: message }),
     });
   };
 

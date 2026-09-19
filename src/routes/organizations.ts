@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth, requireRole, AuthRequest } from '../middleware/auth.js';
 import { Organization } from '../models/Organization.js';
 
 const router = express.Router();
@@ -46,9 +46,8 @@ const router = express.Router();
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.post('/', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
-  if (user.role !== 'creator') return res.status(403).json({ error: 'forbidden' });
+router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, res) => {
+  const user = req.user!;
 
   const { name, description } = req.body;
   if (!name) return res.status(400).json({ error: 'invalid_input' });
@@ -89,15 +88,15 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
  *             schema: { $ref: '#/components/schemas/Error' }
  */
 router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
+  const user = req.user!;
   const id = String(req.params.id);
   const org = await Organization.findById(id, { populate: true });
   if (!org) return res.status(404).json({ error: 'not_found' });
 
-  const isOwner = String((org.owner as any)?.id ?? org.owner) === String(user.id);
-  const isMember = org.members.some(
-    (member: any) => String(member?.id ?? member) === String(user.id),
-  );
+  const [isOwner, isMember] = await Promise.all([
+    Organization.isOwner(user.id, id),
+    Organization.isMember(user.id, id),
+  ]);
   if (!isOwner && !isMember) return res.status(403).json({ error: 'forbidden' });
 
   res.json(org);
@@ -122,7 +121,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
  *               items: { $ref: '#/components/schemas/Organization' }
  */
 router.get('/', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
+  const user = req.user!;
   const orgs = await Organization.findByOwnerOrMember(user.id);
   res.json(orgs);
 });
@@ -167,12 +166,14 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
-  const user = req.user;
+router.patch('/:id', requireAuth, requireRole('creator'), async (req: AuthRequest, res) => {
+  const user = req.user!;
   const id = String(req.params.id);
   const org = await Organization.findById(id);
   if (!org) return res.status(404).json({ error: 'not_found' });
-  if (String(org.owner) !== String(user.id)) return res.status(403).json({ error: 'forbidden' });
+  if (!(await Organization.isOwner(user.id, id))) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
 
   const { name, description } = req.body;
   const updated = await Organization.update(id, { name, description });
