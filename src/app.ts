@@ -12,6 +12,7 @@ import { huntOptionsRouter } from './routes/huntOptions.js';
 import { huntAccessRouter } from './routes/huntAccess.js';
 import { rewardOptionsRouter } from './routes/rewardOptions.js';
 import { huntRewardsRouter } from './routes/huntRewards.js';
+import { organizerApplicationsRouter } from './routes/organizerApplications.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -34,6 +35,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   });
 
   app.use('/api/auth', authRouter);
+  app.use('/api/organizer-applications', organizerApplicationsRouter);
   app.use('/api/organizations', organizationsRouter);
   app.use('/api/hunt-templates', huntTemplatesRouter);
   app.use('/api/hunt-options', huntOptionsRouter);

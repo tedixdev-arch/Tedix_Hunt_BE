@@ -62,6 +62,21 @@ const options: swaggerJsdoc.Options = {
             createdAt: { type: 'string', format: 'date-time' },
           },
         },
+        OrganizerApplication: {
+          type: 'object',
+          required: ['id', 'name', 'email', 'organizationName', 'organizationType', 'reason', 'phone', 'status', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            name: { type: 'string' },
+            email: { type: 'string', format: 'email' },
+            organizationName: { type: 'string' },
+            organizationType: { type: 'string', enum: ['school', 'ngo', 'community', 'other'] },
+            reason: { type: 'string' },
+            phone: { type: 'string', nullable: true },
+            status: { type: 'string', enum: ['pending'] },
+            createdAt: { type: 'string', format: 'date-time' },
+          },
+        },
         Hunt: {
           type: 'object',
           required: ['id', 'organizationId', 'createdByUserId', 'name', 'status', 'createdAt', 'updatedAt'],

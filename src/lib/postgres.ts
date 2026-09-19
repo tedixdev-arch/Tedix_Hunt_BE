@@ -39,6 +39,23 @@ CREATE TABLE IF NOT EXISTS organization_members (
   PRIMARY KEY (organization_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS organizer_applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  organization_name TEXT NOT NULL,
+  organization_type TEXT NOT NULL CHECK (
+    organization_type IN ('school', 'ngo', 'community', 'other')
+  ),
+  reason TEXT NOT NULL,
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (
+    status IN ('pending', 'approved', 'rejected')
+  ),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS hunts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
