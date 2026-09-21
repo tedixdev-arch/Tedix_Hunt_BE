@@ -218,7 +218,14 @@ router.post('/organizer/login', async (req, res) => {
  */
 router.post('/admin/login', async (req, res) => {
   const { email, password } = req.body ?? {};
-  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
+  if (
+    typeof email !== 'string'
+    || !email.trim()
+    || typeof password !== 'string'
+    || !password
+  ) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
 
   const user = await User.findOne({ email: normalizeEmail(email) });
   if (!user || !user.roles.includes('admin')) {

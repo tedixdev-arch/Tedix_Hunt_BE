@@ -290,6 +290,7 @@ describe('user account API', () => {
 
   describe('admin login', () => {
     const password = 'admin-password';
+    const comparePassword = vi.spyOn(bcrypt, 'compare');
 
     const admin = async (roles: string[], role = 'participant') => ({
       ...registeredUser,
@@ -364,6 +365,22 @@ describe('user account API', () => {
         .expect(400, { error: 'invalid_input' });
 
       expect(mocks.findUser).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ email: {}, password }],
+      [{ email: 42, password }],
+      [{ email: registeredUser.email, password: {} }],
+      [{ email: registeredUser.email, password: 42 }],
+      [{ email: '   ', password }],
+    ])('rejects malformed credential values with invalid_input', async (body) => {
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send(body)
+        .expect(400, { error: 'invalid_input' });
+
+      expect(mocks.findUser).not.toHaveBeenCalled();
+      expect(comparePassword).not.toHaveBeenCalled();
     });
   });
 
