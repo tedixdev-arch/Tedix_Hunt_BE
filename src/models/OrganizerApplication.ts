@@ -188,7 +188,11 @@ export const OrganizerApplications = {
         await client.query('ROLLBACK');
         return null;
       }
-      await client.query('UPDATE users SET password_hash = $2 WHERE id = $1', [rows[0].user_id, passwordHash]);
+      // Multi-role accounts keep their existing credential; only new professional accounts have NULL here.
+      await client.query(
+        'UPDATE users SET password_hash = COALESCE(password_hash, $2) WHERE id = $1',
+        [rows[0].user_id, passwordHash],
+      );
       const userRows = await client.query(
         `SELECT users.*, ARRAY(SELECT role FROM user_roles WHERE user_id = users.id ORDER BY role) roles
          FROM users WHERE id = $1`, [rows[0].user_id],

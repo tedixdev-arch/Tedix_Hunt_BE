@@ -121,6 +121,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '007_hunt_access_code' },
       { id: '008_hunt_rewards' },
       { id: '009_organizer_applications' },
+      { id: '010_organizer_approval' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
