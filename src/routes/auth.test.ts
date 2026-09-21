@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   consumeRefreshToken: vi.fn(),
   deleteRefreshToken: vi.fn(),
   organizationsForUser: vi.fn(),
+  activateOrganizer: vi.fn(),
 }));
 
 vi.mock('../models/User.js', () => ({
@@ -28,6 +29,9 @@ vi.mock('../models/RefreshToken.js', () => ({
 }));
 vi.mock('../models/Organization.js', () => ({
   Organization: { findByOwnerOrMember: mocks.organizationsForUser },
+}));
+vi.mock('../models/OrganizerApplication.js', () => ({
+  OrganizerApplications: { activate: mocks.activateOrganizer },
 }));
 
 import { createApp } from '../app.js';
@@ -57,6 +61,29 @@ describe('user account API', () => {
     mocks.consumeRefreshToken.mockResolvedValue(null);
     mocks.deleteRefreshToken.mockResolvedValue(false);
     mocks.organizationsForUser.mockResolvedValue([]);
+    mocks.activateOrganizer.mockResolvedValue(null);
+  });
+
+  it('activates an organizer once, hashes its password, and issues normal tokens', async () => {
+    const organizer = { ...registeredUser, role: 'organizer', roles: ['organizer'] };
+    mocks.activateOrganizer.mockResolvedValue(organizer);
+    const response = await request(app).post('/api/auth/organizer/activate')
+      .send({ token: 'one-time-token', password: 'secure-password' }).expect(200);
+
+    const [tokenHash, passwordHash] = mocks.activateOrganizer.mock.calls[0];
+    expect(tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(tokenHash).not.toBe('one-time-token');
+    await expect(bcrypt.compare('secure-password', passwordHash)).resolves.toBe(true);
+    expect(response.body.user.roles).toContain('organizer');
+    expect(response.body.tokens).toEqual({
+      accessToken: expect.any(String), refreshToken: expect.any(String),
+    });
+  });
+
+  it.each(['invalid', 'expired', 'already-used'])('rejects an %s activation token', async () => {
+    await request(app).post('/api/auth/organizer/activate')
+      .send({ token: 'unusable-token', password: 'secure-password' })
+      .expect(401, { error: 'invalid_or_expired_activation' });
   });
 
   it('hashes a registered user password and never returns its hash', async () => {

@@ -1,14 +1,38 @@
 import express from 'express';
 import {
   OrganizerApplications,
+  ApplicationNotPendingError,
   type OrganizationType,
+  type OrganizerApplicationStatus,
 } from '../models/OrganizerApplication.js';
+import { requireAuth, requireAnyRole, type AuthRequest } from '../middleware/auth.js';
 
 const router = express.Router();
 const allowedFields = new Set([
   'name', 'email', 'organizationName', 'organizationType', 'reason', 'phone',
 ]);
 const organizationTypes: OrganizationType[] = ['school', 'ngo', 'community', 'other'];
+const statuses: OrganizerApplicationStatus[] = ['pending', 'approved', 'rejected'];
+
+// Deliberately omits the activation token digest from every API representation.
+const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.findById>> & {}) => ({
+  id: application.id,
+  name: application.name,
+  email: application.email,
+  organizationName: application.organizationName,
+  organizationType: application.organizationType,
+  reason: application.reason,
+  phone: application.phone,
+  status: application.status,
+  createdAt: application.createdAt,
+  updatedAt: application.updatedAt,
+  reviewedAt: application.reviewedAt,
+  reviewedBy: application.reviewedBy,
+  userId: application.userId,
+  organizationId: application.organizationId,
+  activationExpiresAt: application.activationExpiresAt,
+  activatedAt: application.activatedAt,
+});
 
 /**
  * @openapi
@@ -90,6 +114,47 @@ router.post('/', async (request, response) => {
     status: application.status,
     createdAt: application.createdAt,
   });
+});
+
+router.get('/', requireAuth, requireAnyRole(['admin']), async (request, response) => {
+  const status = request.query.status;
+  if (status !== undefined && (typeof status !== 'string' || !statuses.includes(status as OrganizerApplicationStatus))) {
+    return response.status(400).json({ error: 'invalid_status' });
+  }
+  const applications = await OrganizerApplications.list(status as OrganizerApplicationStatus | undefined);
+  return response.json(applications.map(serialize));
+});
+
+router.post('/:id/approve', requireAuth, requireAnyRole(['admin']), async (request: AuthRequest, response) => {
+  if (typeof request.params.id !== 'string') return response.status(400).json({ error: 'invalid_input' });
+  try {
+    const result = await OrganizerApplications.approve(request.params.id, request.user!.id);
+    if (!result) return response.status(404).json({ error: 'application_not_found' });
+    return response.json({
+      application: serialize(result.application),
+      activationToken: result.activationToken,
+      activationExpiresAt: result.application.activationExpiresAt,
+    });
+  } catch (error) {
+    if (error instanceof ApplicationNotPendingError) {
+      return response.status(409).json({ error: 'application_already_decided' });
+    }
+    throw error;
+  }
+});
+
+router.post('/:id/reject', requireAuth, requireAnyRole(['admin']), async (request: AuthRequest, response) => {
+  if (typeof request.params.id !== 'string') return response.status(400).json({ error: 'invalid_input' });
+  try {
+    const application = await OrganizerApplications.reject(request.params.id, request.user!.id);
+    if (!application) return response.status(404).json({ error: 'application_not_found' });
+    return response.json({ application: serialize(application) });
+  } catch (error) {
+    if (error instanceof ApplicationNotPendingError) {
+      return response.status(409).json({ error: 'application_already_decided' });
+    }
+    throw error;
+  }
 });
 
 export const organizerApplicationsRouter = router;
