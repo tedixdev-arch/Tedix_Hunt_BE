@@ -21,13 +21,16 @@ From the repository root:
 After configuring `DATABASE_URL`, provision the first Admin from a trusted server shell:
 
 ```sh
-npm run bootstrap-admin -- --email admin@example.com --password '<strong-password>' --name 'Admin'
+TEDIX_BOOTSTRAP_ADMIN_PASSWORD='<strong-password>' \
+npm run bootstrap-admin -- --email admin@example.com --name 'Admin'
 ```
 
 The source command is intended for development and server operations where dev dependencies are
 installed. A built-only deployment can run the same command as
-`node dist/scripts/bootstrapAdmin.js --email ... --password ...`. If an Admin already exists, the
-command refuses to continue unless the trusted operator supplies `--allow-additional-admin`.
+`node dist/scripts/bootstrapAdmin.js --email ...`. The `--password` option remains available for
+development and tests, but avoid it on shared or production shells because command-line arguments
+may be exposed in shell history and process listings. If an Admin already exists, the command
+refuses to continue unless the trusted operator supplies `--allow-additional-admin`.
 
 ## Endpoints
 

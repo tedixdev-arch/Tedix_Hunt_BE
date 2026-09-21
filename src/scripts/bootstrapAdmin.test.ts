@@ -145,4 +145,37 @@ describe('bootstrapAdmin', () => {
       '--email', 'admin@example.com', '--password', 'long-enough', '--name', '   ',
     ])).toThrow('--name must be non-empty');
   });
+
+  it('accepts the environment password when --password is absent', () => {
+    const parsed = parseBootstrapArguments(
+      ['--email', 'admin@example.com'],
+      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'environment-password' },
+    );
+
+    expect(parsed.password).toBe('environment-password');
+  });
+
+  it('prefers an explicit --password over the environment', () => {
+    const parsed = parseBootstrapArguments(
+      ['--email', 'admin@example.com', '--password', 'explicit-password'],
+      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'environment-password' },
+    );
+
+    expect(parsed.password).toBe('explicit-password');
+  });
+
+  it('fails safely when neither password source is present', () => {
+    expect(() => parseBootstrapArguments(['--email', 'admin@example.com'], {}))
+      .toThrow('A password is required');
+
+    const secret = 'tiny';
+    try {
+      parseBootstrapArguments(
+        ['--email', 'admin@example.com'],
+        { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: secret },
+      );
+    } catch (error) {
+      expect(String(error)).not.toContain(secret);
+    }
+  });
 });

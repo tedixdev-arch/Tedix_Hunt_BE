@@ -27,8 +27,13 @@ export const validateBootstrapInput = (input: BootstrapAdminInput): BootstrapAdm
   if (typeof input.email !== 'string' || !input.email.trim()) {
     throw new BootstrapAdminError('--email is required and must be non-empty.');
   }
-  if (typeof input.password !== 'string' || input.password.length < 8) {
-    throw new BootstrapAdminError('--password is required and must be at least 8 characters.');
+  if (typeof input.password !== 'string' || !input.password) {
+    throw new BootstrapAdminError(
+      'A password is required. Provide --password or set TEDIX_BOOTSTRAP_ADMIN_PASSWORD.',
+    );
+  }
+  if (input.password.length < 8) {
+    throw new BootstrapAdminError('The Admin password must be at least 8 characters.');
   }
   if (input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim())) {
     throw new BootstrapAdminError('--name must be non-empty when supplied.');
@@ -97,8 +102,12 @@ export const bootstrapAdmin = async (
   }
 };
 
-export const parseBootstrapArguments = (args: string[]): BootstrapAdminInput => {
+export const parseBootstrapArguments = (
+  args: string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): BootstrapAdminInput => {
   const parsed: Partial<BootstrapAdminInput> = {};
+  let explicitPassword = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--allow-additional-admin') {
@@ -114,10 +123,15 @@ export const parseBootstrapArguments = (args: string[]): BootstrapAdminInput => 
       throw new BootstrapAdminError(`${argument} requires a value.`);
     }
     if (argument === '--email') parsed.email = value;
-    if (argument === '--password') parsed.password = value;
+    if (argument === '--password') {
+      parsed.password = value;
+      explicitPassword = true;
+    }
     if (argument === '--name') parsed.name = value;
     index += 1;
   }
+  // Command-line input wins for development/tests; server operators should prefer the environment.
+  if (!explicitPassword) parsed.password = environment.TEDIX_BOOTSTRAP_ADMIN_PASSWORD;
   return validateBootstrapInput(parsed as BootstrapAdminInput);
 };
 
