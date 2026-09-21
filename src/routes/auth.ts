@@ -2,7 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { signJwt } from '../lib/jwt.js';
-import { User, type IUser } from '../models/User.js';
+import { normalizeEmail, User, type IUser } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
 import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
@@ -175,6 +175,60 @@ router.post('/organizer/login', async (req, res) => {
 
   const tokens = await createTokens(user.id);
 
+  res.json({ user: publicUser(user), tokens });
+});
+
+/**
+ * @openapi
+ * /api/auth/admin/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Admin login
+ *     description: Authenticates users whose authoritative roles include the Admin capability.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200:
+ *         description: Authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user: { $ref: '#/components/schemas/User' }
+ *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
+ *       400:
+ *         description: Missing email or password
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ */
+router.post('/admin/login', async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
+
+  const user = await User.findOne({ email: normalizeEmail(email) });
+  if (!user || !user.roles.includes('admin')) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+
+  const ok = await bcrypt.compare(password, user.passwordHash ?? '');
+  if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+
+  const tokens = await createTokens(user.id);
   res.json({ user: publicUser(user), tokens });
 });
 
