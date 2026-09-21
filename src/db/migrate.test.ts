@@ -12,12 +12,14 @@ import { huntPilotOptionsMigration } from './migrations/006_hunt_pilot_options.j
 import { huntAccessCodeMigration } from './migrations/007_hunt_access_code.js';
 import { huntRewardsMigration } from './migrations/008_hunt_rewards.js';
 import { organizerApplicationsMigration } from './migrations/009_organizer_applications.js';
+import { organizerApprovalMigration } from './migrations/010_organizer_approval.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
   baselineMigration, userRolesMigration, coreHuntRecordsMigration,
   huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
   huntAccessCodeMigration, huntRewardsMigration, organizerApplicationsMigration,
+  organizerApprovalMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -68,6 +70,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
       '007_hunt_access_code', '008_hunt_rewards', '009_organizer_applications',
+      '010_organizer_approval',
     ]);
 
     const existing = await client.query(
@@ -118,6 +121,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '007_hunt_access_code' },
       { id: '008_hunt_rewards' },
       { id: '009_organizer_applications' },
+      { id: '010_organizer_approval' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id

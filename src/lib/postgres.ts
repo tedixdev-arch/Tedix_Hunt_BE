@@ -52,9 +52,19 @@ CREATE TABLE IF NOT EXISTS organizer_applications (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (
     status IN ('pending', 'approved', 'rejected')
   ),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id),
+  user_id UUID REFERENCES users(id),
+  organization_id UUID REFERENCES organizations(id),
+  activation_token_hash TEXT,
+  activation_expires_at TIMESTAMPTZ,
+  activated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS organizer_applications_activation_token_hash_key
+  ON organizer_applications (activation_token_hash) WHERE activation_token_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS hunts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
