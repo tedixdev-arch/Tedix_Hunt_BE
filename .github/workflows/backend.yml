@@ -52,6 +52,7 @@ jobs:
       DEPLOY_HOST: tedixhunt-be-dev.anainfo.ai
       DEPLOY_USER: deploy
       DEPLOY_PATH: /var/www/Tedix_Hunt_BE
+      WEB_ORIGIN: https://tedixhunt-fe-dev.anainfo.ai
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH
