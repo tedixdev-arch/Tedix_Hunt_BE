@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../models/User.js', () => ({
+  normalizeEmail: (email: string) => email.trim().toLowerCase(),
   User: {
     create: mocks.createUser,
     findOne: mocks.findUser,
@@ -284,6 +285,102 @@ describe('user account API', () => {
         accessToken: expect.any(String),
         refreshToken: expect.any(String),
       });
+    });
+  });
+
+  describe('admin login', () => {
+    const password = 'admin-password';
+    const comparePassword = vi.spyOn(bcrypt, 'compare');
+
+    const admin = async (roles: string[], role = 'participant') => ({
+      ...registeredUser,
+      role,
+      roles,
+      passwordHash: await bcrypt.hash(password, 4),
+    });
+
+    it('authenticates an authoritative admin and returns the public user and normal tokens', async () => {
+      const user = await admin(['participant', 'admin']);
+      mocks.findUser.mockResolvedValue(user);
+
+      const response = await request(app)
+        .post('/api/auth/admin/login')
+        .send({ email: ' ADMIN@EXAMPLE.COM ', password })
+        .expect(200);
+
+      expect(mocks.findUser).toHaveBeenCalledWith({ email: 'admin@example.com' });
+      expect(response.body.user).toMatchObject({
+        id: user.id,
+        role: 'participant',
+        roles: ['participant', 'admin'],
+      });
+      expect(response.body.user).not.toHaveProperty('passwordHash');
+      expect(response.body.tokens).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+      });
+      expect(mocks.createRefreshToken).toHaveBeenCalledWith(
+        expect.objectContaining({ user: user.id, token: response.body.tokens.refreshToken }),
+      );
+    });
+
+    it.each([
+      ['legacy admin without an authoritative admin role', ['participant'], 'admin'],
+      ['participant', ['participant'], 'participant'],
+      ['organizer', ['organizer'], 'participant'],
+      ['creator', ['creator'], 'creator'],
+    ])('rejects a %s account', async (_label, roles, role) => {
+      mocks.findUser.mockResolvedValue(await admin(roles, role));
+
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send({ email: registeredUser.email, password })
+        .expect(401, { error: 'invalid_credentials' });
+
+      expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('uses the same invalid-credentials response for wrong passwords and unknown accounts', async () => {
+      mocks.findUser
+        .mockResolvedValueOnce(await admin(['admin']))
+        .mockResolvedValueOnce(null);
+
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send({ email: registeredUser.email, password: 'wrong-password' })
+        .expect(401, { error: 'invalid_credentials' });
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send({ email: 'unknown@example.com', password })
+        .expect(401, { error: 'invalid_credentials' });
+    });
+
+    it.each([
+      [{ password }],
+      [{ email: registeredUser.email }],
+    ])('rejects missing credentials with invalid_input', async (body) => {
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send(body)
+        .expect(400, { error: 'invalid_input' });
+
+      expect(mocks.findUser).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ email: {}, password }],
+      [{ email: 42, password }],
+      [{ email: registeredUser.email, password: {} }],
+      [{ email: registeredUser.email, password: 42 }],
+      [{ email: '   ', password }],
+    ])('rejects malformed credential values with invalid_input', async (body) => {
+      await request(app)
+        .post('/api/auth/admin/login')
+        .send(body)
+        .expect(400, { error: 'invalid_input' });
+
+      expect(mocks.findUser).not.toHaveBeenCalled();
+      expect(comparePassword).not.toHaveBeenCalled();
     });
   });
 
