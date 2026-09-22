@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   deleteRefreshToken: vi.fn(),
   organizationsForUser: vi.fn(),
   activateOrganizer: vi.fn(),
+  activateAdmin: vi.fn(),
 }));
 
 vi.mock('../models/User.js', () => ({
@@ -35,6 +36,11 @@ vi.mock('../models/Organization.js', () => ({
 }));
 vi.mock('../models/OrganizerApplication.js', () => ({
   OrganizerApplications: { activate: mocks.activateOrganizer },
+}));
+vi.mock('../models/AdminProvisioning.js', () => ({
+  AdminProvisioning: { activate: mocks.activateAdmin, list: vi.fn(), provision: vi.fn() },
+  GuestPromotionError: class extends Error {},
+  ActivationAlreadyPendingError: class extends Error {},
 }));
 
 import { createApp } from '../app.js';
@@ -65,6 +71,7 @@ describe('user account API', () => {
     mocks.deleteRefreshToken.mockResolvedValue(false);
     mocks.organizationsForUser.mockResolvedValue([]);
     mocks.activateOrganizer.mockResolvedValue(null);
+    mocks.activateAdmin.mockResolvedValue(null);
     mocks.changePasswordAndRevokeSessions.mockResolvedValue(undefined);
   });
 
@@ -82,6 +89,26 @@ describe('user account API', () => {
     expect(response.body.tokens).toEqual({
       accessToken: expect.any(String), refreshToken: expect.any(String),
     });
+  });
+
+  it('activates an Admin once with a hashed password and normal session tokens', async () => {
+    const admin = { ...registeredUser, passwordHash: '$stored', roles: ['participant', 'admin'] };
+    mocks.activateAdmin.mockResolvedValue(admin);
+    const response = await request(app).post('/api/auth/admin/activate')
+      .send({ token: 'admin-one-time-token', password: 'secure-password' }).expect(200);
+    const [tokenHash, passwordHash] = mocks.activateAdmin.mock.calls[0];
+    expect(tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(tokenHash).not.toBe('admin-one-time-token');
+    await expect(bcrypt.compare('secure-password', passwordHash)).resolves.toBe(true);
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+    expect(response.body.user.roles).toContain('admin');
+    expect(response.body.tokens).toEqual({ accessToken: expect.any(String), refreshToken: expect.any(String) });
+  });
+
+  it.each(['invalid', 'expired', 'consumed'])('uniformly rejects an %s Admin activation', async () => {
+    await request(app).post('/api/auth/admin/activate')
+      .send({ token: 'unusable-token', password: 'secure-password' })
+      .expect(401, { error: 'invalid_or_expired_activation' });
   });
 
   it.each(['invalid', 'expired', 'already-used'])('rejects an %s activation token', async () => {

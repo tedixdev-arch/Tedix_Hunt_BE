@@ -8,6 +8,7 @@ import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { OrganizerApplications } from '../models/OrganizerApplication.js';
+import { AdminProvisioning } from '../models/AdminProvisioning.js';
 
 const router = express.Router();
 const PASSWORD_BCRYPT_ROUNDS = 10;
@@ -59,6 +60,41 @@ router.post('/organizer/activate', async (req, res) => {
   const user = await OrganizerApplications.activate(tokenHash, passwordHash);
   if (!user) return res.status(401).json({ error: 'invalid_or_expired_activation' });
 
+  const tokens = await createTokens(user.id);
+  return res.json({ user: publicUser(user), tokens });
+});
+
+/**
+ * @openapi
+ * /api/auth/admin/activate:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Activate a provisioned Admin identity
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, password]
+ *             properties:
+ *               token: { type: string }
+ *               password: { type: string, format: password, minLength: 8 }
+ *     responses:
+ *       200:
+ *         description: Activated and authenticated
+ *       401:
+ *         description: Invalid, expired, or consumed activation credential
+ */
+router.post('/admin/activate', async (req, res) => {
+  const { token, password } = req.body ?? {};
+  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
+  const user = await AdminProvisioning.activate(tokenHash, passwordHash);
+  if (!user) return res.status(401).json({ error: 'invalid_or_expired_activation' });
   const tokens = await createTokens(user.id);
   return res.json({ user: publicUser(user), tokens });
 });
