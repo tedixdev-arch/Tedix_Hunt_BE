@@ -22,7 +22,6 @@ export const createApp = (options: CreateAppOptions = {}) => {
   const app = express();
 
   app.use(express.json());
-
   if (environment.webOrigin) {
     app.use(cors({ origin: environment.webOrigin }));
   }
