@@ -121,6 +121,21 @@ export const User = {
     );
     return rows[0] ? mapRow(rows[0]) : null;
   },
+
+  async changePasswordAndRevokeSessions(id: string, passwordHash: string): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
 };
 
 export { USER_ROLES } from './UserRole.js';

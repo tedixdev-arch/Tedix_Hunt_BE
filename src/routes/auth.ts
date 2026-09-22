@@ -10,6 +10,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { OrganizerApplications } from '../models/OrganizerApplication.js';
 
 const router = express.Router();
+const PASSWORD_BCRYPT_ROUNDS = 10;
 
 const publicUser = (user: IUser) => ({
   id: user.id,
@@ -54,7 +55,7 @@ router.post('/organizer/activate', async (req, res) => {
 
   // Match only the SHA-256 digest; plaintext activation credentials are never persisted.
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
   const user = await OrganizerApplications.activate(tokenHash, passwordHash);
   if (!user) return res.status(401).json({ error: 'invalid_or_expired_activation' });
 
@@ -300,7 +301,7 @@ router.post('/participant/register', async (req, res) => {
     const exists = await User.findOne({ email });
     if (exists) return res.status(409).json({ error: 'email_taken' });
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
     try {
       const user = await User.create({ email, passwordHash, role: 'participant', name });
       const tokens = await createTokens(user.id);
@@ -474,6 +475,31 @@ router.post('/logout', async (req, res) => {
 
   await RefreshToken.deleteByToken(refreshToken);
   return res.status(200).json({ success: true });
+});
+
+/** Changes only the authenticated account's password and revokes all of its refresh sessions. */
+router.post('/change-password', requireAuth, async (req: AuthRequest, res) => {
+  const { currentPassword, newPassword } = req.body ?? {};
+  if (
+    typeof currentPassword !== 'string'
+    || currentPassword.length === 0
+    || typeof newPassword !== 'string'
+    || newPassword.length < 8
+  ) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+
+  const user = req.user!;
+  if (user.isGuest || !user.passwordHash) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+
+  const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!matches) return res.status(401).json({ error: 'invalid_credentials' });
+
+  const passwordHash = await bcrypt.hash(newPassword, PASSWORD_BCRYPT_ROUNDS);
+  await User.changePasswordAndRevokeSessions(user.id, passwordHash);
+  return res.json({ message: 'Password changed successfully.' });
 });
 
 /**
