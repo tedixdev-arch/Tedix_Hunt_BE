@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --inspect src/server.ts",
     "build": "tsc -b tsconfig.json",
     "bootstrap-admin": "tsx src/scripts/bootstrapAdmin.ts",
     "migrate": "node dist/db/migrate.js",
