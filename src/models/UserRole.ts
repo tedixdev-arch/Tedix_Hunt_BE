@@ -2,6 +2,7 @@ import { pool } from '../lib/postgres.js';
 
 export type UserRole = 'participant' | 'organizer' | 'creator' | 'admin';
 export const USER_ROLES: readonly UserRole[] = ['participant', 'organizer', 'creator', 'admin'];
+export class LastAdminError extends Error {}
 
 function assertRole(role: string): asserts role is UserRole {
   if (!USER_ROLES.includes(role as UserRole)) throw new Error('invalid_user_role');
@@ -36,6 +37,33 @@ export const UserRoles = {
 
   async removeRole(userId: string, role: UserRole): Promise<void> {
     assertRole(role);
-    await pool.query('DELETE FROM user_roles WHERE user_id = $1 AND role = $2', [userId, role]);
+    if (role !== 'admin') {
+      await pool.query('DELETE FROM user_roles WHERE user_id = $1 AND role = $2', [userId, role]);
+      return;
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Any future role-removal/deactivation flow must use this helper. The lock serializes
+      // final-Admin checks; an active Admin is non-guest and has usable credentials.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('active-admin-invariant'))");
+      const result = await client.query(
+        `SELECT count(*)::int AS count FROM user_roles ur JOIN users u ON u.id = ur.user_id
+         WHERE ur.role = 'admin' AND u.is_guest = FALSE AND u.password_hash IS NOT NULL`,
+      );
+      const target = await client.query(
+        `SELECT 1 FROM user_roles ur JOIN users u ON u.id = ur.user_id
+         WHERE ur.user_id = $1 AND ur.role = 'admin'
+           AND u.is_guest = FALSE AND u.password_hash IS NOT NULL`, [userId],
+      );
+      if (target.rows[0] && result.rows[0].count <= 1) throw new LastAdminError();
+      await client.query("DELETE FROM user_roles WHERE user_id = $1 AND role = 'admin'", [userId]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };

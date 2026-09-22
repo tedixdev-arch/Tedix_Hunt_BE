@@ -51,6 +51,22 @@ const options: swaggerJsdoc.Options = {
             organizations: { type: 'array', items: { type: 'string' } },
           },
         },
+        AdminUser: {
+          type: 'object',
+          required: ['id', 'email', 'roles', 'isGuest', 'createdAt', 'activationState'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            email: { type: 'string', format: 'email' },
+            name: { type: 'string', nullable: true },
+            roles: {
+              type: 'array',
+              items: { type: 'string', enum: ['participant', 'organizer', 'creator', 'admin'] },
+            },
+            isGuest: { type: 'boolean' },
+            createdAt: { type: 'string', format: 'date-time' },
+            activationState: { type: 'string', enum: ['not_required', 'pending', 'expired'] },
+          },
+        },
         Organization: {
           type: 'object',
           properties: {
