@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { query } = vi.hoisted(() => ({ query: vi.fn() }));
+const { query, connect, clientQuery, release } = vi.hoisted(() => ({
+  query: vi.fn(),
+  connect: vi.fn(),
+  clientQuery: vi.fn(),
+  release: vi.fn(),
+}));
 
-vi.mock('../lib/postgres.js', () => ({ pool: { query } }));
+vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
 import { User, USER_ROLES } from './User.js';
 
@@ -19,7 +24,11 @@ const storedRow = {
 };
 
 describe('User persistence', () => {
-  beforeEach(() => query.mockReset());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    connect.mockResolvedValue({ query: clientQuery, release });
+    clientQuery.mockResolvedValue({ rows: [] });
+  });
 
   it('creates a registered user with a normalized email and password hash', async () => {
     query.mockResolvedValue({ rows: [storedRow] });
@@ -71,5 +80,34 @@ describe('User persistence', () => {
       'invalid_user_role',
     );
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('atomically changes the password and removes only that user\'s refresh sessions', async () => {
+    await User.changePasswordAndRevokeSessions(storedRow.id, 'new-bcrypt-hash');
+
+    expect(clientQuery.mock.calls).toEqual([
+      ['BEGIN'],
+      ['UPDATE users SET password_hash = $1 WHERE id = $2', ['new-bcrypt-hash', storedRow.id]],
+      ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
+      ['COMMIT'],
+    ]);
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['password update', 1],
+    ['refresh-token deletion', 2],
+  ])('rolls back if the %s fails', async (_label, failingCall) => {
+    clientQuery.mockImplementation(async () => {
+      if (clientQuery.mock.calls.length === failingCall + 1) throw new Error('database failure');
+      return { rows: [] };
+    });
+
+    await expect(
+      User.changePasswordAndRevokeSessions(storedRow.id, 'new-bcrypt-hash'),
+    ).rejects.toThrow('database failure');
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
+    expect(release).toHaveBeenCalledOnce();
   });
 });

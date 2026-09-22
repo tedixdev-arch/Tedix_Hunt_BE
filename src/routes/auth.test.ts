@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createUser: vi.fn(),
   findUser: vi.fn(),
   findUserById: vi.fn(),
+  changePasswordAndRevokeSessions: vi.fn(),
   createRefreshToken: vi.fn(),
   consumeRefreshToken: vi.fn(),
   deleteRefreshToken: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('../models/User.js', () => ({
     create: mocks.createUser,
     findOne: mocks.findUser,
     findById: mocks.findUserById,
+    changePasswordAndRevokeSessions: mocks.changePasswordAndRevokeSessions,
   },
 }));
 vi.mock('../models/RefreshToken.js', () => ({
@@ -63,6 +65,7 @@ describe('user account API', () => {
     mocks.deleteRefreshToken.mockResolvedValue(false);
     mocks.organizationsForUser.mockResolvedValue([]);
     mocks.activateOrganizer.mockResolvedValue(null);
+    mocks.changePasswordAndRevokeSessions.mockResolvedValue(undefined);
   });
 
   it('activates an organizer once, hashes its password, and issues normal tokens', async () => {
@@ -429,6 +432,82 @@ describe('user account API', () => {
     });
     expect(response.body).not.toHaveProperty('passwordHash');
     expect(response.body).not.toHaveProperty('refreshToken');
+  });
+
+  describe('change password', () => {
+    const currentPassword = 'current-password';
+    const newPassword = 'replacement-password';
+
+    const authenticatedRequest = (user: any = registeredUser, body: Record<string, unknown> = {
+      currentPassword,
+      newPassword,
+    }) => {
+      mocks.findUserById.mockResolvedValue(user);
+      const token = signJwt({ sub: user.id, type: 'access' });
+      return request(app).post('/api/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    };
+
+    it('changes the authenticated user password to a bcrypt hash without returning credentials', async () => {
+      const passwordHash = await bcrypt.hash(currentPassword, 4);
+      const response = await authenticatedRequest({ ...registeredUser, passwordHash }).expect(200);
+
+      expect(response.body).toEqual({ message: 'Password changed successfully.' });
+      const [userId, newHash] = mocks.changePasswordAndRevokeSessions.mock.calls[0];
+      expect(userId).toBe(registeredUser.id);
+      expect(newHash).not.toBe(newPassword);
+      await expect(bcrypt.compare(newPassword, newHash)).resolves.toBe(true);
+      await expect(bcrypt.compare(currentPassword, newHash)).resolves.toBe(false);
+      expect(JSON.stringify(response.body)).not.toContain(currentPassword);
+      expect(JSON.stringify(response.body)).not.toContain(newPassword);
+    });
+
+    it('rejects wrong current credentials without modifying the password', async () => {
+      const passwordHash = await bcrypt.hash(currentPassword, 4);
+      const response = await authenticatedRequest(
+        { ...registeredUser, passwordHash },
+        { currentPassword: 'wrong-password', newPassword },
+      ).expect(401, { error: 'invalid_credentials' });
+
+      expect(mocks.changePasswordAndRevokeSessions).not.toHaveBeenCalled();
+      expect(JSON.stringify(response.body)).not.toContain('wrong-password');
+      expect(JSON.stringify(response.body)).not.toContain(newPassword);
+    });
+
+    it.each([
+      ['guest', { ...registeredUser, isGuest: true }],
+      ['passwordless user', { ...registeredUser, passwordHash: null }],
+    ])('rejects a %s with the same safe error', async (_label, user) => {
+      await authenticatedRequest(user).expect(401, { error: 'invalid_credentials' });
+      expect(mocks.changePasswordAndRevokeSessions).not.toHaveBeenCalled();
+    });
+
+    it('cannot select another account with request fields', async () => {
+      const passwordHash = await bcrypt.hash(currentPassword, 4);
+      await authenticatedRequest(
+        { ...registeredUser, passwordHash },
+        { currentPassword, newPassword, userId: 'another-user', email: 'other@example.com', role: 'admin' },
+      ).expect(200);
+
+      expect(mocks.changePasswordAndRevokeSessions).toHaveBeenCalledWith(
+        registeredUser.id,
+        expect.any(String),
+      );
+    });
+
+    it.each([
+      [{ currentPassword: '', newPassword }],
+      [{ currentPassword: 123, newPassword }],
+      [{ currentPassword, newPassword: 'short' }],
+      [{ currentPassword, newPassword: 123 }],
+    ])('rejects invalid input safely', async (body) => {
+      const response = await authenticatedRequest(registeredUser, body).expect(400, { error: 'invalid_input' });
+      expect(mocks.changePasswordAndRevokeSessions).not.toHaveBeenCalled();
+      for (const password of [body.currentPassword, body.newPassword]) {
+        if (String(password)) expect(JSON.stringify(response.body)).not.toContain(String(password));
+      }
+    });
   });
 
   it('rejects malformed and expired access tokens without leaking JWT details', async () => {
