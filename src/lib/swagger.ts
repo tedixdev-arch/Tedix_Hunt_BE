@@ -149,6 +149,17 @@ const options: swaggerJsdoc.Options = {
             },
           ],
         },
+        HuntContext: {
+          type: 'object',
+          required: ['huntId', 'huntName', 'huntStatus', 'participant', 'supervisor'],
+          properties: {
+            huntId: { type: 'string', format: 'uuid' },
+            huntName: { type: 'string' },
+            huntStatus: { type: 'string', enum: ['active', 'paused', 'published', 'draft', 'finished', 'cancelled'] },
+            participant: { type: 'boolean', description: 'True when the user is enrolled in this Hunt.' },
+            supervisor: { type: 'boolean', description: 'True when the user has this Hunt-specific supervisor role.' },
+          },
+        },
         HuntAccess: {
           type: 'object',
           required: ['huntId', 'code'],
