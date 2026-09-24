@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   professionalProvision: vi.fn(), createRefreshToken: vi.fn(), setAccountStatus: vi.fn(),
   updateIdentity: vi.fn(), findOne: vi.fn(),
   replaceNonAdminPasswordAndRevokeSessions: vi.fn(),
+  deleteControlled: vi.fn(),
   assignRole: vi.fn(), removeRole: vi.fn(),
 }));
 vi.mock('../models/UserRole.js', () => ({
@@ -25,10 +26,12 @@ vi.mock('../models/ProfessionalProvisioning.js', () => {
 vi.mock('../models/User.js', () => ({
   AdminPasswordChangeNotAllowedError: class AdminPasswordChangeNotAllowedError extends Error {},
   LastActiveAdminError: class LastActiveAdminError extends Error {},
+  UserHasProtectedDependenciesError: class UserHasProtectedDependenciesError extends Error {},
   User: {
     findById: mocks.findById, findOne: mocks.findOne,
     setAccountStatus: mocks.setAccountStatus, updateIdentity: mocks.updateIdentity,
     replaceNonAdminPasswordAndRevokeSessions: mocks.replaceNonAdminPasswordAndRevokeSessions,
+    deleteControlled: mocks.deleteControlled,
   },
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
 }));
@@ -68,6 +71,7 @@ describe('Admin user provisioning API', () => {
     mocks.updateIdentity.mockImplementation(async (_id, update) => user(['participant'], update));
     mocks.replaceNonAdminPasswordAndRevokeSessions.mockImplementation(async (id, passwordHash) =>
       user(['participant'], { id, passwordHash }));
+    mocks.deleteControlled.mockResolvedValue(true);
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -180,6 +184,37 @@ describe('Admin user provisioning API', () => {
     const { LastActiveAdminError } = await import('../models/User.js');
     mocks.setAccountStatus.mockRejectedValue(new LastActiveAdminError());
     await request(app).post('/api/admin/users/last-admin/block')
+      .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
+  });
+
+  it('deletes a dependency-free identity and returns no sensitive data', async () => {
+    const response = await request(app).delete('/api/admin/users/target-id')
+      .set('Authorization', bearer()).expect(200);
+    expect(mocks.deleteControlled).toHaveBeenCalledWith('target-id');
+    expect(response.body).toEqual({ status: 'deleted' });
+  });
+
+  it('rejects self-delete before persistence and non-Admin callers', async () => {
+    await request(app).delete(`/api/admin/users/${user([]).id}`)
+      .set('Authorization', bearer()).expect(409, { error: 'self_delete_not_allowed' });
+    mocks.findById.mockResolvedValue(user(['participant']));
+    await request(app).delete('/api/admin/users/target-id')
+      .set('Authorization', bearer()).expect(403);
+    expect(mocks.deleteControlled).not.toHaveBeenCalled();
+  });
+
+  it('maps missing, protected-dependency, and final-active-Admin deletion results', async () => {
+    mocks.deleteControlled.mockResolvedValueOnce(false);
+    await request(app).delete('/api/admin/users/missing')
+      .set('Authorization', bearer()).expect(404, { error: 'user_not_found' });
+    const { UserHasProtectedDependenciesError, LastActiveAdminError } =
+      await import('../models/User.js');
+    mocks.deleteControlled.mockRejectedValueOnce(new UserHasProtectedDependenciesError());
+    await request(app).delete('/api/admin/users/dependent')
+      .set('Authorization', bearer())
+      .expect(409, { error: 'user_has_protected_dependencies' });
+    mocks.deleteControlled.mockRejectedValueOnce(new LastActiveAdminError());
+    await request(app).delete('/api/admin/users/final-admin')
       .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
   });
 

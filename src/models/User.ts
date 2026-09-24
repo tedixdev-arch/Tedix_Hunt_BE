@@ -61,6 +61,7 @@ const mapRow = (row: any): IUser => ({
 
 export class LastActiveAdminError extends Error {}
 export class AdminPasswordChangeNotAllowedError extends Error {}
+export class UserHasProtectedDependenciesError extends Error {}
 
 export const User = {
   async create(input: CreateUserInput): Promise<IUser> {
@@ -245,6 +246,65 @@ export const User = {
       )).rows[0];
       await client.query('COMMIT');
       return mapRow(row);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async deleteControlled(id: string): Promise<boolean> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Share the established invariant lock with Admin blocking and role removal.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('active-admin-invariant'))");
+      const target = (await client.query(
+        `SELECT users.*, ARRAY(
+           SELECT role FROM user_roles WHERE user_id = users.id ORDER BY role
+         ) roles FROM users WHERE id = $1 FOR UPDATE`, [id],
+      )).rows[0];
+      if (!target) {
+        await client.query('COMMIT');
+        return false;
+      }
+
+      // An active Admin may be removed only while another active Admin remains.
+      if (target.account_status === 'active' && target.roles.includes('admin')) {
+        const activeAdmins = await client.query(
+          `SELECT count(*)::int AS count
+           FROM user_roles ur JOIN users u ON u.id = ur.user_id
+           WHERE ur.role = 'admin' AND u.account_status = 'active'`,
+        );
+        if (activeAdmins.rows[0].count <= 1) throw new LastActiveAdminError();
+      }
+
+      // These existing relationships are business/history records. Some FKs cascade, but
+      // deletion must never use those cascades to erase the records with the identity.
+      const dependencies = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM organizations WHERE owner_id = $1
+           UNION ALL SELECT 1 FROM organization_members WHERE user_id = $1
+           UNION ALL SELECT 1 FROM hunts WHERE created_by_user_id = $1
+           UNION ALL SELECT 1 FROM hunt_participants WHERE user_id = $1
+           UNION ALL SELECT 1 FROM hunt_roles WHERE user_id = $1
+           UNION ALL SELECT 1 FROM organizer_applications
+             WHERE user_id = $1 OR reviewed_by = $1
+           UNION ALL SELECT 1 FROM professional_activation_tokens
+             WHERE created_by = $1 AND user_id <> $1
+         ) AS present`, [id],
+      );
+      if (dependencies.rows[0].present) throw new UserHasProtectedDependenciesError();
+
+      // Account-only records are intentionally removed inside the identity transaction rather
+      // than relying on FK cascades. A failure at any step rolls the complete deletion back.
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM professional_activation_tokens WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM user_roles WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM users WHERE id = $1', [id]);
+      await client.query('COMMIT');
+      return true;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
