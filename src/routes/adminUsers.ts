@@ -6,6 +6,7 @@ import {
   GuestPromotionError,
 } from '../models/AdminProvisioning.js';
 import { LastActiveAdminError, normalizeEmail, User, type IUser } from '../models/User.js';
+import { LastAdminError, UserRoles, type UserRole } from '../models/UserRole.js';
 import {
   ProfessionalActivationAlreadyPendingError,
   ProfessionalGuestPromotionError,
@@ -22,6 +23,10 @@ const safeUser = (user: IUser) => ({
 
 const isUniqueViolation = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
+
+type ManageableRole = Extract<UserRole, 'admin' | 'organizer' | 'creator'>;
+const isManageableRole = (role: string): role is ManageableRole =>
+  role === 'admin' || role === 'organizer' || role === 'creator';
 
 const changeStatus = (status: 'active' | 'blocked') =>
   async (request: AuthRequest, response: express.Response) => {
@@ -183,6 +188,71 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (request, response
  */
 router.post('/:id/block', requireAuth, requireRole('admin'), changeStatus('blocked'));
 router.post('/:id/unblock', requireAuth, requireRole('admin'), changeStatus('active'));
+
+/**
+ * @openapi
+ * /api/admin/users/{id}/roles/{role}:
+ *   post:
+ *     tags: [Admin Users]
+ *     summary: Grant one global platform capability
+ *     description: Idempotently grants a role in user_roles. Organizer grants do not create organizations or memberships, and grants never establish credentials or create Creator records.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *       - { in: path, name: role, required: true, schema: { type: string, enum: [admin, organizer, creator] } }
+ *     responses:
+ *       200: { description: Updated safe identity representation }
+ *       400: { description: Role is not globally manageable }
+ *       403: { description: Admin capability required }
+ *       404: { description: Identity not found }
+ *       409: { description: Conflict }
+ *   delete:
+ *     tags: [Admin Users]
+ *     summary: Remove one global platform capability
+ *     description: Idempotently removes a role from user_roles while preserving all other identity and business data. An Admin cannot remove their own Admin capability, and the final active Admin is protected.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *       - { in: path, name: role, required: true, schema: { type: string, enum: [admin, organizer, creator] } }
+ *     responses:
+ *       200: { description: Updated safe identity representation }
+ *       400: { description: Role is not globally manageable }
+ *       403: { description: Admin capability required }
+ *       404: { description: Identity not found }
+ *       409: { description: Self Admin removal or final active Admin removal is forbidden }
+ */
+router.post('/:id/roles/:role', requireAuth, requireRole('admin'), async (request: AuthRequest, response) => {
+  const targetId = String(request.params.id);
+  const role = String(request.params.role);
+  if (!isManageableRole(role)) return response.status(400).json({ error: 'invalid_role' });
+
+  // Role ownership is independent of account status, credentials, and domain provisioning.
+  if (!await User.findById(targetId)) return response.status(404).json({ error: 'user_not_found' });
+  await UserRoles.assignRole(targetId, role);
+  const user = await User.findById(targetId);
+  return response.json({ user: safeUser(user!) });
+});
+
+router.delete('/:id/roles/:role', requireAuth, requireRole('admin'), async (request: AuthRequest, response) => {
+  const targetId = String(request.params.id);
+  const role = String(request.params.role);
+  if (!isManageableRole(role)) return response.status(400).json({ error: 'invalid_role' });
+  // Self-removal is a distinct conflict even when other active Admins exist.
+  if (role === 'admin' && targetId === request.user!.id) {
+    return response.status(409).json({ error: 'self_admin_removal_not_allowed' });
+  }
+  if (!await User.findById(targetId)) return response.status(404).json({ error: 'user_not_found' });
+  try {
+    await UserRoles.removeRole(targetId, role);
+  } catch (error) {
+    if (error instanceof LastAdminError) {
+      return response.status(409).json({ error: 'last_active_admin' });
+    }
+    throw error;
+  }
+  const user = await User.findById(targetId);
+  return response.json({ user: safeUser(user!) });
+});
 
 /**
  * @openapi

@@ -26,7 +26,7 @@ export const UserRoles = {
     return (result.rowCount ?? result.rows.length) > 0;
   },
 
-  // These mutations are intentionally internal-only. B1 exposes no public role-assignment route.
+  // The unique user_id/role key makes grants idempotent without replacing any other capability.
   async assignRole(userId: string, role: UserRole): Promise<void> {
     assertRole(role);
     await pool.query(
