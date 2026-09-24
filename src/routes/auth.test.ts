@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   organizationsForUser: vi.fn(),
   activateOrganizer: vi.fn(),
   activateAdmin: vi.fn(),
+  activateProfessional: vi.fn(),
 }));
 
 vi.mock('../models/User.js', () => ({
@@ -41,6 +42,11 @@ vi.mock('../models/AdminProvisioning.js', () => ({
   AdminProvisioning: { activate: mocks.activateAdmin, list: vi.fn(), provision: vi.fn() },
   GuestPromotionError: class extends Error {},
   ActivationAlreadyPendingError: class extends Error {},
+}));
+vi.mock('../models/ProfessionalProvisioning.js', () => ({
+  ProfessionalProvisioning: { activate: mocks.activateProfessional, list: vi.fn(), provision: vi.fn() },
+  ProfessionalGuestPromotionError: class extends Error {},
+  ProfessionalActivationAlreadyPendingError: class extends Error {},
 }));
 
 import { createApp } from '../app.js';
@@ -72,7 +78,20 @@ describe('user account API', () => {
     mocks.organizationsForUser.mockResolvedValue([]);
     mocks.activateOrganizer.mockResolvedValue(null);
     mocks.activateAdmin.mockResolvedValue(null);
+    mocks.activateProfessional.mockResolvedValue(null);
     mocks.changePasswordAndRevokeSessions.mockResolvedValue(undefined);
+  });
+
+  it.each(['organizer', 'creator'] as const)('directly activates a provisioned %s', async (role) => {
+    mocks.activateProfessional.mockResolvedValue({ ...registeredUser, roles: [role] });
+    const path = role === 'organizer' ? '/api/auth/organizer/activate-direct' : '/api/auth/creator/activate';
+    const response = await request(app).post(path)
+      .send({ token: `${role}-token`, password: 'secure-password' }).expect(200);
+    expect(mocks.activateProfessional).toHaveBeenCalledWith(
+      role, expect.stringMatching(/^[a-f0-9]{64}$/), expect.any(String),
+    );
+    expect(response.body.user.roles).toEqual([role]);
+    expect(response.body.tokens.accessToken).toEqual(expect.any(String));
   });
 
   it('activates an organizer once, hashes its password, and issues normal tokens', async () => {

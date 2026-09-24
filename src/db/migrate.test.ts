@@ -14,6 +14,7 @@ import { huntRewardsMigration } from './migrations/008_hunt_rewards.js';
 import { organizerApplicationsMigration } from './migrations/009_organizer_applications.js';
 import { organizerApprovalMigration } from './migrations/010_organizer_approval.js';
 import { professionalActivationTokensMigration } from './migrations/011_professional_activation_tokens.js';
+import { professionalActivationPurposesMigration } from './migrations/012_professional_activation_purposes.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -21,6 +22,7 @@ const migrations = [
   huntGeneralSetupMigration, huntTemplateSelectionMigration, huntPilotOptionsMigration,
   huntAccessCodeMigration, huntRewardsMigration, organizerApplicationsMigration,
   organizerApprovalMigration, professionalActivationTokensMigration,
+  professionalActivationPurposesMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -68,11 +70,28 @@ describeWithDatabase('PostgreSQL migrations', () => {
                '00000000-0000-0000-0000-000000000090',
                '00000000-0000-0000-0000-000000000002', 'Existing Hunt', 'draft')`,
     );
-    await expect(runMigrations(client, migrations)).resolves.toEqual([
+    await expect(runMigrations(client, migrations.slice(0, -1))).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
       '007_hunt_access_code', '008_hunt_rewards', '009_organizer_applications',
       '010_organizer_approval', '011_professional_activation_tokens',
     ]);
+    await client.query(
+      `INSERT INTO professional_activation_tokens
+         (user_id, token_hash, purpose, expires_at, created_by)
+       VALUES ('00000000-0000-0000-0000-000000000001', 'pre-012-admin',
+               'admin_activation', now() + interval '1 day',
+               '00000000-0000-0000-0000-000000000002')`,
+    );
+    await expect(runMigrations(client, migrations)).resolves.toEqual([
+      '012_professional_activation_purposes',
+    ]);
+    await expect(client.query(
+      `SELECT purpose FROM professional_activation_tokens WHERE token_hash = 'pre-012-admin'`,
+    )).resolves.toMatchObject({ rows: [{ purpose: 'admin_activation' }] });
+    await client.query(
+      `UPDATE professional_activation_tokens SET consumed_at = now()
+       WHERE token_hash = 'pre-012-admin'`,
+    );
 
     const existing = await client.query(
       `SELECT country, region, city, start_date, start_time, timezone,
@@ -124,6 +143,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '009_organizer_applications' },
       { id: '010_organizer_approval' },
       { id: '011_professional_activation_tokens' },
+      { id: '012_professional_activation_purposes' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string }>(
       `SELECT u.id, u.email, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -189,6 +209,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
 
     await expect(client.query(insert, [participantId, 'hash-one', 'admin_activation', creatorId]))
       .resolves.toMatchObject({ rowCount: 1 });
+    await expect(client.query(insert, [creatorId, 'hash-organizer', 'organizer_activation', participantId]))
+      .resolves.toMatchObject({ rowCount: 1 });
+    await expect(client.query(insert, [participantId, 'hash-creator', 'creator_activation', creatorId]))
+      .resolves.toMatchObject({ rowCount: 1 });
     await expect(client.query(insert, [creatorId, 'hash-one', 'admin_activation', participantId]))
       .rejects.toMatchObject({ code: '23505' });
     await expect(client.query(insert, [participantId, 'hash-two', 'admin_activation', creatorId]))
@@ -203,7 +227,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
 
     const tokens = await client.query(
       `SELECT token_hash, consumed_at IS NULL AS active
-       FROM professional_activation_tokens WHERE user_id = $1 ORDER BY created_at`, [participantId],
+       FROM professional_activation_tokens
+       WHERE user_id = $1 AND purpose = 'admin_activation' ORDER BY created_at`, [participantId],
     );
     expect(tokens.rows).toEqual([
       { token_hash: 'hash-one', active: false },
