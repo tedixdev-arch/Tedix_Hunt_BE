@@ -5,7 +5,7 @@ import {
   AdminProvisioning,
   GuestPromotionError,
 } from '../models/AdminProvisioning.js';
-import { LastActiveAdminError, User, type IUser } from '../models/User.js';
+import { LastActiveAdminError, normalizeEmail, User, type IUser } from '../models/User.js';
 import {
   ProfessionalActivationAlreadyPendingError,
   ProfessionalGuestPromotionError,
@@ -19,6 +19,9 @@ const safeUser = (user: IUser) => ({
   id: user.id, email: user.email, name: user.name, roles: user.roles,
   isGuest: user.isGuest, accountStatus: user.accountStatus, createdAt: user.createdAt,
 });
+
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 
 const changeStatus = (status: 'active' | 'blocked') =>
   async (request: AuthRequest, response: express.Response) => {
@@ -69,6 +72,87 @@ router.get('/', requireAuth, requireRole('admin'), async (request, response) => 
   return response.json(users.map((user) => ({
     ...safeUser(user), activationState: user.activationState,
   })));
+});
+
+/**
+ * @openapi
+ * /api/admin/users/{id}:
+ *   patch:
+ *     tags: [Admin Users]
+ *     summary: Edit an identity's safe profile fields
+ *     description: Only name and email may be edited. Credentials, account status, roles, sessions, memberships, and Hunt data are preserved.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             minProperties: 1
+ *             properties:
+ *               name: { type: string, nullable: true }
+ *               email: { type: string, format: email }
+ *     responses:
+ *       200:
+ *         description: Updated safe identity representation
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties: { user: { $ref: '#/components/schemas/AdminUser' } }
+ *       400: { description: Empty, unsupported, or invalid update }
+ *       403: { description: Admin capability required }
+ *       404: { description: Identity not found }
+ *       409: { description: Normalized email belongs to another identity }
+ */
+router.patch('/:id', requireAuth, requireRole('admin'), async (request, response) => {
+  const body: unknown = request.body;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return response.status(400).json({ error: 'invalid_input' });
+  }
+  const record = body as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (!keys.length || keys.some((key) => key !== 'name' && key !== 'email')) {
+    return response.status(400).json({ error: 'invalid_input' });
+  }
+
+  const update: { name?: string | null; email?: string } = {};
+  if ('name' in record) {
+    if (record.name !== null && typeof record.name !== 'string') {
+      return response.status(400).json({ error: 'invalid_input' });
+    }
+    const name = typeof record.name === 'string' ? record.name.trim() : null;
+    update.name = name || null;
+  }
+  if ('email' in record) {
+    if (typeof record.email !== 'string') {
+      return response.status(400).json({ error: 'invalid_input' });
+    }
+    const email = normalizeEmail(record.email);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return response.status(400).json({ error: 'invalid_input' });
+    }
+    update.email = email;
+    // Give a clear conflict before writing; the database constraint below still closes races.
+    const owner = await User.findOne({ email });
+    if (owner && owner.id !== String(request.params.id)) {
+      return response.status(409).json({ error: 'email_already_in_use' });
+    }
+  }
+
+  try {
+    const user = await User.updateIdentity(String(request.params.id), update);
+    if (!user) return response.status(404).json({ error: 'user_not_found' });
+    return response.json({ user: safeUser(user) });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return response.status(409).json({ error: 'email_already_in_use' });
+    }
+    throw error;
+  }
 });
 
 /**

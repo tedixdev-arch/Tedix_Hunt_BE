@@ -95,6 +95,25 @@ describe('User persistence', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
+  it('atomically updates only normalized identity fields and returns preserved state', async () => {
+    query.mockResolvedValue({ rows: [{
+      ...storedRow, email: 'new@example.com', name: 'New Name', account_status: 'blocked',
+      roles: ['admin', 'participant'],
+    }] });
+    await expect(User.updateIdentity(storedRow.id, {
+      name: 'New Name', email: ' NEW@EXAMPLE.COM ',
+    })).resolves.toMatchObject({
+      email: 'new@example.com', name: 'New Name', passwordHash: storedRow.password_hash,
+      accountStatus: 'blocked', roles: ['admin', 'participant'],
+    });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('UPDATE users'), [
+      storedRow.id, true, 'New Name', true, 'new@example.com',
+    ]);
+    const sql = query.mock.calls[0][0] as string;
+    expect(sql).not.toMatch(/password_hash\s*=|account_status\s*=|DELETE/i);
+    expect(sql).not.toContain('refresh_tokens');
+  });
+
   it.each([
     ['password update', 1],
     ['refresh-token deletion', 2],
