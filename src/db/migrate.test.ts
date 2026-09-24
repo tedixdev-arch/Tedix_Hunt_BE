@@ -85,13 +85,18 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '012_professional_activation_purposes',
     ]);
-    await expect(client.query(
-      `SELECT purpose FROM professional_activation_tokens WHERE token_hash = 'pre-012-admin'`,
-    )).resolves.toMatchObject({ rows: [{ purpose: 'admin_activation' }] });
-    await client.query(
-      `UPDATE professional_activation_tokens SET consumed_at = now()
-       WHERE token_hash = 'pre-012-admin'`,
-    );
+    try {
+      await expect(client.query(
+        `SELECT purpose FROM professional_activation_tokens
+         WHERE token_hash = 'pre-012-admin'`,
+      )).resolves.toMatchObject({ rows: [{ purpose: 'admin_activation' }] });
+    } finally {
+      // This suite shares its migrated schema across tests. Remove this preservation fixture
+      // entirely so its created_by foreign key and token row cannot leak into later assertions.
+      await client.query(
+        `DELETE FROM professional_activation_tokens WHERE token_hash = 'pre-012-admin'`,
+      );
+    }
 
     const existing = await client.query(
       `SELECT country, region, city, start_date, start_time, timezone,

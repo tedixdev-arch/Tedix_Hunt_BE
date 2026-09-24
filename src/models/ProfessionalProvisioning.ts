@@ -98,12 +98,24 @@ export const ProfessionalProvisioning = {
 
       let organization: ProvisionedOrganization | undefined;
       if (input.role === 'organizer') {
-        const org = (await client.query(
-          `INSERT INTO organizations (name, owner_id) VALUES ($1, $2) RETURNING id, name`,
-          [input.organizationName!.trim(), row.id],
+        const organizationName = input.organizationName!.trim();
+        // The email advisory lock also serializes organization lookup/create for this owner.
+        // Reuse only an organization owned by this identity with the same normalized name.
+        let org = (await client.query(
+          `SELECT id, name FROM organizations
+           WHERE owner_id = $1 AND lower(btrim(name)) = lower(btrim($2))
+           ORDER BY created_at ASC LIMIT 1`,
+          [row.id, organizationName],
         )).rows[0];
+        if (!org) {
+          org = (await client.query(
+            `INSERT INTO organizations (name, owner_id) VALUES ($1, $2) RETURNING id, name`,
+            [organizationName, row.id],
+          )).rows[0];
+        }
         await client.query(
-          `INSERT INTO organization_members (organization_id, user_id) VALUES ($1, $2)`,
+          `INSERT INTO organization_members (organization_id, user_id)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
           [org.id, row.id],
         );
         organization = { id: org.id, name: org.name };
