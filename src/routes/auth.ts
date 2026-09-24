@@ -9,6 +9,7 @@ import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { OrganizerApplications } from '../models/OrganizerApplication.js';
 import { AdminProvisioning } from '../models/AdminProvisioning.js';
+import { ProfessionalProvisioning, type ProfessionalRole } from '../models/ProfessionalProvisioning.js';
 
 const router = express.Router();
 const PASSWORD_BCRYPT_ROUNDS = 10;
@@ -98,6 +99,59 @@ router.post('/admin/activate', async (req, res) => {
   const tokens = await createTokens(user.id);
   return res.json({ user: publicUser(user), tokens });
 });
+
+const activateProfessional = (role: ProfessionalRole) => async (req: express.Request, res: express.Response) => {
+  const { token, password } = req.body ?? {};
+  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
+  const user = await ProfessionalProvisioning.activate(role, tokenHash, passwordHash);
+  if (!user) return res.status(401).json({ error: 'invalid_or_expired_activation' });
+  const tokens = await createTokens(user.id);
+  return res.json({ user: publicUser(user), tokens });
+};
+
+/**
+ * @openapi
+ * /api/auth/organizer/activate-direct:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Activate a directly provisioned Organizer with a one-time token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, password]
+ *             properties:
+ *               token: { type: string, description: One-time Organizer activation token }
+ *               password: { type: string, format: password, minLength: 8 }
+ *     responses:
+ *       200: { description: Activated and authenticated }
+ *       401: { description: Invalid, expired, consumed, or wrong-purpose token }
+ * /api/auth/creator/activate:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Activate a provisioned Creator with a one-time token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, password]
+ *             properties:
+ *               token: { type: string, description: One-time Creator activation token }
+ *               password: { type: string, format: password, minLength: 8 }
+ *     responses:
+ *       200: { description: Activated and authenticated }
+ *       401: { description: Invalid, expired, consumed, or wrong-purpose token }
+ */
+router.post('/organizer/activate-direct', activateProfessional('organizer'));
+router.post('/creator/activate', activateProfessional('creator'));
 
 /**
  * @openapi

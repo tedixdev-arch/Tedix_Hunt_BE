@@ -2,8 +2,19 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  findById: vi.fn(), list: vi.fn(), provision: vi.fn(), createRefreshToken: vi.fn(),
+  findById: vi.fn(), list: vi.fn(), provision: vi.fn(), professionalList: vi.fn(),
+  professionalProvision: vi.fn(), createRefreshToken: vi.fn(),
 }));
+vi.mock('../models/ProfessionalProvisioning.js', () => {
+  class ProfessionalGuestPromotionError extends Error {}
+  class ProfessionalActivationAlreadyPendingError extends Error {}
+  return {
+    ProfessionalGuestPromotionError, ProfessionalActivationAlreadyPendingError,
+    ProfessionalProvisioning: {
+      list: mocks.professionalList, provision: mocks.professionalProvision, activate: vi.fn(),
+    },
+  };
+});
 vi.mock('../models/User.js', () => ({
   User: { findById: mocks.findById },
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
@@ -36,6 +47,7 @@ describe('Admin user provisioning API', () => {
     vi.clearAllMocks();
     mocks.findById.mockResolvedValue(user(['admin']));
     mocks.list.mockResolvedValue([]);
+    mocks.professionalList.mockResolvedValue([]);
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -43,8 +55,43 @@ describe('Admin user provisioning API', () => {
     await request(app).get('/api/admin/users?role=admin').set('Authorization', bearer()).expect(403);
     await request(app).post('/api/admin/users/admin').set('Authorization', bearer())
       .send({ email: 'second@example.com' }).expect(403);
+    await request(app).post('/api/admin/users/professional').set('Authorization', bearer())
+      .send({ email: 'creator@example.com', role: 'creator' }).expect(403);
     expect(mocks.list).not.toHaveBeenCalled();
     expect(mocks.provision).not.toHaveBeenCalled();
+  });
+
+  it('provisions a Creator without requiring an organization', async () => {
+    mocks.professionalProvision.mockResolvedValue({
+      user: user(['creator'], { passwordHash: null }), role: 'creator',
+      activationRequired: true, activationToken: 'creator-token',
+      activationExpiresAt: new Date('2026-01-02T00:00:00Z'),
+    });
+    const response = await request(app).post('/api/admin/users/professional')
+      .set('Authorization', bearer())
+      .send({ email: ' Creator@Example.com ', role: 'creator' }).expect(201);
+    expect(mocks.professionalProvision).toHaveBeenCalledWith(expect.objectContaining({
+      email: ' Creator@Example.com ', role: 'creator', createdBy: user([]).id,
+    }));
+    expect(response.body).toMatchObject({ role: 'creator', activationRequired: true });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('requires an organization name for Organizer and rejects unsupported fields', async () => {
+    await request(app).post('/api/admin/users/professional').set('Authorization', bearer())
+      .send({ email: 'organizer@example.com', role: 'organizer' }).expect(400);
+    await request(app).post('/api/admin/users/professional').set('Authorization', bearer())
+      .send({ email: 'creator@example.com', role: 'creator', password: 'nope' }).expect(400);
+    expect(mocks.professionalProvision).not.toHaveBeenCalled();
+  });
+
+  it.each(['organizer', 'creator'])('lists safe %s identities with role-specific state', async (role) => {
+    mocks.professionalList.mockResolvedValue([user([role], { activationState: 'pending' })]);
+    const response = await request(app).get(`/api/admin/users?role=${role}`)
+      .set('Authorization', bearer()).expect(200);
+    expect(mocks.professionalList).toHaveBeenCalledWith(role);
+    expect(response.body[0]).toMatchObject({ activationState: 'pending', roles: [role] });
+    expect(response.body[0]).not.toHaveProperty('passwordHash');
   });
 
   it('lists only the safe Admin representation', async () => {
