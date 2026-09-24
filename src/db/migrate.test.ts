@@ -209,36 +209,43 @@ describeWithDatabase('PostgreSQL migrations', () => {
       (user_id, token_hash, purpose, expires_at, created_by)
       VALUES ($1, $2, $3, now() + interval '1 day', $4)`;
 
-    await expect(client.query(insert, [participantId, 'hash-one', 'unsupported', creatorId]))
-      .rejects.toMatchObject({ code: '23514' });
+    try {
+      await expect(client.query(insert, [participantId, 'hash-one', 'unsupported', creatorId]))
+        .rejects.toMatchObject({ code: '23514' });
 
-    await expect(client.query(insert, [participantId, 'hash-one', 'admin_activation', creatorId]))
-      .resolves.toMatchObject({ rowCount: 1 });
-    await expect(client.query(insert, [creatorId, 'hash-organizer', 'organizer_activation', participantId]))
-      .resolves.toMatchObject({ rowCount: 1 });
-    await expect(client.query(insert, [participantId, 'hash-creator', 'creator_activation', creatorId]))
-      .resolves.toMatchObject({ rowCount: 1 });
-    await expect(client.query(insert, [creatorId, 'hash-one', 'admin_activation', participantId]))
-      .rejects.toMatchObject({ code: '23505' });
-    await expect(client.query(insert, [participantId, 'hash-two', 'admin_activation', creatorId]))
-      .rejects.toMatchObject({ code: '23505' });
+      await expect(client.query(insert, [participantId, 'hash-one', 'admin_activation', creatorId]))
+        .resolves.toMatchObject({ rowCount: 1 });
+      await expect(client.query(insert, [creatorId, 'hash-organizer', 'organizer_activation', participantId]))
+        .resolves.toMatchObject({ rowCount: 1 });
+      await expect(client.query(insert, [participantId, 'hash-creator', 'creator_activation', creatorId]))
+        .resolves.toMatchObject({ rowCount: 1 });
+      await expect(client.query(insert, [creatorId, 'hash-one', 'admin_activation', participantId]))
+        .rejects.toMatchObject({ code: '23505' });
+      await expect(client.query(insert, [participantId, 'hash-two', 'admin_activation', creatorId]))
+        .rejects.toMatchObject({ code: '23505' });
 
-    await client.query(
-      `UPDATE professional_activation_tokens SET consumed_at = now()
-       WHERE user_id = $1 AND purpose = 'admin_activation'`, [participantId],
-    );
-    await expect(client.query(insert, [participantId, 'hash-two', 'admin_activation', creatorId]))
-      .resolves.toMatchObject({ rowCount: 1 });
+      await client.query(
+        `UPDATE professional_activation_tokens SET consumed_at = now()
+         WHERE user_id = $1 AND purpose = 'admin_activation'`, [participantId],
+      );
+      await expect(client.query(insert, [participantId, 'hash-two', 'admin_activation', creatorId]))
+        .resolves.toMatchObject({ rowCount: 1 });
 
-    const tokens = await client.query(
-      `SELECT token_hash, consumed_at IS NULL AS active
-       FROM professional_activation_tokens
-       WHERE user_id = $1 AND purpose = 'admin_activation' ORDER BY created_at`, [participantId],
-    );
-    expect(tokens.rows).toEqual([
-      { token_hash: 'hash-one', active: false },
-      { token_hash: 'hash-two', active: true },
-    ]);
+      const tokens = await client.query(
+        `SELECT token_hash, consumed_at IS NULL AS active
+         FROM professional_activation_tokens
+         WHERE user_id = $1 AND purpose = 'admin_activation' ORDER BY created_at`, [participantId],
+      );
+      expect(tokens.rows).toEqual([
+        { token_hash: 'hash-one', active: false },
+        { token_hash: 'hash-two', active: true },
+      ]);
+    } finally {
+      await client.query(
+        `DELETE FROM professional_activation_tokens
+         WHERE token_hash IN ('hash-one', 'hash-two', 'hash-organizer', 'hash-creator')`,
+      );
+    }
   });
 
   it('defaults Organizer applications to pending and enforces its enum constraints', async () => {
