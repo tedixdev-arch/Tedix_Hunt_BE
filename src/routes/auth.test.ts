@@ -62,6 +62,7 @@ const registeredUser = {
   name: 'Person',
   isGuest: false,
   tedixUserId: null,
+  accountStatus: 'active',
   createdAt,
 };
 
@@ -664,6 +665,40 @@ describe('user account API', () => {
       .send({ tedixUserId: 'tedix-123' })
       .expect(200);
     expect(mocks.createRefreshToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects login and refresh for a blocked identity, including an old session', async () => {
+    const blocked = {
+      ...registeredUser,
+      accountStatus: 'blocked' as const,
+      passwordHash: await bcrypt.hash('correct-password', 4),
+    };
+    mocks.findUser.mockResolvedValue(blocked);
+    await request(app).post('/api/auth/creator/login')
+      .send({ email: blocked.email, password: 'correct-password' })
+      .expect(401, { error: 'invalid_credentials' });
+
+    mocks.consumeRefreshToken.mockResolvedValue({
+      id: 'old-session', user: blocked.id, token: 'old-refresh',
+      expiresAt: new Date(Date.now() + 60_000), createdAt,
+    });
+    mocks.findUserById.mockResolvedValue(blocked);
+    await request(app).post('/api/auth/refresh').send({ refreshToken: 'old-refresh' })
+      .expect(401, { error: 'invalid_refresh' });
+    expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('allows an unblocked identity to authenticate without reviving an old token', async () => {
+    const active = {
+      ...registeredUser, accountStatus: 'active' as const,
+      passwordHash: await bcrypt.hash('correct-password', 4),
+    };
+    mocks.findUser.mockResolvedValue(active);
+    await request(app).post('/api/auth/creator/login')
+      .send({ email: active.email, password: 'correct-password' }).expect(200);
+    mocks.consumeRefreshToken.mockResolvedValue(null);
+    await request(app).post('/api/auth/refresh').send({ refreshToken: 'revoked-before-unblock' })
+      .expect(401, { error: 'invalid_refresh' });
   });
 
   it('preserves the guest distinction', async () => {

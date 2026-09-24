@@ -45,16 +45,16 @@ export const UserRoles = {
     try {
       await client.query('BEGIN');
       // Any future role-removal/deactivation flow must use this helper. The lock serializes
-      // final-Admin checks; an active Admin is non-guest and has usable credentials.
+      // final-Admin checks against authoritative roles and account status.
       await client.query("SELECT pg_advisory_xact_lock(hashtext('active-admin-invariant'))");
       const result = await client.query(
         `SELECT count(*)::int AS count FROM user_roles ur JOIN users u ON u.id = ur.user_id
-         WHERE ur.role = 'admin' AND u.is_guest = FALSE AND u.password_hash IS NOT NULL`,
+         WHERE ur.role = 'admin' AND u.account_status = 'active'`,
       );
       const target = await client.query(
         `SELECT 1 FROM user_roles ur JOIN users u ON u.id = ur.user_id
          WHERE ur.user_id = $1 AND ur.role = 'admin'
-           AND u.is_guest = FALSE AND u.password_hash IS NOT NULL`, [userId],
+           AND u.account_status = 'active'`, [userId],
       );
       if (target.rows[0] && result.rows[0].count <= 1) throw new LastAdminError();
       await client.query("DELETE FROM user_roles WHERE user_id = $1 AND role = 'admin'", [userId]);

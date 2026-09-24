@@ -3,6 +3,7 @@ import { pool } from '../lib/postgres.js';
 import type { UserRole } from './UserRole.js';
 
 export type LegacyRole = 'creator' | 'participant' | 'guest';
+export type AccountStatus = 'active' | 'blocked';
 
 export interface IUser {
   id: string;
@@ -13,6 +14,7 @@ export interface IUser {
   name?: string | null;
   isGuest: boolean;
   tedixUserId?: string | null;
+  accountStatus: AccountStatus;
   createdAt: Date;
 }
 
@@ -48,8 +50,11 @@ const mapRow = (row: any): IUser => ({
   name: row.name,
   isGuest: row.is_guest,
   tedixUserId: row.tedix_user_id,
+  accountStatus: row.account_status ?? 'active',
   createdAt: row.created_at,
 });
+
+export class LastActiveAdminError extends Error {}
 
 export const User = {
   async create(input: CreateUserInput): Promise<IUser> {
@@ -129,6 +134,53 @@ export const User = {
       await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
       await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async setAccountStatus(id: string, status: AccountStatus): Promise<IUser | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Serialize this decision with Admin-role removal so concurrent changes cannot remove
+      // every active Admin-capable identity.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('active-admin-invariant'))");
+      const target = (await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [id])).rows[0];
+      if (!target) {
+        await client.query('COMMIT');
+        return null;
+      }
+
+      if (status === 'blocked' && target.account_status === 'active') {
+        const isAdmin = await client.query(
+          "SELECT 1 FROM user_roles WHERE user_id = $1 AND role = 'admin'", [id],
+        );
+        if (isAdmin.rows[0]) {
+          const activeAdmins = await client.query(
+            `SELECT count(*)::int AS count
+             FROM user_roles ur JOIN users u ON u.id = ur.user_id
+             WHERE ur.role = 'admin' AND u.account_status = 'active'`,
+          );
+          if (activeAdmins.rows[0].count <= 1) throw new LastActiveAdminError();
+        }
+      }
+
+      await client.query('UPDATE users SET account_status = $2 WHERE id = $1', [id, status]);
+      // Revoke every session on block, including an idempotent repeated block.
+      if (status === 'blocked') {
+        await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      }
+      const row = (await client.query(
+        `SELECT users.*, ARRAY(
+           SELECT role FROM user_roles WHERE user_id = users.id ORDER BY role
+         ) roles FROM users WHERE id = $1`, [id],
+      )).rows[0];
+      await client.query('COMMIT');
+      return mapRow(row);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

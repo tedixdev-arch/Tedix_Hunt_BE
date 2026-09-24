@@ -202,7 +202,7 @@ export const OrganizerApplications = {
       return {
         id: row.id, email: row.email, passwordHash: row.password_hash, role: row.role,
         roles: row.roles, name: row.name, isGuest: row.is_guest,
-        tedixUserId: row.tedix_user_id, createdAt: row.created_at,
+        tedixUserId: row.tedix_user_id, accountStatus: row.account_status ?? 'active', createdAt: row.created_at,
       };
     } catch (error) {
       await client.query('ROLLBACK');

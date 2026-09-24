@@ -25,7 +25,9 @@ export const requireAuth: RequestHandler = async (req: AuthRequest, res, next) =
     }
     const user = await User.findById(payload.sub);
 
-    if (!user) return res.status(401).json({ error: 'unauthorized' });
+    if (!user || user.accountStatus === 'blocked') {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
 
     req.user = user;
     next();
