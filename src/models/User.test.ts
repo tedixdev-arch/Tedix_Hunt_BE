@@ -9,7 +9,9 @@ const { query, connect, clientQuery, release } = vi.hoisted(() => ({
 
 vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
-import { LastActiveAdminError, User, USER_ROLES } from './User.js';
+import {
+  AdminPasswordChangeNotAllowedError, LastActiveAdminError, User, USER_ROLES,
+} from './User.js';
 
 const storedRow = {
   id: '7dc65d7e-cd31-4205-b92d-c716a7ae494a',
@@ -93,6 +95,64 @@ describe('User persistence', () => {
       ['COMMIT'],
     ]);
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('atomically replaces a non-Admin credential and preserves all other state', async () => {
+    const target = {
+      ...storedRow, roles: ['creator', 'organizer', 'participant'], account_status: 'blocked',
+    };
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [target] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(User.replaceNonAdminPasswordAndRevokeSessions(
+      storedRow.id, '$2a$10$new-hash',
+    )).resolves.toMatchObject({
+      id: storedRow.id, roles: target.roles, accountStatus: 'blocked',
+      email: storedRow.email, name: storedRow.name, passwordHash: '$2a$10$new-hash',
+    });
+    expect(clientQuery.mock.calls).toEqual([
+      ['BEGIN'],
+      [expect.stringContaining('FROM users WHERE id = $1 FOR UPDATE'), [storedRow.id]],
+      ['UPDATE users SET password_hash = $1 WHERE id = $2', ['$2a$10$new-hash', storedRow.id]],
+      ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
+      ['COMMIT'],
+    ]);
+    const sql = clientQuery.mock.calls.map(([statement]) => statement).join('\n');
+    expect(sql).not.toMatch(/UPDATE\s+(user_roles|organizations|hunts|hunt_roles|hunt_participants)/i);
+    expect(sql).not.toMatch(/account_status\s*=/i);
+  });
+
+  it('rejects every authoritative Admin role combination before changing credentials', async () => {
+    for (const roles of [['admin'], ['creator', 'admin'], ['organizer', 'admin']]) {
+      vi.clearAllMocks();
+      connect.mockResolvedValue({ query: clientQuery, release });
+      clientQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ ...storedRow, roles }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await expect(User.replaceNonAdminPasswordAndRevokeSessions(storedRow.id, 'hash'))
+        .rejects.toBeInstanceOf(AdminPasswordChangeNotAllowedError);
+      expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(clientQuery).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE users SET password_hash'), expect.anything(),
+      );
+    }
+  });
+
+  it.each([2, 3])('rolls back the Admin replacement transaction when operation %s fails', async (call) => {
+    clientQuery.mockImplementation(async () => {
+      if (clientQuery.mock.calls.length === call + 1) throw new Error('database failure');
+      if (clientQuery.mock.calls.length === 2) return { rows: [storedRow] };
+      return { rows: [] };
+    });
+    await expect(User.replaceNonAdminPasswordAndRevokeSessions(storedRow.id, 'hash'))
+      .rejects.toThrow('database failure');
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
   });
 
   it('atomically updates only normalized identity fields and returns preserved state', async () => {
