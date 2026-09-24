@@ -23,14 +23,14 @@ const mapRow = (row: any): IRefreshToken => ({
 });
 
 export const RefreshToken = {
-  async create(input: CreateRefreshTokenInput): Promise<IRefreshToken> {
+  async create(input: CreateRefreshTokenInput): Promise<IRefreshToken | null> {
     const { rows } = await pool.query(
       `INSERT INTO refresh_tokens (user_id, token, expires_at)
-       VALUES ($1, $2, $3)
+       SELECT id, $2, $3 FROM users WHERE id = $1 AND account_status = 'active'
        RETURNING *`,
       [input.user, input.token, input.expiresAt],
     );
-    return mapRow(rows[0]);
+    return rows[0] ? mapRow(rows[0]) : null;
   },
 
   async findOne(filter: { token: string }): Promise<IRefreshToken | null> {

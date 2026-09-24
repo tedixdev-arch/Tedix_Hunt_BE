@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findById: vi.fn(), list: vi.fn(), provision: vi.fn(), professionalList: vi.fn(),
-  professionalProvision: vi.fn(), createRefreshToken: vi.fn(),
+  professionalProvision: vi.fn(), createRefreshToken: vi.fn(), setAccountStatus: vi.fn(),
 }));
 vi.mock('../models/ProfessionalProvisioning.js', () => {
   class ProfessionalGuestPromotionError extends Error {}
@@ -16,7 +16,8 @@ vi.mock('../models/ProfessionalProvisioning.js', () => {
   };
 });
 vi.mock('../models/User.js', () => ({
-  User: { findById: mocks.findById },
+  LastActiveAdminError: class LastActiveAdminError extends Error {},
+  User: { findById: mocks.findById, setAccountStatus: mocks.setAccountStatus },
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
 }));
 vi.mock('../models/AdminProvisioning.js', () => {
@@ -37,7 +38,8 @@ import { signJwt } from '../lib/jwt.js';
 const user = (roles: string[], overrides = {}) => ({
   id: '0aa12189-77d8-4aa9-9d37-57db263de6cf', email: 'user@example.com',
   passwordHash: 'secret-hash', role: 'participant', roles, name: 'User', isGuest: false,
-  tedixUserId: null, createdAt: new Date('2026-01-01T00:00:00Z'), ...overrides,
+  tedixUserId: null, accountStatus: 'active', createdAt: new Date('2026-01-01T00:00:00Z'),
+  ...overrides,
 });
 const bearer = () => `Bearer ${signJwt({ sub: user([]).id, type: 'access' })}`;
 
@@ -48,6 +50,8 @@ describe('Admin user provisioning API', () => {
     mocks.findById.mockResolvedValue(user(['admin']));
     mocks.list.mockResolvedValue([]);
     mocks.professionalList.mockResolvedValue([]);
+    mocks.setAccountStatus.mockImplementation(async (_id, accountStatus) =>
+      user(['participant'], { accountStatus }));
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -129,5 +133,37 @@ describe('Admin user provisioning API', () => {
     expect(response.body).toMatchObject({ activationRequired: false });
     expect(response.body).not.toHaveProperty('activationToken');
     expect(response.body.user.roles).toEqual(['admin', 'creator']);
+  });
+
+  it('blocks and unblocks another identity idempotently without changing roles', async () => {
+    const targetId = '86ea867c-8058-4d53-a2ab-09ba2250f423';
+    const blocked = await request(app).post(`/api/admin/users/${targetId}/block`)
+      .set('Authorization', bearer()).expect(200);
+    const unblocked = await request(app).post(`/api/admin/users/${targetId}/unblock`)
+      .set('Authorization', bearer()).expect(200);
+    await request(app).post(`/api/admin/users/${targetId}/block`)
+      .set('Authorization', bearer()).expect(200);
+
+    expect(mocks.setAccountStatus.mock.calls).toEqual([
+      [targetId, 'blocked'], [targetId, 'active'], [targetId, 'blocked'],
+    ]);
+    expect(blocked.body.user).toMatchObject({ accountStatus: 'blocked', roles: ['participant'] });
+    expect(unblocked.body.user).toMatchObject({ accountStatus: 'active', roles: ['participant'] });
+  });
+
+  it('prevents self-block and non-Admin status changes', async () => {
+    await request(app).post(`/api/admin/users/${user([]).id}/block`)
+      .set('Authorization', bearer()).expect(409, { error: 'self_block_not_allowed' });
+    mocks.findById.mockResolvedValue(user(['participant']));
+    await request(app).post('/api/admin/users/another-user/block')
+      .set('Authorization', bearer()).expect(403);
+    expect(mocks.setAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it('rejects blocking the last active Admin', async () => {
+    const { LastActiveAdminError } = await import('../models/User.js');
+    mocks.setAccountStatus.mockRejectedValue(new LastActiveAdminError());
+    await request(app).post('/api/admin/users/last-admin/block')
+      .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
   });
 });

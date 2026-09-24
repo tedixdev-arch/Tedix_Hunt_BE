@@ -9,7 +9,7 @@ const { query, connect, clientQuery, release } = vi.hoisted(() => ({
 
 vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
-import { User, USER_ROLES } from './User.js';
+import { LastActiveAdminError, User, USER_ROLES } from './User.js';
 
 const storedRow = {
   id: '7dc65d7e-cd31-4205-b92d-c716a7ae494a',
@@ -20,6 +20,7 @@ const storedRow = {
   name: 'Person',
   is_guest: false,
   tedix_user_id: null,
+  account_status: 'active',
   created_at: new Date('2026-01-02T03:04:05Z'),
 };
 
@@ -109,5 +110,58 @@ describe('User persistence', () => {
     expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
     expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('blocks atomically, protects roles and business data, and revokes refresh sessions', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [storedRow] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: 'blocked' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(User.setAccountStatus(storedRow.id, 'blocked')).resolves.toMatchObject({
+      accountStatus: 'blocked', roles: ['participant'],
+    });
+    expect(clientQuery).toHaveBeenCalledWith(
+      'DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id],
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(expect.stringMatching(/DELETE FROM (user_roles|organizations|hunts)/), expect.anything());
+    expect(clientQuery).toHaveBeenCalledWith(
+      'UPDATE users SET account_status = $2 WHERE id = $1', [storedRow.id, 'blocked'],
+    );
+  });
+
+  it('unblocks without recreating previously revoked sessions', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: 'blocked' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: 'active' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(User.setAccountStatus(storedRow.id, 'active')).resolves.toMatchObject({
+      accountStatus: 'active',
+    });
+    expect(clientQuery).not.toHaveBeenCalledWith(expect.stringContaining('refresh_tokens'), expect.anything());
+  });
+
+  it('rejects blocking the final active authoritative Admin under the invariant lock', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: 'active' }] })
+      .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+      .mockResolvedValueOnce({ rows: [{ count: 1 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(User.setAccountStatus(storedRow.id, 'blocked'))
+      .rejects.toBeInstanceOf(LastActiveAdminError);
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      'UPDATE users SET account_status = $2 WHERE id = $1', expect.anything(),
+    );
   });
 });

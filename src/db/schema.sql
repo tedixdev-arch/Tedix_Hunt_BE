@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT,
   is_guest BOOLEAN NOT NULL DEFAULT FALSE,
   tedix_user_id TEXT UNIQUE,
+  account_status TEXT NOT NULL DEFAULT 'active' CHECK (account_status IN ('active', 'blocked')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

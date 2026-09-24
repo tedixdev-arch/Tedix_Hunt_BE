@@ -8,6 +8,7 @@ const mapUser = (row: any): IUser => ({
   id: row.id, email: row.email, passwordHash: row.password_hash, role: row.role,
   roles: row.roles ?? [], name: row.name, isGuest: row.is_guest,
   tedixUserId: row.tedix_user_id, createdAt: row.created_at,
+  accountStatus: row.account_status ?? 'active',
 });
 
 export type AdminActivationState = 'not_required' | 'pending' | 'expired';

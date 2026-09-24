@@ -46,4 +46,14 @@ describe('RefreshToken persistence', () => {
       [storedRow.token],
     );
   });
+
+  it('does not create a session unless PostgreSQL says the account is active', async () => {
+    query.mockResolvedValue({ rows: [] });
+    await expect(RefreshToken.create({
+      user: storedRow.user_id, token: 'blocked-token', expiresAt: storedRow.expires_at,
+    })).resolves.toBeNull();
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("account_status = 'active'"), [
+      storedRow.user_id, 'blocked-token', storedRow.expires_at,
+    ]);
+  });
 });

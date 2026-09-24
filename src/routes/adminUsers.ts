@@ -5,7 +5,7 @@ import {
   AdminProvisioning,
   GuestPromotionError,
 } from '../models/AdminProvisioning.js';
-import type { IUser } from '../models/User.js';
+import { LastActiveAdminError, User, type IUser } from '../models/User.js';
 import {
   ProfessionalActivationAlreadyPendingError,
   ProfessionalGuestPromotionError,
@@ -17,8 +17,26 @@ const router = express.Router();
 
 const safeUser = (user: IUser) => ({
   id: user.id, email: user.email, name: user.name, roles: user.roles,
-  isGuest: user.isGuest, createdAt: user.createdAt,
+  isGuest: user.isGuest, accountStatus: user.accountStatus, createdAt: user.createdAt,
 });
+
+const changeStatus = (status: 'active' | 'blocked') =>
+  async (request: AuthRequest, response: express.Response) => {
+    const targetId = String(request.params.id);
+    if (status === 'blocked' && targetId === request.user!.id) {
+      return response.status(409).json({ error: 'self_block_not_allowed' });
+    }
+    try {
+      const user = await User.setAccountStatus(targetId, status);
+      if (!user) return response.status(404).json({ error: 'user_not_found' });
+      return response.json({ user: safeUser(user) });
+    } catch (error) {
+      if (error instanceof LastActiveAdminError) {
+        return response.status(409).json({ error: 'last_active_admin' });
+      }
+      throw error;
+    }
+  };
 
 /**
  * @openapi
@@ -52,6 +70,35 @@ router.get('/', requireAuth, requireRole('admin'), async (request, response) => 
     ...safeUser(user), activationState: user.activationState,
   })));
 });
+
+/**
+ * @openapi
+ * /api/admin/users/{id}/block:
+ *   post:
+ *     tags: [Admin Users]
+ *     summary: Block an identity and revoke all of its refresh sessions
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       200: { description: Identity blocked (also returned when already blocked) }
+ *       403: { description: Admin capability required }
+ *       404: { description: Identity not found }
+ *       409: { description: Self-block or blocking the last active Admin is forbidden }
+ * /api/admin/users/{id}/unblock:
+ *   post:
+ *     tags: [Admin Users]
+ *     summary: Unblock an identity without restoring revoked sessions
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       200: { description: Identity active (also returned when already active) }
+ *       403: { description: Admin capability required }
+ *       404: { description: Identity not found }
+ */
+router.post('/:id/block', requireAuth, requireRole('admin'), changeStatus('blocked'));
+router.post('/:id/unblock', requireAuth, requireRole('admin'), changeStatus('active'));
 
 /**
  * @openapi
