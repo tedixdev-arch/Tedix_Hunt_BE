@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   findById: vi.fn(), list: vi.fn(), provision: vi.fn(), professionalList: vi.fn(),
   professionalProvision: vi.fn(), createRefreshToken: vi.fn(), setAccountStatus: vi.fn(),
   updateIdentity: vi.fn(), findOne: vi.fn(),
+  assignRole: vi.fn(), removeRole: vi.fn(),
+}));
+vi.mock('../models/UserRole.js', () => ({
+  LastAdminError: class LastAdminError extends Error {},
+  UserRoles: { assignRole: mocks.assignRole, removeRole: mocks.removeRole },
 }));
 vi.mock('../models/ProfessionalProvisioning.js', () => {
   class ProfessionalGuestPromotionError extends Error {}
@@ -241,5 +246,78 @@ describe('Admin user provisioning API', () => {
     expect(mocks.updateIdentity).toHaveBeenLastCalledWith(user([]).id, {
       name: 'Self', email: 'self@example.com',
     });
+  });
+
+  it.each(['creator', 'organizer', 'admin'])('grants %s idempotently and returns a safe user', async (role) => {
+    const targetId = '86ea867c-8058-4d53-a2ab-09ba2250f423';
+    mocks.findById
+      .mockResolvedValueOnce(user(['admin']))
+      .mockResolvedValueOnce(user(['participant'], { id: targetId, accountStatus: 'blocked' }))
+      .mockResolvedValueOnce(user(['participant', role], { id: targetId, accountStatus: 'blocked' }));
+    const response = await request(app).post(`/api/admin/users/${targetId}/roles/${role}`)
+      .set('Authorization', bearer()).expect(200);
+    expect(mocks.assignRole).toHaveBeenCalledWith(targetId, role);
+    expect(response.body.user).toMatchObject({ roles: ['participant', role], accountStatus: 'blocked' });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it.each(['creator', 'organizer'])('allows self-removal of %s', async (role) => {
+    mocks.findById
+      .mockResolvedValueOnce(user(['admin', role]))
+      .mockResolvedValueOnce(user(['admin', role]))
+      .mockResolvedValueOnce(user(['admin']));
+    await request(app).delete(`/api/admin/users/${user([]).id}/roles/${role}`)
+      .set('Authorization', bearer()).expect(200);
+    expect(mocks.removeRole).toHaveBeenCalledWith(user([]).id, role);
+  });
+
+  it('removes a role from a blocked identity without unblocking it', async () => {
+    const targetId = 'blocked-user';
+    mocks.findById
+      .mockResolvedValueOnce(user(['admin']))
+      .mockResolvedValueOnce(user(['creator', 'participant'], {
+        id: targetId, accountStatus: 'blocked', passwordHash: 'unchanged',
+      }))
+      .mockResolvedValueOnce(user(['participant'], {
+        id: targetId, accountStatus: 'blocked', passwordHash: 'unchanged',
+      }));
+    const response = await request(app).delete(`/api/admin/users/${targetId}/roles/creator`)
+      .set('Authorization', bearer()).expect(200);
+    expect(response.body.user).toMatchObject({ roles: ['participant'], accountStatus: 'blocked' });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+    expect(mocks.setAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it('removes another Admin and maps the final-Admin invariant conflict', async () => {
+    const targetId = 'other-admin';
+    mocks.findById
+      .mockResolvedValueOnce(user(['admin']))
+      .mockResolvedValueOnce(user(['admin'], { id: targetId }))
+      .mockResolvedValueOnce(user(['creator'], { id: targetId }));
+    await request(app).delete(`/api/admin/users/${targetId}/roles/admin`)
+      .set('Authorization', bearer()).expect(200);
+    expect(mocks.removeRole).toHaveBeenCalledWith(targetId, 'admin');
+
+    const { LastAdminError } = await import('../models/UserRole.js');
+    mocks.findById.mockResolvedValue(user(['admin']));
+    mocks.removeRole.mockRejectedValueOnce(new LastAdminError());
+    await request(app).delete('/api/admin/users/last/roles/admin')
+      .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
+  });
+
+  it('rejects self Admin removal, invalid roles, unknown users, and non-Admins', async () => {
+    await request(app).delete(`/api/admin/users/${user([]).id}/roles/admin`)
+      .set('Authorization', bearer())
+      .expect(409, { error: 'self_admin_removal_not_allowed' });
+    for (const role of ['participant', 'supervisor', 'guest', 'arbitrary']) {
+      await request(app).post(`/api/admin/users/target/roles/${role}`)
+        .set('Authorization', bearer()).expect(400, { error: 'invalid_role' });
+    }
+    mocks.findById.mockResolvedValueOnce(user(['admin'])).mockResolvedValueOnce(null);
+    await request(app).post('/api/admin/users/missing/roles/creator')
+      .set('Authorization', bearer()).expect(404, { error: 'user_not_found' });
+    mocks.findById.mockResolvedValue(user(['participant']));
+    await request(app).delete('/api/admin/users/target/roles/creator')
+      .set('Authorization', bearer()).expect(403);
   });
 });
