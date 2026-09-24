@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   findById: vi.fn(), list: vi.fn(), provision: vi.fn(), professionalList: vi.fn(),
   professionalProvision: vi.fn(), createRefreshToken: vi.fn(), setAccountStatus: vi.fn(),
+  updateIdentity: vi.fn(), findOne: vi.fn(),
 }));
 vi.mock('../models/ProfessionalProvisioning.js', () => {
   class ProfessionalGuestPromotionError extends Error {}
@@ -17,7 +18,10 @@ vi.mock('../models/ProfessionalProvisioning.js', () => {
 });
 vi.mock('../models/User.js', () => ({
   LastActiveAdminError: class LastActiveAdminError extends Error {},
-  User: { findById: mocks.findById, setAccountStatus: mocks.setAccountStatus },
+  User: {
+    findById: mocks.findById, findOne: mocks.findOne,
+    setAccountStatus: mocks.setAccountStatus, updateIdentity: mocks.updateIdentity,
+  },
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
 }));
 vi.mock('../models/AdminProvisioning.js', () => {
@@ -52,6 +56,8 @@ describe('Admin user provisioning API', () => {
     mocks.professionalList.mockResolvedValue([]);
     mocks.setAccountStatus.mockImplementation(async (_id, accountStatus) =>
       user(['participant'], { accountStatus }));
+    mocks.findOne.mockResolvedValue(null);
+    mocks.updateIdentity.mockImplementation(async (_id, update) => user(['participant'], update));
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -165,5 +171,75 @@ describe('Admin user provisioning API', () => {
     mocks.setAccountStatus.mockRejectedValue(new LastActiveAdminError());
     await request(app).post('/api/admin/users/last-admin/block')
       .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
+  });
+
+  it('lets an Admin atomically edit another identity name and normalized email', async () => {
+    const targetId = '86ea867c-8058-4d53-a2ab-09ba2250f423';
+    const response = await request(app).patch(`/api/admin/users/${targetId}`)
+      .set('Authorization', bearer())
+      .send({ name: '  Updated User  ', email: ' NEW@Example.COM ' }).expect(200);
+
+    expect(mocks.findOne).toHaveBeenCalledWith({ email: 'new@example.com' });
+    expect(mocks.updateIdentity).toHaveBeenCalledOnce();
+    expect(mocks.updateIdentity).toHaveBeenCalledWith(targetId, {
+      name: 'Updated User', email: 'new@example.com',
+    });
+    expect(response.body.user).toMatchObject({
+      name: 'Updated User', email: 'new@example.com', accountStatus: 'active',
+      roles: ['participant'],
+    });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('edits a blocked identity without changing status or roles', async () => {
+    mocks.updateIdentity.mockResolvedValue(user(['creator'], {
+      name: 'Renamed', accountStatus: 'blocked', passwordHash: 'unchanged-hash',
+    }));
+    const response = await request(app).patch('/api/admin/users/blocked-id')
+      .set('Authorization', bearer()).send({ name: ' Renamed ' }).expect(200);
+    expect(response.body.user).toMatchObject({
+      name: 'Renamed', accountStatus: 'blocked', roles: ['creator'],
+    });
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('returns a conflict for an existing normalized email and database races', async () => {
+    mocks.findOne.mockResolvedValue(user(['participant'], { id: 'another-id' }));
+    await request(app).patch('/api/admin/users/target-id').set('Authorization', bearer())
+      .send({ email: ' USER@EXAMPLE.COM ' })
+      .expect(409, { error: 'email_already_in_use' });
+    expect(mocks.updateIdentity).not.toHaveBeenCalled();
+
+    mocks.findOne.mockResolvedValue(null);
+    mocks.updateIdentity.mockRejectedValue(Object.assign(new Error('unique'), { code: '23505' }));
+    await request(app).patch('/api/admin/users/target-id').set('Authorization', bearer())
+      .send({ email: 'other@example.com' })
+      .expect(409, { error: 'email_already_in_use' });
+  });
+
+  it('rejects non-Admins, empty updates, and every unsupported field', async () => {
+    await request(app).patch('/api/admin/users/target-id').set('Authorization', bearer())
+      .send({}).expect(400, { error: 'invalid_input' });
+    for (const field of ['password', 'passwordHash', 'roles', 'accountStatus', 'isGuest', 'tedixUserId']) {
+      await request(app).patch('/api/admin/users/target-id').set('Authorization', bearer())
+        .send({ [field]: 'forbidden' }).expect(400, { error: 'invalid_input' });
+    }
+    mocks.findById.mockResolvedValue(user(['participant']));
+    await request(app).patch('/api/admin/users/target-id').set('Authorization', bearer())
+      .send({ name: 'Nope' }).expect(403);
+    expect(mocks.updateIdentity).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for an unknown identity and permits self-edit', async () => {
+    mocks.updateIdentity.mockResolvedValueOnce(null).mockResolvedValueOnce(user(['admin'], {
+      name: 'Self', email: 'self@example.com',
+    }));
+    await request(app).patch('/api/admin/users/missing').set('Authorization', bearer())
+      .send({ name: 'Missing' }).expect(404, { error: 'user_not_found' });
+    await request(app).patch(`/api/admin/users/${user([]).id}`).set('Authorization', bearer())
+      .send({ name: ' Self ', email: 'SELF@EXAMPLE.COM' }).expect(200);
+    expect(mocks.updateIdentity).toHaveBeenLastCalledWith(user([]).id, {
+      name: 'Self', email: 'self@example.com',
+    });
   });
 });

@@ -34,6 +34,11 @@ export interface FindUserFilter {
   role?: Extract<UserRole, 'creator' | 'participant'>;
 }
 
+export interface UpdateUserIdentityInput {
+  name?: string | null;
+  email?: string;
+}
+
 export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 function assertInitialRole(role: string): asserts role is CreateUserInput['role'] {
@@ -123,6 +128,30 @@ export const User = {
        ) AS roles
        FROM users WHERE id = $1 LIMIT 1`,
       [id],
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
+  },
+
+  async updateIdentity(id: string, input: UpdateUserIdentityInput): Promise<IUser | null> {
+    const hasName = Object.prototype.hasOwnProperty.call(input, 'name');
+    const hasEmail = Object.prototype.hasOwnProperty.call(input, 'email');
+    // One UPDATE makes a combined name/email edit atomic and deliberately leaves credentials,
+    // access state, roles, sessions, and all related business records untouched.
+    const { rows } = await pool.query(
+      `UPDATE users
+       SET name = CASE WHEN $2 THEN $3 ELSE name END,
+           email = CASE WHEN $4 THEN $5 ELSE email END
+       WHERE id = $1
+       RETURNING users.*, ARRAY(
+         SELECT ur.role FROM user_roles ur WHERE ur.user_id = users.id ORDER BY ur.role
+       ) AS roles`,
+      [
+        id,
+        hasName,
+        input.name ?? null,
+        hasEmail,
+        hasEmail ? normalizeEmail(input.email!) : null,
+      ],
     );
     return rows[0] ? mapRow(rows[0]) : null;
   },
