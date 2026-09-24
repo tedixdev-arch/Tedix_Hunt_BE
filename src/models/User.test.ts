@@ -11,6 +11,7 @@ vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
 import {
   AdminPasswordChangeNotAllowedError, LastActiveAdminError, User, USER_ROLES,
+  UserHasProtectedDependenciesError,
 } from './User.js';
 
 const storedRow = {
@@ -242,5 +243,85 @@ describe('User persistence', () => {
     expect(clientQuery).not.toHaveBeenCalledWith(
       'UPDATE users SET account_status = $2 WHERE id = $1', expect.anything(),
     );
+  });
+
+  it.each(['active', 'blocked'])('transactionally deletes a dependency-free %s identity', async (status) => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: status }] })
+      .mockResolvedValueOnce({ rows: [{ present: false }] })
+      .mockResolvedValue({ rows: [] });
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+    expect(clientQuery.mock.calls.slice(-5)).toEqual([
+      ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
+      ['DELETE FROM professional_activation_tokens WHERE user_id = $1', [storedRow.id]],
+      ['DELETE FROM user_roles WHERE user_id = $1', [storedRow.id]],
+      ['DELETE FROM users WHERE id = $1', [storedRow.id]],
+      ['COMMIT'],
+    ]);
+  });
+
+  it('protects every existing business and history relationship before any deletion', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [storedRow] })
+      .mockResolvedValueOnce({ rows: [{ present: true }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(User.deleteControlled(storedRow.id))
+      .rejects.toBeInstanceOf(UserHasProtectedDependenciesError);
+    const sql = clientQuery.mock.calls[3][0] as string;
+    for (const relationship of [
+      'organizations', 'organization_members', 'hunts', 'hunt_participants', 'hunt_roles',
+      'organizer_applications', 'professional_activation_tokens',
+    ]) expect(sql).toContain(relationship);
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith(expect.stringMatching(/^DELETE/), expect.anything());
+  });
+
+  it('uses the shared lock to reject deletion of the final active Admin', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, roles: ['admin'] }] })
+      .mockResolvedValueOnce({ rows: [{ count: 1 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(User.deleteControlled(storedRow.id)).rejects.toBeInstanceOf(LastActiveAdminError);
+    expect(clientQuery.mock.calls[1][0]).toContain('active-admin-invariant');
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+  });
+
+  it('allows another Admin when the active-Admin invariant permits deletion', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, roles: ['admin'] }] })
+      .mockResolvedValueOnce({ rows: [{ count: 2 }] })
+      .mockResolvedValueOnce({ rows: [{ present: false }] })
+      .mockResolvedValue({ rows: [] });
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+  });
+
+  it('returns not found transactionally and rolls back any deletion failure', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(User.deleteControlled('missing')).resolves.toBe(false);
+    expect(clientQuery).toHaveBeenLastCalledWith('COMMIT');
+
+    vi.clearAllMocks();
+    connect.mockResolvedValue({ query: clientQuery, release });
+    clientQuery.mockImplementation(async (statement: string) => {
+      if (statement.startsWith('SELECT users')) return { rows: [storedRow] };
+      if (statement.startsWith('SELECT EXISTS')) return { rows: [{ present: false }] };
+      if (statement.startsWith('DELETE FROM users')) throw new Error('database failure');
+      return { rows: [] };
+    });
+    await expect(User.deleteControlled(storedRow.id)).rejects.toThrow('database failure');
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
   });
 });

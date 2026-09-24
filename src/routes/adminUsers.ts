@@ -11,6 +11,7 @@ import {
   LastActiveAdminError,
   normalizeEmail,
   User,
+  UserHasProtectedDependenciesError,
   type IUser,
 } from '../models/User.js';
 import { LastAdminError, UserRoles, type UserRole } from '../models/UserRole.js';
@@ -163,6 +164,43 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (request, response
   } catch (error) {
     if (isUniqueViolation(error)) {
       return response.status(409).json({ error: 'email_already_in_use' });
+    }
+    throw error;
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/users/{id}:
+ *   delete:
+ *     tags: [Admin Users]
+ *     summary: Permanently delete a dependency-free identity
+ *     description: Requires authoritative Admin capability. Self-deletion and deletion of the final active Admin are forbidden. The operation atomically removes the identity, global roles, refresh sessions, and its activation credentials only when no protected organization, Hunt, participation, supervision, application, or provisioning records reference it.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       200: { description: Identity and account-only records deleted transactionally }
+ *       403: { description: Authoritative Admin capability required }
+ *       404: { description: Identity not found }
+ *       409: { description: Self-delete, protected dependencies, or final active Admin conflict }
+ */
+router.delete('/:id', requireAuth, requireRole('admin'), async (request: AuthRequest, response) => {
+  const targetId = String(request.params.id);
+  if (targetId === request.user!.id) {
+    return response.status(409).json({ error: 'self_delete_not_allowed' });
+  }
+  try {
+    if (!await User.deleteControlled(targetId)) {
+      return response.status(404).json({ error: 'user_not_found' });
+    }
+    return response.json({ status: 'deleted' });
+  } catch (error) {
+    if (error instanceof UserHasProtectedDependenciesError) {
+      return response.status(409).json({ error: 'user_has_protected_dependencies' });
+    }
+    if (error instanceof LastActiveAdminError) {
+      return response.status(409).json({ error: 'last_active_admin' });
     }
     throw error;
   }
