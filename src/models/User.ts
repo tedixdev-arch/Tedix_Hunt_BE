@@ -60,6 +60,7 @@ const mapRow = (row: any): IUser => ({
 });
 
 export class LastActiveAdminError extends Error {}
+export class AdminPasswordChangeNotAllowedError extends Error {}
 
 export const User = {
   async create(input: CreateUserInput): Promise<IUser> {
@@ -163,6 +164,40 @@ export const User = {
       await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
       await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async replaceNonAdminPasswordAndRevokeSessions(
+    id: string,
+    passwordHash: string,
+  ): Promise<IUser | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const target = (await client.query(
+        `SELECT users.*, ARRAY(
+           SELECT role FROM user_roles WHERE user_id = users.id ORDER BY role
+         ) roles FROM users WHERE id = $1 FOR UPDATE`,
+        [id],
+      )).rows[0];
+      if (!target) {
+        await client.query('COMMIT');
+        return null;
+      }
+      // Admin protection is based only on the target's authoritative user_roles capabilities.
+      if (target.roles.includes('admin')) throw new AdminPasswordChangeNotAllowedError();
+
+      // The credential replacement and complete refresh-session revocation are one transaction.
+      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      await client.query('COMMIT');
+      // account_status and every profile, role, activation, and business field stay untouched.
+      return mapRow({ ...target, password_hash: passwordHash });
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

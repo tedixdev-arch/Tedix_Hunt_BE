@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   findById: vi.fn(), list: vi.fn(), provision: vi.fn(), professionalList: vi.fn(),
   professionalProvision: vi.fn(), createRefreshToken: vi.fn(), setAccountStatus: vi.fn(),
   updateIdentity: vi.fn(), findOne: vi.fn(),
+  replaceNonAdminPasswordAndRevokeSessions: vi.fn(),
   assignRole: vi.fn(), removeRole: vi.fn(),
 }));
 vi.mock('../models/UserRole.js', () => ({
@@ -22,10 +23,12 @@ vi.mock('../models/ProfessionalProvisioning.js', () => {
   };
 });
 vi.mock('../models/User.js', () => ({
+  AdminPasswordChangeNotAllowedError: class AdminPasswordChangeNotAllowedError extends Error {},
   LastActiveAdminError: class LastActiveAdminError extends Error {},
   User: {
     findById: mocks.findById, findOne: mocks.findOne,
     setAccountStatus: mocks.setAccountStatus, updateIdentity: mocks.updateIdentity,
+    replaceNonAdminPasswordAndRevokeSessions: mocks.replaceNonAdminPasswordAndRevokeSessions,
   },
   normalizeEmail: (email: string) => email.trim().toLowerCase(),
 }));
@@ -63,6 +66,8 @@ describe('Admin user provisioning API', () => {
       user(['participant'], { accountStatus }));
     mocks.findOne.mockResolvedValue(null);
     mocks.updateIdentity.mockImplementation(async (_id, update) => user(['participant'], update));
+    mocks.replaceNonAdminPasswordAndRevokeSessions.mockImplementation(async (id, passwordHash) =>
+      user(['participant'], { id, passwordHash }));
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -319,5 +324,73 @@ describe('Admin user provisioning API', () => {
     mocks.findById.mockResolvedValue(user(['participant']));
     await request(app).delete('/api/admin/users/target/roles/creator')
       .set('Authorization', bearer()).expect(403);
+  });
+
+  it.each([
+    ['Creator', ['creator']],
+    ['Organizer', ['organizer']],
+    ['ordinary identity', ['participant']],
+    ['multi-role non-Admin', ['creator', 'organizer', 'participant']],
+  ])('replaces a %s password with bcrypt and returns only safe state', async (_label, roles) => {
+    const target = user(roles, { id: 'target', name: 'Preserved', email: 'kept@example.com' });
+    mocks.replaceNonAdminPasswordAndRevokeSessions.mockImplementationOnce(async (_id, hash) => ({
+      ...target, passwordHash: hash,
+    }));
+    const response = await request(app).put('/api/admin/users/target/password')
+      .set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(200);
+    const [targetId, hash] = mocks.replaceNonAdminPasswordAndRevokeSessions.mock.calls[0];
+    expect(targetId).toBe('target');
+    expect(hash).toMatch(/^\$2[aby]\$10\$/);
+    expect(response.body.user).toMatchObject({
+      id: 'target', roles, name: 'Preserved', email: 'kept@example.com', accountStatus: 'active',
+    });
+    expect(response.body.user).not.toHaveProperty('password');
+    expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('replaces a blocked non-Admin password without changing blocked status', async () => {
+    mocks.replaceNonAdminPasswordAndRevokeSessions.mockResolvedValueOnce(user(['creator'], {
+      id: 'blocked', accountStatus: 'blocked', name: 'Still preserved',
+    }));
+    const response = await request(app).put('/api/admin/users/blocked/password')
+      .set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(200);
+    expect(response.body.user).toMatchObject({ accountStatus: 'blocked', name: 'Still preserved' });
+    expect(mocks.setAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([['admin'], ['creator', 'admin'], ['organizer', 'admin']])(
+    'protects an authoritative Admin target with roles %j', async () => {
+      const { AdminPasswordChangeNotAllowedError } = await import('../models/User.js');
+      mocks.replaceNonAdminPasswordAndRevokeSessions
+        .mockRejectedValueOnce(new AdminPasswordChangeNotAllowedError());
+      await request(app).put('/api/admin/users/other/password').set('Authorization', bearer())
+        .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+        .expect(409, { error: 'admin_password_change_not_allowed' });
+    },
+  );
+
+  it('rejects self-target, non-Admin callers, unknown targets, and invalid passwords', async () => {
+    await request(app).put(`/api/admin/users/${user([]).id}/password`)
+      .set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+      .expect(409, { error: 'self_password_change_use_account_security' });
+
+    mocks.findById.mockResolvedValueOnce(user(['participant']));
+    await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(403);
+
+    mocks.findById.mockResolvedValue(user(['admin']));
+    mocks.replaceNonAdminPasswordAndRevokeSessions.mockResolvedValueOnce(null);
+    await request(app).put('/api/admin/users/missing/password').set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+      .expect(404, { error: 'user_not_found' });
+    await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
+      .send({ newPassword: 'short', confirmPassword: 'short' })
+      .expect(400, { error: 'invalid_input' });
+    await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
+      .send({ newPassword: 'new-password', confirmPassword: 'different-password' })
+      .expect(400, { error: 'password_confirmation_mismatch' });
   });
 });

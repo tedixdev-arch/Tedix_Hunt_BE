@@ -1,11 +1,18 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
   ActivationAlreadyPendingError,
   AdminProvisioning,
   GuestPromotionError,
 } from '../models/AdminProvisioning.js';
-import { LastActiveAdminError, normalizeEmail, User, type IUser } from '../models/User.js';
+import {
+  AdminPasswordChangeNotAllowedError,
+  LastActiveAdminError,
+  normalizeEmail,
+  User,
+  type IUser,
+} from '../models/User.js';
 import { LastAdminError, UserRoles, type UserRole } from '../models/UserRole.js';
 import {
   ProfessionalActivationAlreadyPendingError,
@@ -15,6 +22,7 @@ import {
 } from '../models/ProfessionalProvisioning.js';
 
 const router = express.Router();
+const PASSWORD_BCRYPT_ROUNDS = 10;
 
 const safeUser = (user: IUser) => ({
   id: user.id, email: user.email, name: user.name, roles: user.roles,
@@ -155,6 +163,64 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (request, response
   } catch (error) {
     if (isUniqueViolation(error)) {
       return response.status(409).json({ error: 'email_already_in_use' });
+    }
+    throw error;
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/users/{id}/password:
+ *   put:
+ *     tags: [Admin Users]
+ *     summary: Directly replace a non-Admin identity's password
+ *     description: Requires authoritative Admin capability. The target must not hold the authoritative Admin role and must not be the caller. The password is bcrypt-hashed, all target refresh sessions are atomically revoked, and blocked status and all other identity and business state are preserved. Admins must use /api/auth/change-password for their own password.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [newPassword, confirmPassword]
+ *             properties:
+ *               newPassword: { type: string, format: password, minLength: 8 }
+ *               confirmPassword: { type: string, format: password, minLength: 8 }
+ *     responses:
+ *       200: { description: Password replaced and all refresh sessions revoked }
+ *       400: { description: Invalid password or confirmation mismatch }
+ *       403: { description: Authoritative Admin capability required }
+ *       404: { description: Target identity not found }
+ *       409: { description: Admin target protected or self-target must use account security }
+ */
+router.put('/:id/password', requireAuth, requireRole('admin'), async (request: AuthRequest, response) => {
+  const targetId = String(request.params.id);
+  if (targetId === request.user!.id) {
+    return response.status(409).json({ error: 'self_password_change_use_account_security' });
+  }
+  const body: unknown = request.body;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return response.status(400).json({ error: 'invalid_input' });
+  }
+  const { newPassword, confirmPassword, ...extra } = body as Record<string, unknown>;
+  if (Object.keys(extra).length || typeof newPassword !== 'string' || newPassword.length < 8) {
+    return response.status(400).json({ error: 'invalid_input' });
+  }
+  if (typeof confirmPassword !== 'string' || newPassword !== confirmPassword) {
+    return response.status(400).json({ error: 'password_confirmation_mismatch' });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, PASSWORD_BCRYPT_ROUNDS);
+  try {
+    const user = await User.replaceNonAdminPasswordAndRevokeSessions(targetId, passwordHash);
+    if (!user) return response.status(404).json({ error: 'user_not_found' });
+    return response.json({ user: safeUser(user) });
+  } catch (error) {
+    if (error instanceof AdminPasswordChangeNotAllowedError) {
+      return response.status(409).json({ error: 'admin_password_change_not_allowed' });
     }
     throw error;
   }
