@@ -390,7 +390,7 @@ describe('Admin user provisioning API', () => {
     }));
     const response = await request(app).put('/api/admin/users/target/password')
       .set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(200);
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' }).expect(200);
     const [targetId, hash] = mocks.replaceNonAdminPasswordAndRevokeSessions.mock.calls[0];
     expect(targetId).toBe('target');
     expect(hash).toMatch(/^\$2[aby]\$10\$/);
@@ -407,7 +407,7 @@ describe('Admin user provisioning API', () => {
     }));
     const response = await request(app).put('/api/admin/users/blocked/password')
       .set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(200);
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' }).expect(200);
     expect(response.body.user).toMatchObject({ accountStatus: 'blocked', name: 'Still preserved' });
     expect(mocks.setAccountStatus).not.toHaveBeenCalled();
   });
@@ -418,7 +418,7 @@ describe('Admin user provisioning API', () => {
       mocks.replaceNonAdminPasswordAndRevokeSessions
         .mockRejectedValueOnce(new AdminPasswordChangeNotAllowedError());
       await request(app).put('/api/admin/users/other/password').set('Authorization', bearer())
-        .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+        .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' })
         .expect(409, { error: 'admin_password_change_not_allowed' });
     },
   );
@@ -426,23 +426,30 @@ describe('Admin user provisioning API', () => {
   it('rejects self-target, non-Admin callers, unknown targets, and invalid passwords', async () => {
     await request(app).put(`/api/admin/users/${user([]).id}/password`)
       .set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' })
       .expect(409, { error: 'self_password_change_use_account_security' });
 
     mocks.findById.mockResolvedValueOnce(user(['participant']));
     await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'new-password' }).expect(403);
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' }).expect(403);
 
     mocks.findById.mockResolvedValue(user(['admin']));
     mocks.replaceNonAdminPasswordAndRevokeSessions.mockResolvedValueOnce(null);
     await request(app).put('/api/admin/users/missing/password').set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'new-password' })
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'Newpass1!' })
       .expect(404, { error: 'user_not_found' });
     await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
       .send({ newPassword: 'short', confirmPassword: 'short' })
-      .expect(400, { error: 'invalid_input' });
+      .expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
     await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
-      .send({ newPassword: 'new-password', confirmPassword: 'different-password' })
+      .send({ newPassword: 'Newpass1!', confirmPassword: 'different-password' })
       .expect(400, { error: 'password_confirmation_mismatch' });
+  });
+
+  it('rejects weak Admin password replacement before persistence', async () => {
+    await request(app).put('/api/admin/users/target/password').set('Authorization', bearer())
+      .send({ newPassword: 'password1', confirmPassword: 'password1' })
+      .expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
+    expect(mocks.replaceNonAdminPasswordAndRevokeSessions).not.toHaveBeenCalled();
   });
 });

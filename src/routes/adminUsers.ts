@@ -13,6 +13,7 @@ import {
   User,
   type IUser,
 } from '../models/User.js';
+import { meetsPasswordPolicy, passwordPolicyError } from '../lib/passwordPolicy.js';
 import { LastAdminError, UserRoles, type UserRole } from '../models/UserRole.js';
 import {
   ProfessionalActivationAlreadyPendingError,
@@ -246,11 +247,14 @@ router.put('/:id/password', requireAuth, requireRole('admin'), async (request: A
     return response.status(400).json({ error: 'invalid_input' });
   }
   const { newPassword, confirmPassword, ...extra } = body as Record<string, unknown>;
-  if (Object.keys(extra).length || typeof newPassword !== 'string' || newPassword.length < 8) {
+  if (Object.keys(extra).length || typeof newPassword !== 'string' || !newPassword || typeof confirmPassword !== 'string') {
     return response.status(400).json({ error: 'invalid_input' });
   }
-  if (typeof confirmPassword !== 'string' || newPassword !== confirmPassword) {
+  if (newPassword !== confirmPassword) {
     return response.status(400).json({ error: 'password_confirmation_mismatch' });
+  }
+  if (!meetsPasswordPolicy(newPassword)) {
+    return response.status(400).json(passwordPolicyError());
   }
 
   const passwordHash = await bcrypt.hash(newPassword, PASSWORD_BCRYPT_ROUNDS);

@@ -26,8 +26,8 @@ const validInput = {
   organizationType: 'school',
   reason: 'Run educational Hunts',
   phone: '+44 1234',
-  password: 'secure-password',
-  confirmPassword: 'secure-password',
+  password: 'Secure123!',
+  confirmPassword: 'Secure123!',
 };
 const created = {
   id: 'application-1',
@@ -116,14 +116,24 @@ describe('POST /api/organizer-applications', () => {
   });
 
   it.each([
-    [{ confirmPassword: undefined }, 'password_confirmation_mismatch'],
-    [{ password: undefined }, 'invalid_password'],
-    [{ password: 'short', confirmPassword: 'short' }, 'invalid_password'],
-    [{ confirmPassword: 'different-password' }, 'password_confirmation_mismatch'],
-  ])('rejects invalid credentials %#', async (overrides, error) => {
+    [{ confirmPassword: undefined }, { error: 'invalid_input' }],
+    [{ password: undefined }, { error: 'invalid_input' }],
+    [{ password: 'short', confirmPassword: 'short' }, {
+      error: 'password_policy_not_met',
+      message: 'Password must be at least 8 characters and include a letter, a number, and a special character.',
+    }],
+    [{ confirmPassword: 'different-password' }, { error: 'password_confirmation_mismatch' }],
+  ])('rejects invalid credentials %#', async (overrides, body) => {
     const input: Record<string, unknown> = { ...validInput, ...overrides };
     for (const [key, value] of Object.entries(input)) if (value === undefined) delete input[key];
-    await request(app).post('/api/organizer-applications').send(input).expect(400, { error });
+    await request(app).post('/api/organizer-applications').send(input).expect(400, body);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a weak application password through the shared policy', async () => {
+    await request(app).post('/api/organizer-applications').send({
+      ...validInput, password: 'password1', confirmPassword: 'password1',
+    }).expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
     expect(mocks.create).not.toHaveBeenCalled();
   });
 

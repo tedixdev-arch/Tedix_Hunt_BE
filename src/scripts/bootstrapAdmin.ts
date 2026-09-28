@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import type { Pool } from 'pg';
 import { pool } from '../lib/postgres.js';
 import { normalizeEmail } from '../models/User.js';
+import { meetsPasswordPolicy, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
 
 const BOOTSTRAP_LOCK_ID = 2_026_090_601;
 
@@ -32,8 +33,8 @@ export const validateBootstrapInput = (input: BootstrapAdminInput): BootstrapAdm
       'A password is required. Provide --password or set TEDIX_BOOTSTRAP_ADMIN_PASSWORD.',
     );
   }
-  if (input.password.length < 8) {
-    throw new BootstrapAdminError('The Admin password must be at least 8 characters.');
+  if (!meetsPasswordPolicy(input.password)) {
+    throw new BootstrapAdminError(PASSWORD_POLICY_MESSAGE);
   }
   if (input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim())) {
     throw new BootstrapAdminError('--name must be non-empty when supplied.');

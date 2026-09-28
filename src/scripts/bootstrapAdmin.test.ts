@@ -61,12 +61,12 @@ describe('bootstrapAdmin', () => {
   it('creates a normalized Admin with a bcrypt password and no unrelated roles', async () => {
     const fake = fakeDatabase();
     const result = await bootstrapAdmin({
-      email: '  FIRST.Admin@Example.COM ', password: 'secure-password', name: ' First Admin ',
+      email: '  FIRST.Admin@Example.COM ', password: 'Secure123!', name: ' First Admin ',
     }, fake.database);
 
     expect(result).toEqual({ email: 'first.admin@example.com', userId: 'user-1' });
     expect(fake.users()[0].roles).toEqual(new Set(['admin']));
-    expect(await bcrypt.compare('secure-password', fake.users()[0].passwordHash!)).toBe(true);
+    expect(await bcrypt.compare('Secure123!', fake.users()[0].passwordHash!)).toBe(true);
     const insert = fake.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO users'))!;
     expect(insert[0]).toContain("VALUES ($1, $2, 'creator', $3, FALSE)");
     expect(insert[1]).toEqual(['first.admin@example.com', expect.any(String), 'First Admin']);
@@ -79,9 +79,9 @@ describe('bootstrapAdmin', () => {
       roles: new Set(['participant', 'creator']),
     }]);
 
-    await bootstrapAdmin({ email: 'person@example.com', password: 'ignored-password' }, fake.database);
+    await bootstrapAdmin({ email: 'person@example.com', password: 'Ignored1!' }, fake.database);
     await bootstrapAdmin({
-      email: 'person@example.com', password: 'ignored-password', allowAdditionalAdmin: true,
+      email: 'person@example.com', password: 'Ignored1!', allowAdditionalAdmin: true,
     }, fake.database);
 
     expect(fake.users()[0].passwordHash).toBe(storedHash);
@@ -96,7 +96,7 @@ describe('bootstrapAdmin', () => {
     }]);
 
     await expect(bootstrapAdmin({
-      email: 'person@example.com', password: 'new-password',
+      email: 'person@example.com', password: 'Newpass1!',
     }, fake.database)).rejects.toThrow('will not set or reset');
     expect(fake.users()[0].roles).toEqual(new Set(['organizer']));
   });
@@ -107,17 +107,17 @@ describe('bootstrapAdmin', () => {
     }]);
 
     await expect(bootstrapAdmin({
-      email: 'second@example.com', password: 'secure-password',
+      email: 'second@example.com', password: 'Secure123!',
     }, fake.database)).rejects.toThrow('An Admin already exists');
     await expect(bootstrapAdmin({
-      email: 'second@example.com', password: 'secure-password', allowAdditionalAdmin: true,
+      email: 'second@example.com', password: 'Secure123!', allowAdditionalAdmin: true,
     }, fake.database)).resolves.toMatchObject({ email: 'second@example.com' });
   });
 
   it('rolls back new-user creation when authoritative role assignment fails', async () => {
     const fake = fakeDatabase([], true);
     await expect(bootstrapAdmin({
-      email: 'admin@example.com', password: 'secure-password',
+      email: 'admin@example.com', password: 'Secure123!',
     }, fake.database)).rejects.toThrow('role insert failed');
     expect(fake.users()).toHaveLength(0);
     expect(fake.query).toHaveBeenCalledWith('ROLLBACK');
@@ -142,26 +142,26 @@ describe('bootstrapAdmin', () => {
       '--email', 'admin@example.com', '--password', 'short',
     ])).toThrow('at least 8 characters');
     expect(() => parseBootstrapArguments([
-      '--email', 'admin@example.com', '--password', 'long-enough', '--name', '   ',
+      '--email', 'admin@example.com', '--password', 'Longenough1!', '--name', '   ',
     ])).toThrow('--name must be non-empty');
   });
 
   it('accepts the environment password when --password is absent', () => {
     const parsed = parseBootstrapArguments(
       ['--email', 'admin@example.com'],
-      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'environment-password' },
+      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'Environment1!' },
     );
 
-    expect(parsed.password).toBe('environment-password');
+    expect(parsed.password).toBe('Environment1!');
   });
 
   it('prefers an explicit --password over the environment', () => {
     const parsed = parseBootstrapArguments(
-      ['--email', 'admin@example.com', '--password', 'explicit-password'],
-      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'environment-password' },
+      ['--email', 'admin@example.com', '--password', 'Explicit1!'],
+      { TEDIX_BOOTSTRAP_ADMIN_PASSWORD: 'Environment1!' },
     );
 
-    expect(parsed.password).toBe('explicit-password');
+    expect(parsed.password).toBe('Explicit1!');
   });
 
   it('fails safely when neither password source is present', () => {
