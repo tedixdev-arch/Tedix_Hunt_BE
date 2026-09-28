@@ -147,7 +147,7 @@ router.post('/creator/activate', activateProfessional('creator'));
  *     description: Creator, participant and guest authentication
  */
 
-// Creator capabilities are provisioned only by trusted internal/admin code; there is no public signup.
+// Creator capability comes from Admin provisioning or approval of a self-registration application.
 
 /**
  * @openapi

@@ -63,6 +63,24 @@ CREATE TABLE IF NOT EXISTS organizer_applications (
 CREATE UNIQUE INDEX IF NOT EXISTS organizer_applications_activation_token_hash_key
   ON organizer_applications (activation_token_hash) WHERE activation_token_hash IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS creator_applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS creator_applications_status_created_at_idx
+  ON creator_applications (status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS creator_applications_pending_user_key
+  ON creator_applications (user_id) WHERE status = 'pending';
+
 CREATE TABLE IF NOT EXISTS professional_activation_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

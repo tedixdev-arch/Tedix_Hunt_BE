@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import request from 'supertest';
+import bcrypt from 'bcryptjs';
 import { runMigrations } from './migrate.js';
 import { baselineMigration } from './migrations/001_baseline.js';
 import { userRolesMigration } from './migrations/002_user_roles.js';
@@ -17,6 +19,7 @@ import { professionalActivationTokensMigration } from './migrations/011_professi
 import { professionalActivationPurposesMigration } from './migrations/012_professional_activation_purposes.js';
 import { userAccountStatusMigration } from './migrations/013_user_account_status.js';
 import { retiredAccountStatusMigration } from './migrations/014_retired_account_status.js';
+import { creatorApplicationsMigration } from './migrations/015_creator_applications.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -27,6 +30,7 @@ const migrations = [
   professionalActivationPurposesMigration,
   userAccountStatusMigration,
   retiredAccountStatusMigration,
+  creatorApplicationsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -39,6 +43,31 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip;
 describeWithDatabase('PostgreSQL migrations', () => {
   const pool = new Pool({ connectionString: databaseUrl });
   let client: PoolClient;
+  let closeApplicationPool: (() => Promise<void>) | undefined;
+
+  const application = async () => {
+    // The application pool normally reads DATABASE_URL. Point it at the isolated integration
+    // database before importing the app so HTTP requests exercise real repositories and SQL.
+    process.env.DATABASE_URL = databaseUrl;
+    const { environment } = await import('../config/environment.js');
+    environment.databaseUrl = databaseUrl;
+    const [{ createApp }, { signJwt }, postgres] = await Promise.all([
+      import('../app.js'), import('../lib/jwt.js'), import('../lib/postgres.js'),
+    ]);
+    closeApplicationPool = async () => postgres.pool.end();
+    return { app: createApp(), signJwt };
+  };
+
+  const insertAdmin = async (email: string) => {
+    const passwordHash = await bcrypt.hash('AdminPass1!', 10);
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash, role, name, is_guest)
+       VALUES ($1, $2, 'participant', 'Integration Admin', FALSE) RETURNING id`,
+      [email, passwordHash],
+    );
+    await client.query("INSERT INTO user_roles (user_id, role) VALUES ($1, 'admin')", [result.rows[0].id]);
+    return result.rows[0].id;
+  };
 
   beforeAll(async () => {
     client = await pool.connect();
@@ -53,6 +82,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
   });
 
   afterAll(async () => {
+    await closeApplicationPool?.();
     client?.release();
     await pool.end();
   });
@@ -90,6 +120,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '012_professional_activation_purposes',
       '013_user_account_status',
       '014_retired_account_status',
+      '015_creator_applications',
     ]);
     try {
       await expect(client.query(
@@ -157,6 +188,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '012_professional_activation_purposes' },
       { id: '013_user_account_status' },
       { id: '014_retired_account_status' },
+      { id: '015_creator_applications' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -204,11 +236,182 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'hunt_special_awards',
       'organizer_applications',
       'professional_activation_tokens',
+      'creator_applications',
     ]) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
         `public.${table}`,
       ]);
       expect(result.rows[0]?.exists).toBe(table);
+    }
+  });
+
+  it('runs self-registration through approval and normal Creator login with the original password', async () => {
+    const email = 'creator-self-registration@example.com';
+    const password = 'OriginalPass1!';
+    const adminEmail = 'creator-review-admin@example.com';
+    const { app, signJwt } = await application();
+    const adminId = await insertAdmin(adminEmail);
+    let userId: string | undefined;
+    try {
+      const submitted = await request(app).post('/api/creator-applications').send({
+        name: 'Self Registered Creator', email, password, confirmPassword: password,
+      }).expect(201);
+      expect(submitted.body.status).toBe('pending');
+
+      const identity = await client.query<{ id: string; password_hash: string }>(
+        'SELECT id, password_hash FROM users WHERE email = $1', [email],
+      );
+      userId = identity.rows[0].id;
+      expect(identity.rows[0].password_hash).not.toBe(password);
+      await expect(bcrypt.compare(password, identity.rows[0].password_hash)).resolves.toBe(true);
+      await expect(client.query(
+        "SELECT role FROM user_roles WHERE user_id = $1 AND role = 'creator'", [userId],
+      )).resolves.toMatchObject({ rows: [] });
+      await expect(client.query(
+        'SELECT status FROM creator_applications WHERE id = $1', [submitted.body.id],
+      )).resolves.toMatchObject({ rows: [{ status: 'pending' }] });
+      await expect(client.query(
+        'SELECT id FROM professional_activation_tokens WHERE user_id = $1', [userId],
+      )).resolves.toMatchObject({ rows: [] });
+
+      // Possessing valid identity credentials is not Creator authorization while pending.
+      await request(app).post('/api/auth/creator/login').send({ email, password })
+        .expect(401, { error: 'invalid_credentials' });
+
+      const passwordHashBeforeApproval = identity.rows[0].password_hash;
+      const bearer = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
+      await request(app).post(`/api/creator-applications/${submitted.body.id}/approve`)
+        .set('Authorization', bearer).expect(200);
+
+      const approved = await client.query<{ password_hash: string; status: string }>(
+        `SELECT users.password_hash, creator_applications.status
+         FROM users JOIN creator_applications ON creator_applications.user_id = users.id
+         WHERE creator_applications.id = $1`, [submitted.body.id],
+      );
+      expect(approved.rows[0]).toEqual({ password_hash: passwordHashBeforeApproval, status: 'approved' });
+      await expect(client.query(
+        "SELECT role FROM user_roles WHERE user_id = $1 AND role = 'creator'", [userId],
+      )).resolves.toMatchObject({ rows: [{ role: 'creator' }] });
+      await expect(client.query(
+        'SELECT id FROM professional_activation_tokens WHERE user_id = $1', [userId],
+      )).resolves.toMatchObject({ rows: [] });
+
+      const login = await request(app).post('/api/auth/creator/login').send({ email, password }).expect(200);
+      expect(login.body.user).toMatchObject({ id: userId, roles: ['creator'] });
+      expect(login.body.tokens).toMatchObject({ accessToken: expect.any(String), refreshToken: expect.any(String) });
+    } finally {
+      if (userId) await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM creator_applications WHERE email = $1', [email]);
+      await client.query('DELETE FROM users WHERE email IN ($1, $2)', [email, adminEmail]);
+    }
+  });
+
+  it('preserves an established identity password through application and approval', async () => {
+    const email = 'existing-password-creator@example.com';
+    const existingPassword = 'ExistingPass1!';
+    const submittedPassword = 'SubmittedPass2!';
+    const adminEmail = 'existing-password-review-admin@example.com';
+    const existingHash = await bcrypt.hash(existingPassword, 10);
+    const { app, signJwt } = await application();
+    const adminId = await insertAdmin(adminEmail);
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash, role, name, is_guest)
+       VALUES ($1, $2, 'participant', 'Existing Identity', FALSE) RETURNING id`, [email, existingHash],
+    );
+    const userId = inserted.rows[0].id;
+    try {
+      const submitted = await request(app).post('/api/creator-applications').send({
+        name: 'Existing Identity', email, password: submittedPassword, confirmPassword: submittedPassword,
+      }).expect(201);
+      await expect(client.query('SELECT password_hash FROM users WHERE id = $1', [userId]))
+        .resolves.toMatchObject({ rows: [{ password_hash: existingHash }] });
+
+      const bearer = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
+      await request(app).post(`/api/creator-applications/${submitted.body.id}/approve`)
+        .set('Authorization', bearer).expect(200);
+      await expect(client.query('SELECT password_hash FROM users WHERE id = $1', [userId]))
+        .resolves.toMatchObject({ rows: [{ password_hash: existingHash }] });
+      await request(app).post('/api/auth/creator/login')
+        .send({ email, password: submittedPassword }).expect(401);
+      await request(app).post('/api/auth/creator/login')
+        .send({ email, password: existingPassword }).expect(200);
+    } finally {
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM creator_applications WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM users WHERE email IN ($1, $2)', [email, adminEmail]);
+    }
+  });
+
+  it('establishes a password once for an active passwordless identity and does not replace it on approval', async () => {
+    const email = 'passwordless-creator-applicant@example.com';
+    const password = 'EstablishedPass1!';
+    const adminEmail = 'passwordless-review-admin@example.com';
+    const { app, signJwt } = await application();
+    const adminId = await insertAdmin(adminEmail);
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash, role, name, is_guest)
+       VALUES ($1, NULL, 'participant', 'Passwordless Identity', FALSE) RETURNING id`, [email],
+    );
+    const userId = inserted.rows[0].id;
+    try {
+      const submitted = await request(app).post('/api/creator-applications').send({
+        name: 'Passwordless Identity', email, password, confirmPassword: password,
+      }).expect(201);
+      const established = await client.query<{ password_hash: string }>(
+        'SELECT password_hash FROM users WHERE id = $1', [userId],
+      );
+      await expect(bcrypt.compare(password, established.rows[0].password_hash)).resolves.toBe(true);
+
+      const bearer = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
+      await request(app).post(`/api/creator-applications/${submitted.body.id}/approve`)
+        .set('Authorization', bearer).expect(200);
+      await expect(client.query('SELECT password_hash FROM users WHERE id = $1', [userId]))
+        .resolves.toMatchObject({ rows: [{ password_hash: established.rows[0].password_hash }] });
+      await request(app).post('/api/auth/creator/login').send({ email, password }).expect(200);
+    } finally {
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM creator_applications WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM users WHERE email IN ($1, $2)', [email, adminEmail]);
+    }
+  });
+
+  it('keeps the real Admin-provisioned Creator activation token flow one-time', async () => {
+    const email = 'admin-provisioned-creator@example.com';
+    const password = 'ActivatedPass1!';
+    const adminEmail = 'provisioning-admin@example.com';
+    const { app, signJwt } = await application();
+    const adminId = await insertAdmin(adminEmail);
+    let userId: string | undefined;
+    try {
+      const bearer = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
+      const provisioned = await request(app).post('/api/admin/users/professional')
+        .set('Authorization', bearer).send({ email, name: 'Provisioned Creator', role: 'creator' })
+        .expect(201);
+      userId = provisioned.body.user.id;
+      expect(provisioned.body).toMatchObject({
+        role: 'creator', activationRequired: true, activationToken: expect.any(String),
+      });
+      await expect(client.query(
+        `SELECT purpose, consumed_at FROM professional_activation_tokens
+         WHERE user_id = $1`, [userId],
+      )).resolves.toMatchObject({ rows: [{ purpose: 'creator_activation', consumed_at: null }] });
+
+      await request(app).post('/api/auth/creator/activate')
+        .send({ token: provisioned.body.activationToken, password }).expect(200);
+      await request(app).post('/api/auth/creator/login').send({ email, password }).expect(200);
+      await request(app).post('/api/auth/creator/activate')
+        .send({ token: provisioned.body.activationToken, password: 'AnotherPass2!' })
+        .expect(401, { error: 'invalid_or_expired_activation' });
+      await expect(client.query(
+        `SELECT consumed_at IS NOT NULL AS consumed FROM professional_activation_tokens
+         WHERE user_id = $1`, [userId],
+      )).resolves.toMatchObject({ rows: [{ consumed: true }] });
+    } finally {
+      if (userId) {
+        await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM professional_activation_tokens WHERE user_id = $1', [userId]);
+      }
+      await client.query('DELETE FROM users WHERE email IN ($1, $2)', [email, adminEmail]);
     }
   });
 
