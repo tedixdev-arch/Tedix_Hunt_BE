@@ -1,4 +1,5 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import {
   OrganizerApplications,
   ApplicationNotPendingError,
@@ -10,11 +11,13 @@ import { requireAuth, requireAnyRole, type AuthRequest } from '../middleware/aut
 const router = express.Router();
 const allowedFields = new Set([
   'name', 'email', 'organizationName', 'organizationType', 'reason', 'phone',
+  'password', 'confirmPassword',
 ]);
+const PASSWORD_BCRYPT_ROUNDS = 10;
 const organizationTypes: OrganizationType[] = ['school', 'ngo', 'community', 'other'];
 const statuses: OrganizerApplicationStatus[] = ['pending', 'approved', 'rejected'];
 
-// Deliberately omits the activation token digest from every API representation.
+// Credentials and retired application-activation fields are never API data.
 const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.findById>> & {}) => ({
   id: application.id,
   name: application.name,
@@ -30,8 +33,6 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
   reviewedBy: application.reviewedBy,
   userId: application.userId,
   organizationId: application.organizationId,
-  activationExpiresAt: application.activationExpiresAt,
-  activatedAt: application.activatedAt,
 });
 
 /**
@@ -47,7 +48,7 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
  *   post:
  *     tags: [Organizer Applications]
  *     summary: Submit an Organizer application
- *     description: Submitting an application does not create an account or grant Organizer access.
+ *     description: Establishes credentials, but does not grant Organizer access while pending.
  *     requestBody:
  *       required: true
  *       content:
@@ -55,7 +56,7 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
  *           schema:
  *             type: object
  *             additionalProperties: false
- *             required: [name, email, organizationName, organizationType, reason]
+ *             required: [name, email, organizationName, organizationType, reason, password, confirmPassword]
  *             properties:
  *               name: { type: string, minLength: 1 }
  *               email: { type: string, minLength: 1, format: email }
@@ -63,6 +64,8 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
  *               organizationType: { type: string, enum: [school, ngo, community, other] }
  *               reason: { type: string, minLength: 1 }
  *               phone: { type: string, nullable: true }
+ *               password: { type: string, format: password, minLength: 8 }
+ *               confirmPassword: { type: string, format: password, minLength: 8 }
  *     responses:
  *       201:
  *         description: Pending application created
@@ -93,7 +96,15 @@ router.post('/', async (request, response) => {
       (input.phone !== undefined && input.phone !== null && typeof input.phone !== 'string')) {
     return response.status(400).json({ error: 'invalid_input' });
   }
+  if (typeof input.password !== 'string' || input.password.length < 8) {
+    return response.status(400).json({ error: 'invalid_password' });
+  }
+  if (typeof input.confirmPassword !== 'string' || input.password !== input.confirmPassword) {
+    return response.status(400).json({ error: 'password_confirmation_mismatch' });
+  }
 
+  // Hash before crossing into persistence; applications never contain credentials.
+  const passwordHash = await bcrypt.hash(input.password, PASSWORD_BCRYPT_ROUNDS);
   const application = await OrganizerApplications.create({
     name: (input.name as string).trim(),
     email: (input.email as string).trim().toLowerCase(),
@@ -101,6 +112,7 @@ router.post('/', async (request, response) => {
     organizationType: input.organizationType as OrganizationType,
     reason: (input.reason as string).trim(),
     phone: typeof input.phone === 'string' ? input.phone.trim() || null : null,
+    passwordHash,
   });
 
   return response.status(201).json({
@@ -130,11 +142,7 @@ router.post('/:id/approve', requireAuth, requireAnyRole(['admin']), async (reque
   try {
     const result = await OrganizerApplications.approve(request.params.id, request.user!.id);
     if (!result) return response.status(404).json({ error: 'application_not_found' });
-    return response.json({
-      application: serialize(result.application),
-      activationToken: result.activationToken,
-      activationExpiresAt: result.application.activationExpiresAt,
-    });
+    return response.json({ application: serialize(result) });
   } catch (error) {
     if (error instanceof ApplicationNotPendingError) {
       return response.status(409).json({ error: 'application_already_decided' });

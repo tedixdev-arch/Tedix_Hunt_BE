@@ -1,4 +1,5 @@
 import request from 'supertest';
+import bcrypt from 'bcryptjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -25,17 +26,19 @@ const validInput = {
   organizationType: 'school',
   reason: 'Run educational Hunts',
   phone: '+44 1234',
+  password: 'secure-password',
+  confirmPassword: 'secure-password',
 };
 const created = {
   id: 'application-1',
-  ...validInput,
+  name: validInput.name, email: validInput.email, organizationName: validInput.organizationName,
+  organizationType: validInput.organizationType, reason: validInput.reason, phone: validInput.phone,
   status: 'pending',
   createdAt: new Date('2026-09-18T12:00:00.000Z'),
   updatedAt: new Date('2026-09-18T12:00:00.000Z'),
 };
 const reviewedFields = {
   reviewedAt: null, reviewedBy: null, userId: null, organizationId: null,
-  activationExpiresAt: null, activatedAt: null,
 };
 const admin = {
   id: 'admin-1', email: 'admin@example.com', role: 'participant', roles: ['admin'],
@@ -55,12 +58,17 @@ describe('POST /api/organizer-applications', () => {
 
     expect(response.body).toEqual({
       id: created.id,
-      ...validInput,
+      name: validInput.name, email: validInput.email, organizationName: validInput.organizationName,
+      organizationType: validInput.organizationType, reason: validInput.reason, phone: validInput.phone,
       status: 'pending',
       createdAt: created.createdAt.toISOString(),
     });
     expect(response.body).not.toHaveProperty('updatedAt');
+    expect(response.body).not.toHaveProperty('password');
     expect(mocks.create).toHaveBeenCalledOnce();
+    const stored = mocks.create.mock.calls[0][0];
+    expect(stored.passwordHash).not.toBe(validInput.password);
+    await expect(bcrypt.compare(validInput.password, stored.passwordHash)).resolves.toBe(true);
   });
 
   it('normalizes email and trims surrounding whitespace', async () => {
@@ -73,14 +81,17 @@ describe('POST /api/organizer-applications', () => {
       phone: '  +44 1234  ',
     }).expect(201);
 
-    expect(mocks.create).toHaveBeenCalledWith(validInput);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      name: validInput.name, email: validInput.email, organizationName: validInput.organizationName,
+      reason: validInput.reason, phone: validInput.phone, passwordHash: expect.any(String),
+    }));
   });
 
   it.each([undefined, '', '   ', null])('turns optional phone %p into null', async (phone) => {
     const input: Record<string, unknown> = { ...validInput, phone };
     if (phone === undefined) delete input.phone;
     await request(app).post('/api/organizer-applications').send(input).expect(201);
-    expect(mocks.create).toHaveBeenCalledWith({ ...validInput, phone: null });
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ phone: null }));
   });
 
   it.each([
@@ -101,6 +112,18 @@ describe('POST /api/organizer-applications', () => {
     await request(app).post('/api/organizer-applications')
       .send({ ...validInput, organizationType: 'company' })
       .expect(400, { error: 'invalid_input' });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ confirmPassword: undefined }, 'password_confirmation_mismatch'],
+    [{ password: undefined }, 'invalid_password'],
+    [{ password: 'short', confirmPassword: 'short' }, 'invalid_password'],
+    [{ confirmPassword: 'different-password' }, 'password_confirmation_mismatch'],
+  ])('rejects invalid credentials %#', async (overrides, error) => {
+    const input: Record<string, unknown> = { ...validInput, ...overrides };
+    for (const [key, value] of Object.entries(input)) if (value === undefined) delete input[key];
+    await request(app).post('/api/organizer-applications').send(input).expect(400, { error });
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
@@ -141,17 +164,17 @@ describe('admin organizer application decisions', () => {
     expect(response.body[0]).not.toHaveProperty('activationTokenHash');
   });
 
-  it('returns the one-time plaintext token from successful approval', async () => {
+  it('approves without returning an activation credential', async () => {
     const approved = {
       ...created, ...reviewedFields, status: 'approved', reviewedBy: admin.id,
       userId: 'user-1', organizationId: 'org-1',
-      activationExpiresAt: new Date('2026-09-22T12:00:00Z'),
     };
-    mocks.approve.mockResolvedValue({ application: approved, activationToken: 'plain-once' });
+    mocks.approve.mockResolvedValue(approved);
     const response = await request(app).post('/api/organizer-applications/application-1/approve')
       .set('Authorization', bearer).expect(200);
     expect(mocks.approve).toHaveBeenCalledWith('application-1', admin.id);
-    expect(response.body.activationToken).toBe('plain-once');
+    expect(response.body).not.toHaveProperty('activationToken');
+    expect(response.body).not.toHaveProperty('activationExpiresAt');
     expect(response.body.application).not.toHaveProperty('activationTokenHash');
   });
 
