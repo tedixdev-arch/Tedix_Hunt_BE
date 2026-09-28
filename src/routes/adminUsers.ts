@@ -175,7 +175,7 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (request, response
  *   delete:
  *     tags: [Admin Users]
  *     summary: Permanently delete a dependency-free identity
- *     description: Requires authoritative Admin capability. Self-deletion and deletion of the final active Admin are forbidden. The operation atomically removes the identity, global roles, refresh sessions, and its activation credentials only when no protected organization, Hunt, participation, supervision, application, or provisioning records reference it.
+ *     description: Requires authoritative Admin capability. Self-deletion and deletion of the final active Admin are forbidden. The operation atomically removes the identity, global roles, refresh sessions, activation credentials, and untouched pending application only when no protected organization, Hunt, participation, supervision, or reviewed application records reference it.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }

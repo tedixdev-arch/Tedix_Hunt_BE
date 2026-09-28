@@ -253,16 +253,17 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [{ present: false }] })
       .mockResolvedValue({ rows: [] });
     await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
-    expect(clientQuery.mock.calls.slice(-5)).toEqual([
+    expect(clientQuery.mock.calls.slice(-6)).toEqual([
       ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
-      ['DELETE FROM professional_activation_tokens WHERE user_id = $1', [storedRow.id]],
+      ['DELETE FROM professional_activation_tokens WHERE user_id = $1 OR created_by = $1', [storedRow.id]],
+      [expect.stringContaining('DELETE FROM organizer_applications'), [storedRow.id]],
       ['DELETE FROM user_roles WHERE user_id = $1', [storedRow.id]],
       ['DELETE FROM users WHERE id = $1', [storedRow.id]],
       ['COMMIT'],
     ]);
   });
 
-  it('protects every existing business and history relationship before any deletion', async () => {
+  it('protects every business relationship while excluding activation credentials', async () => {
     clientQuery
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
@@ -274,10 +275,71 @@ describe('User persistence', () => {
     const sql = clientQuery.mock.calls[3][0] as string;
     for (const relationship of [
       'organizations', 'organization_members', 'hunts', 'hunt_participants', 'hunt_roles',
-      'organizer_applications', 'professional_activation_tokens',
+      'organizer_applications',
     ]) expect(sql).toContain(relationship);
+    expect(sql).not.toContain('professional_activation_tokens');
+    expect(sql).toContain("status = 'pending'");
+    expect(sql).toContain('reviewed_at IS NULL');
     expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
     expect(clientQuery).not.toHaveBeenCalledWith(expect.stringMatching(/^DELETE/), expect.anything());
+  });
+
+  it.each([
+    ['Hunt creator', 'FROM hunts WHERE created_by_user_id = $1'],
+    ['Hunt participant', 'FROM hunt_participants WHERE user_id = $1'],
+    ['Hunt contextual role', 'FROM hunt_roles WHERE user_id = $1'],
+    ['organization owner', 'FROM organizations WHERE owner_id = $1'],
+    ['organization member', 'FROM organization_members WHERE user_id = $1'],
+  ])('checks the protected %s dependency', async (_relationship, clause) => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [storedRow] })
+      .mockResolvedValueOnce({ rows: [{ present: true }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(User.deleteControlled(storedRow.id))
+      .rejects.toBeInstanceOf(UserHasProtectedDependenciesError);
+    expect(clientQuery.mock.calls[3][0]).toContain(clause);
+  });
+
+  it.each(['organizer', 'creator'])('deletes an unactivated %s and disposable artifacts', async (role) => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, role, roles: [role] }] })
+      .mockResolvedValueOnce({ rows: [{ present: false }] })
+      .mockResolvedValue({ rows: [] });
+
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+    const sql = clientQuery.mock.calls.map(([statement]) => statement).join('\n');
+    expect(sql).toContain('DELETE FROM refresh_tokens WHERE user_id = $1');
+    expect(sql).toContain(
+      'DELETE FROM professional_activation_tokens WHERE user_id = $1 OR created_by = $1',
+    );
+    expect(sql).toContain('DELETE FROM user_roles WHERE user_id = $1');
+    expect(sql).toContain('DELETE FROM users WHERE id = $1');
+    expect(clientQuery).toHaveBeenLastCalledWith('COMMIT');
+  });
+
+  it('keeps reviewed organizer applications protected and removes only pristine pending ones', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [storedRow] })
+      .mockResolvedValueOnce({ rows: [{ present: false }] })
+      .mockResolvedValue({ rows: [] });
+    await User.deleteControlled(storedRow.id);
+
+    const dependencySql = clientQuery.mock.calls[3][0] as string;
+    expect(dependencySql).toMatch(/reviewed_by = \$1/);
+    expect(dependencySql).toMatch(/user_id = \$1 AND NOT/);
+    const applicationDelete = clientQuery.mock.calls.find(([statement]) =>
+      String(statement).includes('DELETE FROM organizer_applications'))?.[0] as string;
+    expect(applicationDelete).toContain("status = 'pending'");
+    expect(applicationDelete).toContain('reviewed_at IS NULL');
+    expect(applicationDelete).toContain('reviewed_by IS NULL');
+    expect(applicationDelete).toContain('organization_id IS NULL');
   });
 
   it('uses the shared lock to reject deletion of the final active Admin', async () => {
