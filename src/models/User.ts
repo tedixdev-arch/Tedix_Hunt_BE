@@ -280,8 +280,8 @@ export const User = {
         if (activeAdmins.rows[0].count <= 1) throw new LastActiveAdminError();
       }
 
-      // These existing relationships are business/history records. Some FKs cascade, but
-      // deletion must never use those cascades to erase the records with the identity.
+      // These relationships are durable business/history records. An untouched pending
+      // application is onboarding-only; every reviewed application remains protected.
       const dependencies = await client.query(
         `SELECT EXISTS (
            SELECT 1 FROM organizations WHERE owner_id = $1
@@ -290,17 +290,26 @@ export const User = {
            UNION ALL SELECT 1 FROM hunt_participants WHERE user_id = $1
            UNION ALL SELECT 1 FROM hunt_roles WHERE user_id = $1
            UNION ALL SELECT 1 FROM organizer_applications
-             WHERE user_id = $1 OR reviewed_by = $1
-           UNION ALL SELECT 1 FROM professional_activation_tokens
-             WHERE created_by = $1 AND user_id <> $1
+             WHERE reviewed_by = $1
+                OR (user_id = $1 AND NOT (
+                  status = 'pending' AND reviewed_at IS NULL
+                  AND reviewed_by IS NULL AND organization_id IS NULL
+                ))
          ) AS present`, [id],
       );
       if (dependencies.rows[0].present) throw new UserHasProtectedDependenciesError();
 
-      // Account-only records are intentionally removed inside the identity transaction rather
-      // than relying on FK cascades. A failure at any step rolls the complete deletion back.
+      // Account/onboarding-only records are explicitly removed in this transaction. Activation
+      // credentials created by this identity are provisioning artifacts, not business history.
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
-      await client.query('DELETE FROM professional_activation_tokens WHERE user_id = $1', [id]);
+      await client.query(
+        'DELETE FROM professional_activation_tokens WHERE user_id = $1 OR created_by = $1', [id],
+      );
+      await client.query(
+        `DELETE FROM organizer_applications
+         WHERE user_id = $1 AND status = 'pending' AND reviewed_at IS NULL
+           AND reviewed_by IS NULL AND organization_id IS NULL`, [id],
+      );
       await client.query('DELETE FROM user_roles WHERE user_id = $1', [id]);
       await client.query('DELETE FROM users WHERE id = $1', [id]);
       await client.query('COMMIT');
