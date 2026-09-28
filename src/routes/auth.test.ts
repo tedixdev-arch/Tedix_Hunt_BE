@@ -82,7 +82,7 @@ describe('user account API', () => {
     mocks.activateProfessional.mockResolvedValue({ ...registeredUser, roles: [role] });
     const path = role === 'organizer' ? '/api/auth/organizer/activate-direct' : '/api/auth/creator/activate';
     const response = await request(app).post(path)
-      .send({ token: `${role}-token`, password: 'secure-password' }).expect(200);
+      .send({ token: `${role}-token`, password: 'Secure123!' }).expect(200);
     expect(mocks.activateProfessional).toHaveBeenCalledWith(
       role, expect.stringMatching(/^[a-f0-9]{64}$/), expect.any(String),
     );
@@ -94,11 +94,11 @@ describe('user account API', () => {
     const admin = { ...registeredUser, passwordHash: '$stored', roles: ['participant', 'admin'] };
     mocks.activateAdmin.mockResolvedValue(admin);
     const response = await request(app).post('/api/auth/admin/activate')
-      .send({ token: 'admin-one-time-token', password: 'secure-password' }).expect(200);
+      .send({ token: 'admin-one-time-token', password: 'Secure123!' }).expect(200);
     const [tokenHash, passwordHash] = mocks.activateAdmin.mock.calls[0];
     expect(tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(tokenHash).not.toBe('admin-one-time-token');
-    await expect(bcrypt.compare('secure-password', passwordHash)).resolves.toBe(true);
+    await expect(bcrypt.compare('Secure123!', passwordHash)).resolves.toBe(true);
     expect(response.body.user).not.toHaveProperty('passwordHash');
     expect(response.body.user.roles).toContain('admin');
     expect(response.body.tokens).toEqual({ accessToken: expect.any(String), refreshToken: expect.any(String) });
@@ -106,25 +106,25 @@ describe('user account API', () => {
 
   it.each(['invalid', 'expired', 'consumed'])('uniformly rejects an %s Admin activation', async () => {
     await request(app).post('/api/auth/admin/activate')
-      .send({ token: 'unusable-token', password: 'secure-password' })
+      .send({ token: 'unusable-token', password: 'Secure123!' })
       .expect(401, { error: 'invalid_or_expired_activation' });
   });
 
   it('does not expose the retired application activation endpoint', async () => {
     await request(app).post('/api/auth/organizer/activate')
-      .send({ token: 'retired-token', password: 'secure-password' }).expect(404);
+      .send({ token: 'retired-token', password: 'Secure123!' }).expect(404);
   });
 
   it('hashes a registered user password and never returns its hash', async () => {
     const response = await request(app)
       .post('/api/auth/participant/register')
-      .send({ email: 'person@example.com', password: 'plain-secret', name: 'Person' })
+      .send({ email: 'person@example.com', password: 'Plain123!', name: 'Person' })
       .expect(201);
 
     const createInput = mocks.createUser.mock.calls[0][0];
     expect(createInput.role).toBe('participant');
-    expect(createInput.passwordHash).not.toBe('plain-secret');
-    await expect(bcrypt.compare('plain-secret', createInput.passwordHash)).resolves.toBe(true);
+    expect(createInput.passwordHash).not.toBe('Plain123!');
+    await expect(bcrypt.compare('Plain123!', createInput.passwordHash)).resolves.toBe(true);
     expect(response.body.user).toMatchObject({
       isGuest: false,
       role: 'creator',
@@ -133,12 +133,29 @@ describe('user account API', () => {
     expect(response.body.user).not.toHaveProperty('passwordHash');
   });
 
+  it('rejects a weak participant registration password', async () => {
+    await request(app).post('/api/auth/participant/register')
+      .send({ email: 'person@example.com', password: 'password1' })
+      .expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
+    expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['/api/auth/admin/activate', mocks.activateAdmin],
+    ['/api/auth/organizer/activate-direct', mocks.activateProfessional],
+    ['/api/auth/creator/activate', mocks.activateProfessional],
+  ])('rejects a weak professional password at %s', async (path, activate) => {
+    await request(app).post(path).send({ token: 'one-time-token', password: 'password!' })
+      .expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
+    expect(activate).not.toHaveBeenCalled();
+  });
+
   it('rejects an existing email cleanly', async () => {
     mocks.findUser.mockResolvedValue(registeredUser);
 
     await request(app)
       .post('/api/auth/participant/register')
-      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .send({ email: 'person@example.com', password: 'Plain123!' })
       .expect(409, { error: 'email_taken' });
     expect(mocks.createUser).not.toHaveBeenCalled();
   });
@@ -146,7 +163,7 @@ describe('user account API', () => {
   it('does not expose public privileged-role assignment endpoints', async () => {
     await request(app)
       .post('/api/auth/creator/register')
-      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .send({ email: 'person@example.com', password: 'Plain123!' })
       .expect(404);
     await request(app).post('/api/auth/roles').send({ role: 'admin' }).expect(404);
   });
@@ -418,7 +435,7 @@ describe('user account API', () => {
 
     const response = await request(app)
       .post('/api/auth/participant/register')
-      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .send({ email: 'person@example.com', password: 'Plain123!' })
       .expect(409);
 
     expect(response.body).toEqual({ error: 'email_taken' });
@@ -432,7 +449,7 @@ describe('user account API', () => {
 
     const response = await request(app)
       .post('/api/auth/participant/register')
-      .send({ email: 'person@example.com', password: 'plain-secret' })
+      .send({ email: 'person@example.com', password: 'Plain123!' })
       .expect(500);
 
     expect(response.body).toEqual({
@@ -462,7 +479,7 @@ describe('user account API', () => {
 
   describe('change password', () => {
     const currentPassword = 'current-password';
-    const newPassword = 'replacement-password';
+    const newPassword = 'Replace123!';
 
     const authenticatedRequest = (user: any = registeredUser, body: Record<string, unknown> = {
       currentPassword,
@@ -525,7 +542,6 @@ describe('user account API', () => {
     it.each([
       [{ currentPassword: '', newPassword }],
       [{ currentPassword: 123, newPassword }],
-      [{ currentPassword, newPassword: 'short' }],
       [{ currentPassword, newPassword: 123 }],
     ])('rejects invalid input safely', async (body) => {
       const response = await authenticatedRequest(registeredUser, body).expect(400, { error: 'invalid_input' });
@@ -533,6 +549,12 @@ describe('user account API', () => {
       for (const password of [body.currentPassword, body.newPassword]) {
         if (String(password)) expect(JSON.stringify(response.body)).not.toContain(String(password));
       }
+    });
+
+    it('rejects a weak new password without changing credentials', async () => {
+      await authenticatedRequest(registeredUser, { currentPassword, newPassword: 'password1' })
+        .expect(400, { error: 'password_policy_not_met', message: 'Password must be at least 8 characters and include a letter, a number, and a special character.' });
+      expect(mocks.changePasswordAndRevokeSessions).not.toHaveBeenCalled();
     });
   });
 
@@ -628,7 +650,7 @@ describe('user account API', () => {
       .expect(401, { error: 'invalid_refresh' });
   });
 
-  it('supports participant password and Tedix-linked login', async () => {
+  it('allows a participant with a pre-policy password to log in and supports Tedix-linked login', async () => {
     const participant = { ...registeredUser, role: 'participant' as const, roles: ['participant'] };
     const passwordHash = await bcrypt.hash('participant-password', 4);
     mocks.findUser

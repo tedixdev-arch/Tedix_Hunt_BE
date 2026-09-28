@@ -9,6 +9,7 @@ import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { AdminProvisioning } from '../models/AdminProvisioning.js';
 import { ProfessionalProvisioning, type ProfessionalRole } from '../models/ProfessionalProvisioning.js';
+import { meetsPasswordPolicy, passwordPolicyError } from '../lib/passwordPolicy.js';
 
 const router = express.Router();
 const PASSWORD_BCRYPT_ROUNDS = 10;
@@ -73,9 +74,10 @@ export const createTokens = async (userId: string) => {
  */
 router.post('/admin/activate', async (req, res) => {
   const { token, password } = req.body ?? {};
-  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
+  if (typeof token !== 'string' || !token || typeof password !== 'string' || !password) {
     return res.status(400).json({ error: 'invalid_input' });
   }
+  if (!meetsPasswordPolicy(password)) return res.status(400).json(passwordPolicyError());
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
   const user = await AdminProvisioning.activate(tokenHash, passwordHash);
@@ -86,9 +88,10 @@ router.post('/admin/activate', async (req, res) => {
 
 const activateProfessional = (role: ProfessionalRole) => async (req: express.Request, res: express.Response) => {
   const { token, password } = req.body ?? {};
-  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
+  if (typeof token !== 'string' || !token || typeof password !== 'string' || !password) {
     return res.status(400).json({ error: 'invalid_input' });
   }
+  if (!meetsPasswordPolicy(password)) return res.status(400).json(passwordPolicyError());
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
   const user = await ProfessionalProvisioning.activate(role, tokenHash, passwordHash);
@@ -372,6 +375,8 @@ router.post('/participant/register', async (req, res) => {
 
   // participants may register with or without email/password
   if (email && password) {
+    if (typeof password !== 'string') return res.status(400).json({ error: 'invalid_input' });
+    if (!meetsPasswordPolicy(password)) return res.status(400).json(passwordPolicyError());
     const exists = await User.findOne({ email });
     if (exists) return res.status(409).json({ error: 'email_taken' });
 
@@ -560,10 +565,11 @@ router.post('/change-password', requireAuth, async (req: AuthRequest, res) => {
     typeof currentPassword !== 'string'
     || currentPassword.length === 0
     || typeof newPassword !== 'string'
-    || newPassword.length < 8
+    || newPassword.length === 0
   ) {
     return res.status(400).json({ error: 'invalid_input' });
   }
+  if (!meetsPasswordPolicy(newPassword)) return res.status(400).json(passwordPolicyError());
 
   const user = req.user!;
   if (user.isGuest || !user.passwordHash) {

@@ -7,6 +7,7 @@ import {
   type OrganizerApplicationStatus,
 } from '../models/OrganizerApplication.js';
 import { requireAuth, requireAnyRole, type AuthRequest } from '../middleware/auth.js';
+import { meetsPasswordPolicy, passwordPolicyError } from '../lib/passwordPolicy.js';
 
 const router = express.Router();
 const allowedFields = new Set([
@@ -96,11 +97,14 @@ router.post('/', async (request, response) => {
       (input.phone !== undefined && input.phone !== null && typeof input.phone !== 'string')) {
     return response.status(400).json({ error: 'invalid_input' });
   }
-  if (typeof input.password !== 'string' || input.password.length < 8) {
-    return response.status(400).json({ error: 'invalid_password' });
+  if (typeof input.password !== 'string' || !input.password || typeof input.confirmPassword !== 'string') {
+    return response.status(400).json({ error: 'invalid_input' });
   }
-  if (typeof input.confirmPassword !== 'string' || input.password !== input.confirmPassword) {
+  if (input.password !== input.confirmPassword) {
     return response.status(400).json({ error: 'password_confirmation_mismatch' });
+  }
+  if (!meetsPasswordPolicy(input.password)) {
+    return response.status(400).json(passwordPolicyError());
   }
 
   // Hash before crossing into persistence; applications never contain credentials.
