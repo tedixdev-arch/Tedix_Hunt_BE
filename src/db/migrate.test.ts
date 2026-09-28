@@ -212,6 +212,35 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
+  it('allows a retired email to be cleared and immediately reused despite a claimed fake address', async () => {
+    const retiredId = '00000000-0000-0000-0000-000000000081';
+    const claimantId = '00000000-0000-0000-0000-000000000082';
+    const replacementId = '00000000-0000-0000-0000-000000000083';
+    const originalEmail = 'retirement-original@example.com';
+    const predictableEmail = `retired+${retiredId}@internal.invalid`;
+    try {
+      await client.query(
+        `INSERT INTO users (id, email, role) VALUES
+           ($1, $2, 'creator'), ($3, $4, 'participant')`,
+        [retiredId, originalEmail, claimantId, predictableEmail],
+      );
+      await client.query(
+        `UPDATE users SET email = NULL, account_status = 'retired' WHERE id = $1`,
+        [retiredId],
+      );
+      await expect(client.query(
+        `INSERT INTO users (id, email, role) VALUES ($1, $2, 'participant')`,
+        [replacementId, originalEmail],
+      )).resolves.toMatchObject({ rowCount: 1 });
+      await expect(client.query('SELECT email FROM users WHERE id = $1', [retiredId]))
+        .resolves.toMatchObject({ rows: [{ email: null }] });
+    } finally {
+      await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [
+        [retiredId, claimantId, replacementId],
+      ]);
+    }
+  });
+
   it('enforces professional activation token purpose and active-token uniqueness', async () => {
     const participantId = '00000000-0000-0000-0000-000000000001';
     const creatorId = '00000000-0000-0000-0000-000000000002';

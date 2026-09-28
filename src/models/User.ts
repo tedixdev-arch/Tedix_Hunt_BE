@@ -320,9 +320,9 @@ export const User = {
         await client.query('DELETE FROM user_roles WHERE user_id = $1', [id]);
         await client.query(
           `UPDATE users SET
-             email = 'retired+' || id::text || '@internal.invalid',
+             email = NULL,
              name = 'Deleted user', password_hash = NULL, tedix_user_id = NULL,
-             role = 'participant', is_guest = FALSE, account_status = 'retired'
+             is_guest = FALSE, account_status = 'retired'
            WHERE id = $1`, [id],
         );
         await client.query('COMMIT');
