@@ -97,7 +97,11 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
     Organization.isOwner(user.id, id),
     Organization.isMember(user.id, id),
   ]);
-  if (!isOwner && !isMember) return res.status(403).json({ error: 'forbidden' });
+  // owner_id grants operational authority, but an authoritative Admin capability keeps an
+  // organization manageable when its recorded owner has been retired.
+  if (!req.user!.roles.includes('admin') && !isOwner && !isMember) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
 
   res.json(org);
 });
@@ -166,12 +170,17 @@ router.get('/', requireAuth, async (req: AuthRequest, res) => {
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.patch('/:id', requireAuth, requireRole('creator'), async (req: AuthRequest, res) => {
+router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const user = req.user!;
+  if (!user.roles.includes('creator') && !user.roles.includes('admin')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
   const id = String(req.params.id);
   const org = await Organization.findById(id);
   if (!org) return res.status(404).json({ error: 'not_found' });
-  if (!(await Organization.isOwner(user.id, id))) {
+  // Retained owner_id is provenance after retirement; Admin capability is the narrow fallback
+  // authority and does not transfer ownership to an arbitrary Admin identity.
+  if (!user.roles.includes('admin') && !(await Organization.isOwner(user.id, id))) {
     return res.status(403).json({ error: 'forbidden' });
   }
 

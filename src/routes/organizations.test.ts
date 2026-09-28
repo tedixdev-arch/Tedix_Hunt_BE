@@ -133,6 +133,24 @@ describe('organization authorization', () => {
     expect(mocks.updateOrganization).toHaveBeenCalledOnce();
   });
 
+  it('lets an authoritative Admin manage an organization without becoming its owner', async () => {
+    mocks.findUserById.mockResolvedValue({ ...currentUser, roles: ['admin'] });
+    mocks.updateOrganization.mockResolvedValue({ ...organization, name: 'Admin managed' });
+
+    await request(app).get('/api/organizations/org-1')
+      .set('Authorization', authorization).expect(200);
+    const response = await request(app).patch('/api/organizations/org-1')
+      .set('Authorization', authorization)
+      .send({ name: 'Admin managed' }).expect(200);
+
+    expect(response.body.owner).toBe('owner-1');
+    expect(mocks.updateOrganization).toHaveBeenCalledWith('org-1', {
+      name: 'Admin managed', description: undefined,
+    });
+    // The read checks relationships; the Admin-authorized update does not depend on ownership.
+    expect(mocks.isOwner).toHaveBeenCalledTimes(1);
+  });
+
   it('requires canonical creator capability to create or update organizations', async () => {
     mocks.findUserById.mockResolvedValue({ ...currentUser, roles: ['participant'], role: 'creator' });
     await request(app)

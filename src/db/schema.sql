@@ -3,6 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Retired identities use NULL so anonymization cannot collide and releases the original email.
   email TEXT UNIQUE,
   password_hash TEXT,
   role TEXT NOT NULL,

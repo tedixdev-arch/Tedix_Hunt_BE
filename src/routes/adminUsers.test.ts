@@ -129,6 +129,15 @@ describe('Admin user provisioning API', () => {
     expect(response.body[0]).not.toHaveProperty('activationTokenHash');
   });
 
+  it('safely serializes a retired identity with no email', async () => {
+    mocks.list.mockResolvedValue([user([], {
+      email: null, accountStatus: 'retired', activationState: 'not_required',
+    })]);
+    const response = await request(app).get('/api/admin/users?role=admin')
+      .set('Authorization', bearer()).expect(200);
+    expect(response.body[0]).toMatchObject({ email: null, accountStatus: 'retired' });
+  });
+
   it('returns a one-time activation credential for a passwordless provision', async () => {
     mocks.provision.mockResolvedValue({
       user: user(['admin', 'participant'], { passwordHash: null }),

@@ -283,6 +283,27 @@ describe('User persistence', () => {
     expect(clientQuery).toHaveBeenCalledWith(expect.stringContaining("account_status = 'retired'"), [storedRow.id]);
   });
 
+  it('retires with a collision-free null email and preserves the inert legacy role', async () => {
+    const professional = { ...storedRow, role: 'creator', roles: ['creator'] };
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [professional] })
+      .mockResolvedValueOnce({ rows: [{ present: true }] })
+      .mockResolvedValue({ rows: [], rowCount: 1 });
+
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('retired');
+
+    const retirement = clientQuery.mock.calls.find(([statement]) =>
+      String(statement).includes('UPDATE users SET'))?.[0] as string;
+    expect(retirement).toContain('email = NULL');
+    expect(retirement).not.toContain('internal.invalid');
+    expect(retirement).not.toMatch(/role\s*=/);
+    expect(clientQuery).toHaveBeenCalledWith('DELETE FROM user_roles WHERE user_id = $1', [storedRow.id]);
+    expect(clientQuery.mock.calls.map(([statement]) => String(statement)).join('\n'))
+      .not.toContain('INSERT INTO hunt_participants');
+  });
+
   it.each([
     ['Hunt creator', 'FROM hunts WHERE created_by_user_id = $1'],
     ['Hunt participant', 'FROM hunt_participants WHERE user_id = $1'],
@@ -299,6 +320,21 @@ describe('User persistence', () => {
 
     await expect(User.deleteControlled(storedRow.id)).resolves.toBe('retired');
     expect(clientQuery.mock.calls[3][0]).toContain(clause);
+  });
+
+  it('retires an organization owner while preserving the organization and owner provenance', async () => {
+    clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...storedRow, role: 'creator', roles: ['creator'] }] })
+      .mockResolvedValueOnce({ rows: [{ present: true }] })
+      .mockResolvedValue({ rows: [], rowCount: 1 });
+
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('retired');
+    const statements = clientQuery.mock.calls.map(([statement]) => String(statement)).join('\n');
+    expect(statements).toContain('FROM organizations WHERE owner_id = $1');
+    expect(statements).not.toContain('DELETE FROM organizations');
+    expect(statements).not.toMatch(/UPDATE organizations[\s\S]*owner_id/);
   });
 
   it.each(['organizer', 'creator'])('deletes an unactivated %s and disposable artifacts', async (role) => {
