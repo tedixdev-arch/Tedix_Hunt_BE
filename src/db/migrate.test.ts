@@ -17,6 +17,7 @@ import { professionalActivationTokensMigration } from './migrations/011_professi
 import { professionalActivationPurposesMigration } from './migrations/012_professional_activation_purposes.js';
 import { userAccountStatusMigration } from './migrations/013_user_account_status.js';
 import { retiredAccountStatusMigration } from './migrations/014_retired_account_status.js';
+import { creatorApplicationsMigration } from './migrations/015_creator_applications.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -27,6 +28,7 @@ const migrations = [
   professionalActivationPurposesMigration,
   userAccountStatusMigration,
   retiredAccountStatusMigration,
+  creatorApplicationsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -90,6 +92,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '012_professional_activation_purposes',
       '013_user_account_status',
       '014_retired_account_status',
+      '015_creator_applications',
     ]);
     try {
       await expect(client.query(
@@ -204,6 +207,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'hunt_special_awards',
       'organizer_applications',
       'professional_activation_tokens',
+      'creator_applications',
     ]) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
         `public.${table}`,

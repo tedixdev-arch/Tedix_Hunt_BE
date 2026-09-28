@@ -95,6 +95,21 @@ const options: swaggerJsdoc.Options = {
             createdAt: { type: 'string', format: 'date-time' },
           },
         },
+        CreatorApplication: {
+          type: 'object',
+          required: ['id', 'userId', 'name', 'email', 'status', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            name: { type: 'string' },
+            email: { type: 'string', format: 'email' },
+            status: { type: 'string', enum: ['pending', 'approved', 'rejected'] },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+            reviewedAt: { type: 'string', format: 'date-time', nullable: true },
+            reviewedBy: { type: 'string', format: 'uuid', nullable: true },
+          },
+        },
         Hunt: {
           type: 'object',
           required: ['id', 'organizationId', 'createdByUserId', 'name', 'status', 'createdAt', 'updatedAt'],
