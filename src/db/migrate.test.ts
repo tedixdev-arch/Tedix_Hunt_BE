@@ -20,6 +20,7 @@ import { professionalActivationPurposesMigration } from './migrations/012_profes
 import { userAccountStatusMigration } from './migrations/013_user_account_status.js';
 import { retiredAccountStatusMigration } from './migrations/014_retired_account_status.js';
 import { creatorApplicationsMigration } from './migrations/015_creator_applications.js';
+import { huntTemplateVersionsMigration } from './migrations/016_hunt_template_versions.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -31,6 +32,7 @@ const migrations = [
   userAccountStatusMigration,
   retiredAccountStatusMigration,
   creatorApplicationsMigration,
+  huntTemplateVersionsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -121,6 +123,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '013_user_account_status',
       '014_retired_account_status',
       '015_creator_applications',
+      '016_hunt_template_versions',
     ]);
     try {
       await expect(client.query(
@@ -189,6 +192,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '013_user_account_status' },
       { id: '014_retired_account_status' },
       { id: '015_creator_applications' },
+      { id: '016_hunt_template_versions' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -237,12 +241,84 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'organizer_applications',
       'professional_activation_tokens',
       'creator_applications',
+      'hunt_templates',
+      'hunt_template_versions',
     ]) {
       const result = await client.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
         `public.${table}`,
       ]);
       expect(result.rows[0]?.exists).toBe(table);
     }
+  });
+
+  it('persists Template identities and immutable version content with provenance', async () => {
+    await application();
+    const { HuntTemplates } = await import('../models/HuntTemplate.js');
+    const creatorId = '00000000-0000-0000-0000-000000000002';
+
+    await expect(client.query(
+      `INSERT INTO hunt_templates (key, origin, status)
+       VALUES ('invalid-creator-template', 'creator', 'draft')`,
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(client.query(
+      `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
+       VALUES ('invalid-creator-fk', 'creator', gen_random_uuid(), 'draft')`,
+    )).rejects.toMatchObject({ code: '23503' });
+
+    const platform = await HuntTemplates.create({
+      key: 'integration-platform-template', origin: 'platform', status: 'approved',
+    });
+    expect(platform.createdByUserId).toBeNull();
+    await expect(HuntTemplates.create({
+      key: platform.key, origin: 'platform', status: 'draft',
+    })).rejects.toMatchObject({ code: '23505' });
+
+    const creator = await HuntTemplates.create({
+      key: 'integration-creator-template', origin: 'creator',
+      createdByUserId: creatorId, status: 'draft',
+    });
+    expect(creator.createdByUserId).toBe(creatorId);
+    await expect(client.query(
+      `INSERT INTO hunt_template_versions (template_id, version, content, origin)
+       VALUES ($1, 0, '{}', 'platform')`, [platform.id],
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(client.query(
+      `INSERT INTO hunt_template_versions (template_id, version, content, origin)
+       VALUES ($1, 1, '{}', 'creator')`, [creator.id],
+    )).rejects.toMatchObject({ code: '23514' });
+
+    const version1Content = { setup: { title: 'Concrete platform Template' } };
+    const version1 = await HuntTemplates.createVersion1({
+      templateId: platform.id, content: version1Content, origin: 'platform',
+    });
+    expect(version1).toMatchObject({ version: 1, content: version1Content, createdByUserId: null });
+    await expect(HuntTemplates.createVersion1({
+      templateId: platform.id, content: {}, origin: 'platform',
+    })).rejects.toMatchObject({ code: '23505' });
+
+    await HuntTemplates.createVersion1({
+      templateId: creator.id, content: { setup: 'creator' }, origin: 'creator',
+      createdByUserId: creatorId,
+    });
+    const version2 = await HuntTemplates.createVersion({
+      templateId: platform.id, version: 2, content: { setup: { title: 'Version two' } },
+      origin: 'platform',
+    });
+
+    await expect(HuntTemplates.findByKey(platform.key)).resolves.toMatchObject({ id: platform.id });
+    await expect(HuntTemplates.getVersion(platform.id, 1)).resolves.toMatchObject({
+      id: version1.id, content: version1Content,
+    });
+    await expect(HuntTemplates.getLatestVersion(platform.id)).resolves.toMatchObject({
+      id: version2.id, version: 2,
+    });
+    await expect(HuntTemplates.getVersion(platform.id, 1)).resolves.toMatchObject({
+      id: version1.id, content: version1Content,
+    });
+    await expect(HuntTemplates.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: platform.id, latestVersion: 2 }),
+      expect.objectContaining({ id: creator.id, latestVersion: 1 }),
+    ]));
   });
 
   it('runs self-registration through approval and normal Creator login with the original password', async () => {

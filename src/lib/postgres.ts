@@ -80,6 +80,33 @@ CREATE TABLE IF NOT EXISTS professional_activation_tokens (
 CREATE UNIQUE INDEX IF NOT EXISTS professional_activation_tokens_active_user_purpose_key
   ON professional_activation_tokens (user_id, purpose) WHERE consumed_at IS NULL;
 
+-- The Creator framework is the available construction system; a Template is one concrete reusable implementation.
+CREATE TABLE IF NOT EXISTS hunt_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL UNIQUE,
+  origin TEXT NOT NULL CHECK (origin IN ('platform', 'creator')),
+  -- Provenance only: a Creator account does not own platform content lifecycle.
+  created_by_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL CHECK (status IN ('draft', 'submitted', 'changes_requested', 'approved')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL)
+);
+
+-- A Template version is an immutable implementation snapshot, not a catalog of framework options.
+CREATE TABLE IF NOT EXISTS hunt_template_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id UUID NOT NULL REFERENCES hunt_templates(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  content JSONB NOT NULL,
+  origin TEXT NOT NULL CHECK (origin IN ('platform', 'creator')),
+  -- Provenance only: a Creator account does not own platform content lifecycle.
+  created_by_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (template_id, version),
+  CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL)
+);
+
 CREATE TABLE IF NOT EXISTS hunts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
@@ -99,6 +126,7 @@ CREATE TABLE IF NOT EXISTS hunts (
   contact_name TEXT,
   template_key TEXT,
   template_version INTEGER CHECK (template_version IS NULL OR template_version >= 1),
+  -- Immutable Hunt-time snapshot; existing Hunts do not follow later Template versions.
   template_snapshot JSONB,
   hunt_format TEXT CHECK (hunt_format IS NULL OR hunt_format IN ('team')),
   team_size INTEGER CHECK (team_size IS NULL OR team_size = 4),
