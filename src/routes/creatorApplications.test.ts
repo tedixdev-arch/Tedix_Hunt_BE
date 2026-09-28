@@ -53,6 +53,9 @@ describe('Creator application routes', () => {
 
   it.each([
     [{ password: 'password1', confirmPassword: 'password1' }, 'password_policy_not_met'],
+    [{ password: 'Short1!', confirmPassword: 'Short1!' }, 'password_policy_not_met'],
+    [{ password: 'NoNumbers!', confirmPassword: 'NoNumbers!' }, 'password_policy_not_met'],
+    [{ password: '12345678!', confirmPassword: '12345678!' }, 'password_policy_not_met'],
     [{ confirmPassword: 'Different1!' }, 'password_confirmation_mismatch'],
   ])('rejects invalid passwords %#', async (override, error) => {
     await request(app).post('/api/creator-applications').send({ ...input, ...override })
