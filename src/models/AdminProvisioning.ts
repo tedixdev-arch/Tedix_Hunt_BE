@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { pool } from '../lib/postgres.js';
-import { normalizeEmail, type IUser } from './User.js';
+import { normalizeEmail, RetiredAccountError, type IUser } from './User.js';
 
 const ACTIVATION_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -45,6 +45,7 @@ export const AdminProvisioning = {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [email]);
       let row = (await client.query('SELECT * FROM users WHERE email = $1 FOR UPDATE', [email])).rows[0];
       if (row?.is_guest) throw new GuestPromotionError();
+      if (row?.account_status === 'retired') throw new RetiredAccountError();
       if (!row) {
         row = (await client.query(
           `INSERT INTO users (email, name, role, is_guest, password_hash)
@@ -116,7 +117,8 @@ export const AdminProvisioning = {
       }
       // A token can only establish credentials once; it can never replace a password.
       const changed = await client.query(
-        'UPDATE users SET password_hash = $2 WHERE id = $1 AND password_hash IS NULL RETURNING *',
+        `UPDATE users SET password_hash = $2
+         WHERE id = $1 AND password_hash IS NULL AND account_status = 'active' RETURNING *`,
         [token.user_id, passwordHash],
       );
       if (!changed.rows[0]) {

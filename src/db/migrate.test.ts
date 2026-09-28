@@ -16,6 +16,7 @@ import { organizerApprovalMigration } from './migrations/010_organizer_approval.
 import { professionalActivationTokensMigration } from './migrations/011_professional_activation_tokens.js';
 import { professionalActivationPurposesMigration } from './migrations/012_professional_activation_purposes.js';
 import { userAccountStatusMigration } from './migrations/013_user_account_status.js';
+import { retiredAccountStatusMigration } from './migrations/014_retired_account_status.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -25,6 +26,7 @@ const migrations = [
   organizerApprovalMigration, professionalActivationTokensMigration,
   professionalActivationPurposesMigration,
   userAccountStatusMigration,
+  retiredAccountStatusMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -72,7 +74,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
                '00000000-0000-0000-0000-000000000090',
                '00000000-0000-0000-0000-000000000002', 'Existing Hunt', 'draft')`,
     );
-    await expect(runMigrations(client, migrations.slice(0, -2))).resolves.toEqual([
+    await expect(runMigrations(client, migrations.slice(0, 11))).resolves.toEqual([
       '004_hunt_general_setup', '005_hunt_template_selection', '006_hunt_pilot_options',
       '007_hunt_access_code', '008_hunt_rewards', '009_organizer_applications',
       '010_organizer_approval', '011_professional_activation_tokens',
@@ -87,6 +89,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await expect(runMigrations(client, migrations)).resolves.toEqual([
       '012_professional_activation_purposes',
       '013_user_account_status',
+      '014_retired_account_status',
     ]);
     try {
       await expect(client.query(
@@ -153,6 +156,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '011_professional_activation_tokens' },
       { id: '012_professional_activation_purposes' },
       { id: '013_user_account_status' },
+      { id: '014_retired_account_status' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id

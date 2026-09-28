@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { pool } from '../lib/postgres.js';
-import { normalizeEmail, type IUser } from './User.js';
+import { normalizeEmail, RetiredAccountError, type IUser } from './User.js';
 
 const ACTIVATION_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export type ProfessionalRole = 'organizer' | 'creator';
@@ -59,6 +59,7 @@ export const ProfessionalProvisioning = {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [email]);
       let row = (await client.query('SELECT * FROM users WHERE email = $1 FOR UPDATE', [email])).rows[0];
       if (row?.is_guest) throw new ProfessionalGuestPromotionError();
+      if (row?.account_status === 'retired') throw new RetiredAccountError();
       if (!row) {
         // users.role is compatibility data only; user_roles below grants the capability.
         row = (await client.query(
@@ -149,7 +150,8 @@ export const ProfessionalProvisioning = {
       )).rows[0];
       if (!token) { await client.query('ROLLBACK'); return null; }
       const changed = await client.query(
-        `UPDATE users SET password_hash = $2 WHERE id = $1 AND password_hash IS NULL RETURNING *`,
+        `UPDATE users SET password_hash = $2 WHERE id = $1 AND password_hash IS NULL
+           AND account_status = 'active' RETURNING *`,
         [token.user_id, passwordHash],
       );
       if (!changed.rows[0]) { await client.query('ROLLBACK'); return null; }
