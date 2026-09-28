@@ -7,7 +7,6 @@ import { RefreshToken } from '../models/RefreshToken.js';
 import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { OrganizerApplications } from '../models/OrganizerApplication.js';
 import { AdminProvisioning } from '../models/AdminProvisioning.js';
 import { ProfessionalProvisioning, type ProfessionalRole } from '../models/ProfessionalProvisioning.js';
 
@@ -49,23 +48,6 @@ export const createTokens = async (userId: string) => {
 
   return { accessToken, refreshToken };
 };
-
-/** Activates the provisioned organizer account; approval itself never creates a session. */
-router.post('/organizer/activate', async (req, res) => {
-  const { token, password } = req.body ?? {};
-  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
-    return res.status(400).json({ error: 'invalid_input' });
-  }
-
-  // Match only the SHA-256 digest; plaintext activation credentials are never persisted.
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-  const passwordHash = await bcrypt.hash(password, PASSWORD_BCRYPT_ROUNDS);
-  const user = await OrganizerApplications.activate(tokenHash, passwordHash);
-  if (!user) return res.status(401).json({ error: 'invalid_or_expired_activation' });
-
-  const tokens = await createTokens(user.id);
-  return res.json({ user: publicUser(user), tokens });
-});
 
 /**
  * @openapi

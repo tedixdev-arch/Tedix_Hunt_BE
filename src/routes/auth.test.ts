@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   consumeRefreshToken: vi.fn(),
   deleteRefreshToken: vi.fn(),
   organizationsForUser: vi.fn(),
-  activateOrganizer: vi.fn(),
   activateAdmin: vi.fn(),
   activateProfessional: vi.fn(),
 }));
@@ -34,9 +33,6 @@ vi.mock('../models/RefreshToken.js', () => ({
 }));
 vi.mock('../models/Organization.js', () => ({
   Organization: { findByOwnerOrMember: mocks.organizationsForUser },
-}));
-vi.mock('../models/OrganizerApplication.js', () => ({
-  OrganizerApplications: { activate: mocks.activateOrganizer },
 }));
 vi.mock('../models/AdminProvisioning.js', () => ({
   AdminProvisioning: { activate: mocks.activateAdmin, list: vi.fn(), provision: vi.fn() },
@@ -77,7 +73,6 @@ describe('user account API', () => {
     mocks.consumeRefreshToken.mockResolvedValue(null);
     mocks.deleteRefreshToken.mockResolvedValue(false);
     mocks.organizationsForUser.mockResolvedValue([]);
-    mocks.activateOrganizer.mockResolvedValue(null);
     mocks.activateAdmin.mockResolvedValue(null);
     mocks.activateProfessional.mockResolvedValue(null);
     mocks.changePasswordAndRevokeSessions.mockResolvedValue(undefined);
@@ -93,22 +88,6 @@ describe('user account API', () => {
     );
     expect(response.body.user.roles).toEqual([role]);
     expect(response.body.tokens.accessToken).toEqual(expect.any(String));
-  });
-
-  it('activates an organizer once, hashes its password, and issues normal tokens', async () => {
-    const organizer = { ...registeredUser, role: 'organizer', roles: ['organizer'] };
-    mocks.activateOrganizer.mockResolvedValue(organizer);
-    const response = await request(app).post('/api/auth/organizer/activate')
-      .send({ token: 'one-time-token', password: 'secure-password' }).expect(200);
-
-    const [tokenHash, passwordHash] = mocks.activateOrganizer.mock.calls[0];
-    expect(tokenHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(tokenHash).not.toBe('one-time-token');
-    await expect(bcrypt.compare('secure-password', passwordHash)).resolves.toBe(true);
-    expect(response.body.user.roles).toContain('organizer');
-    expect(response.body.tokens).toEqual({
-      accessToken: expect.any(String), refreshToken: expect.any(String),
-    });
   });
 
   it('activates an Admin once with a hashed password and normal session tokens', async () => {
@@ -131,10 +110,9 @@ describe('user account API', () => {
       .expect(401, { error: 'invalid_or_expired_activation' });
   });
 
-  it.each(['invalid', 'expired', 'already-used'])('rejects an %s activation token', async () => {
+  it('does not expose the retired application activation endpoint', async () => {
     await request(app).post('/api/auth/organizer/activate')
-      .send({ token: 'unusable-token', password: 'secure-password' })
-      .expect(401, { error: 'invalid_or_expired_activation' });
+      .send({ token: 'retired-token', password: 'secure-password' }).expect(404);
   });
 
   it('hashes a registered user password and never returns its hash', async () => {
@@ -271,6 +249,7 @@ describe('user account API', () => {
       ['participant', ['participant']],
       ['admin', ['admin']],
       ['guest', []],
+      ['password-backed pending applicant', []],
     ])('rejects a %s account without the organizer capability', async (_label, roles) => {
       mocks.findUser.mockResolvedValue(await organizer(roles));
 
