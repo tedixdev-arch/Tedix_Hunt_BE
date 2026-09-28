@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('../lib/postgres.js', () => ({ pool: { query } }));
 
-import { UserRoles } from './UserRole.js';
+import { RetiredAccountRoleError, UserRoles } from './UserRole.js';
 
 describe('UserRoles persistence', () => {
   beforeEach(() => query.mockReset());
@@ -36,8 +36,18 @@ describe('UserRoles persistence', () => {
       'DELETE FROM user_roles WHERE user_id = $1 AND role = $2',
       ['user-1', 'creator'],
     );
-    // No users, credential, session, organization, or Hunt table participates in role changes.
-    expect(query.mock.calls.every(([sql]) => /user_roles/.test(sql))).toBe(true);
+    // The users read is only an account-state guard; no domain record participates.
+    expect(query.mock.calls.every(([sql]) => /user_roles|users/.test(sql))).toBe(true);
+  });
+
+  it('never grants a capability to a retired identity', async () => {
+    query
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ account_status: 'retired' }], rowCount: 1 });
+
+    await expect(UserRoles.assignRole('retired-user', 'admin'))
+      .rejects.toBeInstanceOf(RetiredAccountRoleError);
+    expect(query.mock.calls[0][0]).toContain("account_status <> 'retired'");
   });
 
   it('rejects unsupported global roles', async () => {

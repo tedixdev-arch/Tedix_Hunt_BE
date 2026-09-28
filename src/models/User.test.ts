@@ -11,7 +11,6 @@ vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
 import {
   AdminPasswordChangeNotAllowedError, LastActiveAdminError, User, USER_ROLES,
-  UserHasProtectedDependenciesError,
 } from './User.js';
 
 const storedRow = {
@@ -31,7 +30,7 @@ describe('User persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     connect.mockResolvedValue({ query: clientQuery, release });
-    clientQuery.mockResolvedValue({ rows: [] });
+    clientQuery.mockResolvedValue({ rows: [], rowCount: 1 });
   });
 
   it('creates a registered user with a normalized email and password hash', async () => {
@@ -91,7 +90,7 @@ describe('User persistence', () => {
 
     expect(clientQuery.mock.calls).toEqual([
       ['BEGIN'],
-      ['UPDATE users SET password_hash = $1 WHERE id = $2', ['new-bcrypt-hash', storedRow.id]],
+      [expect.stringContaining("account_status <> 'retired'"), ['new-bcrypt-hash', storedRow.id]],
       ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
       ['COMMIT'],
     ]);
@@ -252,7 +251,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [{ ...storedRow, account_status: status }] })
       .mockResolvedValueOnce({ rows: [{ present: false }] })
       .mockResolvedValue({ rows: [] });
-    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('deleted');
     expect(clientQuery.mock.calls.slice(-6)).toEqual([
       ['DELETE FROM refresh_tokens WHERE user_id = $1', [storedRow.id]],
       ['DELETE FROM professional_activation_tokens WHERE user_id = $1 OR created_by = $1', [storedRow.id]],
@@ -270,8 +269,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [storedRow] })
       .mockResolvedValueOnce({ rows: [{ present: true }] })
       .mockResolvedValueOnce({ rows: [] });
-    await expect(User.deleteControlled(storedRow.id))
-      .rejects.toBeInstanceOf(UserHasProtectedDependenciesError);
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('retired');
     const sql = clientQuery.mock.calls[3][0] as string;
     for (const relationship of [
       'organizations', 'organization_members', 'hunts', 'hunt_participants', 'hunt_roles',
@@ -280,8 +278,9 @@ describe('User persistence', () => {
     expect(sql).not.toContain('professional_activation_tokens');
     expect(sql).toContain("status = 'pending'");
     expect(sql).toContain('reviewed_at IS NULL');
-    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
-    expect(clientQuery).not.toHaveBeenCalledWith(expect.stringMatching(/^DELETE/), expect.anything());
+    expect(clientQuery).toHaveBeenLastCalledWith('COMMIT');
+    expect(clientQuery).toHaveBeenCalledWith('DELETE FROM user_roles WHERE user_id = $1', [storedRow.id]);
+    expect(clientQuery).toHaveBeenCalledWith(expect.stringContaining("account_status = 'retired'"), [storedRow.id]);
   });
 
   it.each([
@@ -298,8 +297,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [{ present: true }] })
       .mockResolvedValueOnce({ rows: [] });
 
-    await expect(User.deleteControlled(storedRow.id))
-      .rejects.toBeInstanceOf(UserHasProtectedDependenciesError);
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('retired');
     expect(clientQuery.mock.calls[3][0]).toContain(clause);
   });
 
@@ -311,7 +309,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [{ present: false }] })
       .mockResolvedValue({ rows: [] });
 
-    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('deleted');
     const sql = clientQuery.mock.calls.map(([statement]) => statement).join('\n');
     expect(sql).toContain('DELETE FROM refresh_tokens WHERE user_id = $1');
     expect(sql).toContain(
@@ -362,7 +360,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [{ count: 2 }] })
       .mockResolvedValueOnce({ rows: [{ present: false }] })
       .mockResolvedValue({ rows: [] });
-    await expect(User.deleteControlled(storedRow.id)).resolves.toBe(true);
+    await expect(User.deleteControlled(storedRow.id)).resolves.toBe('deleted');
   });
 
   it('returns not found transactionally and rolls back any deletion failure', async () => {
@@ -371,7 +369,7 @@ describe('User persistence', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
-    await expect(User.deleteControlled('missing')).resolves.toBe(false);
+    await expect(User.deleteControlled('missing')).resolves.toBe(null);
     expect(clientQuery).toHaveBeenLastCalledWith('COMMIT');
 
     vi.clearAllMocks();
@@ -383,6 +381,19 @@ describe('User persistence', () => {
       return { rows: [] };
     });
     await expect(User.deleteControlled(storedRow.id)).rejects.toThrow('database failure');
+    expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('rolls back every retirement change when anonymization fails', async () => {
+    clientQuery.mockImplementation(async (statement: string) => {
+      if (statement.startsWith('SELECT users')) return { rows: [storedRow] };
+      if (statement.startsWith('SELECT EXISTS')) return { rows: [{ present: true }] };
+      if (statement.includes('UPDATE users SET')) throw new Error('anonymization failure');
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(User.deleteControlled(storedRow.id)).rejects.toThrow('anonymization failure');
     expect(clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
     expect(clientQuery).not.toHaveBeenCalledWith('COMMIT');
   });

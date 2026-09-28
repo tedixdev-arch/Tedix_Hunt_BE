@@ -3,7 +3,8 @@ import { pool } from '../lib/postgres.js';
 import type { UserRole } from './UserRole.js';
 
 export type LegacyRole = 'creator' | 'participant' | 'guest';
-export type AccountStatus = 'active' | 'blocked';
+export type AccountStatus = 'active' | 'blocked' | 'retired';
+export type AccountRemovalStatus = 'deleted' | 'retired';
 
 export interface IUser {
   id: string;
@@ -61,6 +62,8 @@ const mapRow = (row: any): IUser => ({
 
 export class LastActiveAdminError extends Error {}
 export class AdminPasswordChangeNotAllowedError extends Error {}
+export class RetiredAccountError extends Error {}
+/** @deprecated Account removal now retires identities with platform-history dependencies. */
 export class UserHasProtectedDependenciesError extends Error {}
 
 export const User = {
@@ -143,7 +146,7 @@ export const User = {
       `UPDATE users
        SET name = CASE WHEN $2 THEN $3 ELSE name END,
            email = CASE WHEN $4 THEN $5 ELSE email END
-       WHERE id = $1
+       WHERE id = $1 AND account_status <> 'retired'
        RETURNING users.*, ARRAY(
          SELECT ur.role FROM user_roles ur WHERE ur.user_id = users.id ORDER BY ur.role
        ) AS roles`,
@@ -162,7 +165,11 @@ export const User = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+      const changed = await client.query(
+        `UPDATE users SET password_hash = $1
+         WHERE id = $2 AND account_status <> 'retired'`, [passwordHash, id],
+      );
+      if (!changed.rowCount) throw new RetiredAccountError();
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
       await client.query('COMMIT');
     } catch (error) {
@@ -190,6 +197,7 @@ export const User = {
         await client.query('COMMIT');
         return null;
       }
+      if (target.account_status === 'retired') throw new RetiredAccountError();
       // Admin protection is based only on the target's authoritative user_roles capabilities.
       if (target.roles.includes('admin')) throw new AdminPasswordChangeNotAllowedError();
 
@@ -219,6 +227,7 @@ export const User = {
         await client.query('COMMIT');
         return null;
       }
+      if (target.account_status === 'retired') throw new RetiredAccountError();
 
       if (status === 'blocked' && target.account_status === 'active') {
         const isAdmin = await client.query(
@@ -254,7 +263,7 @@ export const User = {
     }
   },
 
-  async deleteControlled(id: string): Promise<boolean> {
+  async deleteControlled(id: string): Promise<AccountRemovalStatus | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -267,7 +276,7 @@ export const User = {
       )).rows[0];
       if (!target) {
         await client.query('COMMIT');
-        return false;
+        return null;
       }
 
       // An active Admin may be removed only while another active Admin remains.
@@ -297,7 +306,28 @@ export const User = {
                 ))
          ) AS present`, [id],
       );
-      if (dependencies.rows[0].present) throw new UserHasProtectedDependenciesError();
+      if (dependencies.rows[0].present) {
+        // Platform history owns these references. Keep only an inert, anonymous provenance row.
+        await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+        await client.query(
+          'DELETE FROM professional_activation_tokens WHERE user_id = $1 OR created_by = $1', [id],
+        );
+        await client.query(
+          `UPDATE organizer_applications
+           SET activation_token_hash = NULL, activation_expires_at = NULL
+           WHERE user_id = $1`, [id],
+        );
+        await client.query('DELETE FROM user_roles WHERE user_id = $1', [id]);
+        await client.query(
+          `UPDATE users SET
+             email = 'retired+' || id::text || '@internal.invalid',
+             name = 'Deleted user', password_hash = NULL, tedix_user_id = NULL,
+             role = 'participant', is_guest = FALSE, account_status = 'retired'
+           WHERE id = $1`, [id],
+        );
+        await client.query('COMMIT');
+        return 'retired';
+      }
 
       // Account/onboarding-only records are explicitly removed in this transaction. Activation
       // credentials created by this identity are provisioning artifacts, not business history.
@@ -313,7 +343,7 @@ export const User = {
       await client.query('DELETE FROM user_roles WHERE user_id = $1', [id]);
       await client.query('DELETE FROM users WHERE id = $1', [id]);
       await client.query('COMMIT');
-      return true;
+      return 'deleted';
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

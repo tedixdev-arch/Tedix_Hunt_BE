@@ -11,7 +11,6 @@ import {
   LastActiveAdminError,
   normalizeEmail,
   User,
-  UserHasProtectedDependenciesError,
   type IUser,
 } from '../models/User.js';
 import { LastAdminError, UserRoles, type UserRole } from '../models/UserRole.js';
@@ -32,6 +31,8 @@ const safeUser = (user: IUser) => ({
 
 const isUniqueViolation = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
+const isRetiredAccountError = (error: unknown): boolean =>
+  error instanceof Error && error.constructor.name.startsWith('RetiredAccount');
 
 type ManageableRole = Extract<UserRole, 'admin' | 'organizer' | 'creator'>;
 const isManageableRole = (role: string): role is ManageableRole =>
@@ -48,6 +49,9 @@ const changeStatus = (status: 'active' | 'blocked') =>
       if (!user) return response.status(404).json({ error: 'user_not_found' });
       return response.json({ user: safeUser(user) });
     } catch (error) {
+      if (isRetiredAccountError(error)) {
+        return response.status(409).json({ error: 'account_retired' });
+      }
       if (error instanceof LastActiveAdminError) {
         return response.status(409).json({ error: 'last_active_admin' });
       }
@@ -174,16 +178,16 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (request, response
  * /api/admin/users/{id}:
  *   delete:
  *     tags: [Admin Users]
- *     summary: Permanently delete a dependency-free identity
- *     description: Requires authoritative Admin capability. Self-deletion and deletion of the final active Admin are forbidden. The operation atomically removes the identity, global roles, refresh sessions, activation credentials, and untouched pending application only when no protected organization, Hunt, participation, supervision, or reviewed application records reference it.
+ *     summary: Permanently remove an account
+ *     description: Dependency-free accounts are deleted. Accounts referenced by platform history are transactionally retired and anonymized while their UUID and all history remain. Self-removal and removal of the final active Admin are forbidden.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
  *     responses:
- *       200: { description: Identity and account-only records deleted transactionally }
+ *       200: { description: Returns status deleted or retired }
  *       403: { description: Authoritative Admin capability required }
  *       404: { description: Identity not found }
- *       409: { description: Self-delete, protected dependencies, or final active Admin conflict }
+ *       409: { description: Self-delete or final active Admin conflict }
  */
 router.delete('/:id', requireAuth, requireRole('admin'), async (request: AuthRequest, response) => {
   const targetId = String(request.params.id);
@@ -191,14 +195,12 @@ router.delete('/:id', requireAuth, requireRole('admin'), async (request: AuthReq
     return response.status(409).json({ error: 'self_delete_not_allowed' });
   }
   try {
-    if (!await User.deleteControlled(targetId)) {
+    const status = await User.deleteControlled(targetId);
+    if (!status) {
       return response.status(404).json({ error: 'user_not_found' });
     }
-    return response.json({ status: 'deleted' });
+    return response.json({ status });
   } catch (error) {
-    if (error instanceof UserHasProtectedDependenciesError) {
-      return response.status(409).json({ error: 'user_has_protected_dependencies' });
-    }
     if (error instanceof LastActiveAdminError) {
       return response.status(409).json({ error: 'last_active_admin' });
     }
@@ -257,6 +259,9 @@ router.put('/:id/password', requireAuth, requireRole('admin'), async (request: A
     if (!user) return response.status(404).json({ error: 'user_not_found' });
     return response.json({ user: safeUser(user) });
   } catch (error) {
+    if (isRetiredAccountError(error)) {
+      return response.status(409).json({ error: 'account_retired' });
+    }
     if (error instanceof AdminPasswordChangeNotAllowedError) {
       return response.status(409).json({ error: 'admin_password_change_not_allowed' });
     }
@@ -330,9 +335,20 @@ router.post('/:id/roles/:role', requireAuth, requireRole('admin'), async (reques
   const role = String(request.params.role);
   if (!isManageableRole(role)) return response.status(400).json({ error: 'invalid_role' });
 
-  // Role ownership is independent of account status, credentials, and domain provisioning.
-  if (!await User.findById(targetId)) return response.status(404).json({ error: 'user_not_found' });
-  await UserRoles.assignRole(targetId, role);
+  // Retirement is permanent: normal capability management must never revive the identity.
+  const target = await User.findById(targetId);
+  if (!target) return response.status(404).json({ error: 'user_not_found' });
+  if (target.accountStatus === 'retired') {
+    return response.status(409).json({ error: 'account_retired' });
+  }
+  try {
+    await UserRoles.assignRole(targetId, role);
+  } catch (error) {
+    if (isRetiredAccountError(error)) {
+      return response.status(409).json({ error: 'account_retired' });
+    }
+    throw error;
+  }
   const user = await User.findById(targetId);
   return response.json({ user: safeUser(user!) });
 });
@@ -416,6 +432,9 @@ router.post('/professional', requireAuth, requireRole('admin'), async (request: 
       } : {}),
     });
   } catch (error) {
+    if (isRetiredAccountError(error)) {
+      return response.status(409).json({ error: 'account_retired' });
+    }
     if (error instanceof ProfessionalGuestPromotionError) {
       return response.status(409).json({ error: 'guest_promotion_not_allowed' });
     }
@@ -476,6 +495,9 @@ router.post('/admin', requireAuth, requireRole('admin'), async (request: AuthReq
       } : {}),
     });
   } catch (error) {
+    if (isRetiredAccountError(error)) {
+      return response.status(409).json({ error: 'account_retired' });
+    }
     if (error instanceof GuestPromotionError) {
       return response.status(409).json({ error: 'guest_promotion_not_allowed' });
     }

@@ -646,22 +646,23 @@ describe('user account API', () => {
     expect(mocks.createRefreshToken).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects login and refresh for a blocked identity, including an old session', async () => {
-    const blocked = {
+  it.each(['blocked', 'retired'] as const)(
+    'rejects login and refresh for a %s identity, including an old session', async (status) => {
+    const inactive = {
       ...registeredUser,
-      accountStatus: 'blocked' as const,
+      accountStatus: status,
       passwordHash: await bcrypt.hash('correct-password', 4),
     };
-    mocks.findUser.mockResolvedValue(blocked);
+    mocks.findUser.mockResolvedValue(inactive);
     await request(app).post('/api/auth/creator/login')
-      .send({ email: blocked.email, password: 'correct-password' })
+      .send({ email: inactive.email, password: 'correct-password' })
       .expect(401, { error: 'invalid_credentials' });
 
     mocks.consumeRefreshToken.mockResolvedValue({
-      id: 'old-session', user: blocked.id, token: 'old-refresh',
+      id: 'old-session', user: inactive.id, token: 'old-refresh',
       expiresAt: new Date(Date.now() + 60_000), createdAt,
     });
-    mocks.findUserById.mockResolvedValue(blocked);
+    mocks.findUserById.mockResolvedValue(inactive);
     await request(app).post('/api/auth/refresh').send({ refreshToken: 'old-refresh' })
       .expect(401, { error: 'invalid_refresh' });
     expect(mocks.createRefreshToken).not.toHaveBeenCalled();

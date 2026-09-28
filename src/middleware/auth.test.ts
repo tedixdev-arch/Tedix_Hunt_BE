@@ -93,4 +93,10 @@ describe('capability authorization', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(403, { error: 'forbidden' });
   });
+
+  it('rejects a retired identity even when an old access token and role remain', async () => {
+    mocks.findById.mockResolvedValue(user(['admin'], { accountStatus: 'retired' }));
+    await request(app).get('/operations').set('Authorization', `Bearer ${token}`)
+      .expect(401, { error: 'unauthorized' });
+  });
 });

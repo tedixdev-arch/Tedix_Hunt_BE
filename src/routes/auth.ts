@@ -188,7 +188,7 @@ router.post('/creator/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
   const user = await User.findOne({ email, role: 'creator' });
-  if (!user || user.accountStatus === 'blocked') return res.status(401).json({ error: 'invalid_credentials' });
+  if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired') return res.status(401).json({ error: 'invalid_credentials' });
 
   const ok = await bcrypt.compare(password, user.passwordHash ?? '');
   if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
@@ -241,7 +241,7 @@ router.post('/organizer/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
   const user = await User.findOne({ email });
-  if (!user || user.accountStatus === 'blocked' || !user.roles.includes('organizer')) {
+  if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired' || !user.roles.includes('organizer')) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
 
@@ -303,7 +303,7 @@ router.post('/admin/login', async (req, res) => {
   }
 
   const user = await User.findOne({ email: normalizeEmail(email) });
-  if (!user || user.accountStatus === 'blocked' || !user.roles.includes('admin')) {
+  if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired' || !user.roles.includes('admin')) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
 
@@ -439,7 +439,7 @@ router.post('/participant/login', async (req, res) => {
   // tedixUserId handed back by that flow rather than holding its own password.
   if (tedixUserId) {
     const user = await User.findOne({ tedixUserId, role: 'participant' });
-    if (!user || user.accountStatus === 'blocked') return res.status(401).json({ error: 'invalid_credentials' });
+    if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired') return res.status(401).json({ error: 'invalid_credentials' });
 
     const tokens = await createTokens(user.id);
     return res.json({ user: publicUser(user), tokens });
@@ -448,7 +448,7 @@ router.post('/participant/login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });
 
   const user = await User.findOne({ email, role: 'participant' });
-  if (!user || user.accountStatus === 'blocked') return res.status(401).json({ error: 'invalid_credentials' });
+  if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired') return res.status(401).json({ error: 'invalid_credentials' });
 
   const ok = await bcrypt.compare(password, user.passwordHash ?? '');
   if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
@@ -534,7 +534,7 @@ router.post('/refresh', async (req, res) => {
 
   const userId = String(stored.user);
   const user = await User.findById(userId);
-  if (!user || user.isGuest || user.accountStatus === 'blocked') {
+  if (!user || user.isGuest || user.accountStatus === 'blocked' || user.accountStatus === 'retired') {
     return res.status(401).json({ error: 'invalid_refresh' });
   }
 

@@ -3,6 +3,7 @@ import { pool } from '../lib/postgres.js';
 export type UserRole = 'participant' | 'organizer' | 'creator' | 'admin';
 export const USER_ROLES: readonly UserRole[] = ['participant', 'organizer', 'creator', 'admin'];
 export class LastAdminError extends Error {}
+export class RetiredAccountRoleError extends Error {}
 
 function assertRole(role: string): asserts role is UserRole {
   if (!USER_ROLES.includes(role as UserRole)) throw new Error('invalid_user_role');
@@ -29,10 +30,16 @@ export const UserRoles = {
   // The unique user_id/role key makes grants idempotent without replacing any other capability.
   async assignRole(userId: string, role: UserRole): Promise<void> {
     assertRole(role);
-    await pool.query(
-      'INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    const result = await pool.query(
+      `INSERT INTO user_roles (user_id, role)
+       SELECT id, $2 FROM users WHERE id = $1 AND account_status <> 'retired'
+       ON CONFLICT DO NOTHING`,
       [userId, role],
     );
+    if (!result.rowCount) {
+      const target = await pool.query('SELECT account_status FROM users WHERE id = $1', [userId]);
+      if (target.rows[0]?.account_status === 'retired') throw new RetiredAccountRoleError();
+    }
   },
 
   async removeRole(userId: string, role: UserRole): Promise<void> {

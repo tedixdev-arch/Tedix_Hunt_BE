@@ -71,7 +71,7 @@ describe('Admin user provisioning API', () => {
     mocks.updateIdentity.mockImplementation(async (_id, update) => user(['participant'], update));
     mocks.replaceNonAdminPasswordAndRevokeSessions.mockImplementation(async (id, passwordHash) =>
       user(['participant'], { id, passwordHash }));
-    mocks.deleteControlled.mockResolvedValue(true);
+    mocks.deleteControlled.mockResolvedValue('deleted');
   });
 
   it('requires the authoritative Admin role for listing and provisioning', async () => {
@@ -207,12 +207,11 @@ describe('Admin user provisioning API', () => {
     mocks.deleteControlled.mockResolvedValueOnce(false);
     await request(app).delete('/api/admin/users/missing')
       .set('Authorization', bearer()).expect(404, { error: 'user_not_found' });
-    const { UserHasProtectedDependenciesError, LastActiveAdminError } =
-      await import('../models/User.js');
-    mocks.deleteControlled.mockRejectedValueOnce(new UserHasProtectedDependenciesError());
+    mocks.deleteControlled.mockResolvedValueOnce('retired');
     await request(app).delete('/api/admin/users/dependent')
       .set('Authorization', bearer())
-      .expect(409, { error: 'user_has_protected_dependencies' });
+      .expect(200, { status: 'retired' });
+    const { LastActiveAdminError } = await import('../models/User.js');
     mocks.deleteControlled.mockRejectedValueOnce(new LastActiveAdminError());
     await request(app).delete('/api/admin/users/final-admin')
       .set('Authorization', bearer()).expect(409, { error: 'last_active_admin' });
@@ -299,6 +298,15 @@ describe('Admin user provisioning API', () => {
     expect(mocks.assignRole).toHaveBeenCalledWith(targetId, role);
     expect(response.body.user).toMatchObject({ roles: ['participant', role], accountStatus: 'blocked' });
     expect(response.body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('does not grant a global role to a retired identity', async () => {
+    mocks.findById
+      .mockResolvedValueOnce(user(['admin']))
+      .mockResolvedValueOnce(user([], { id: 'retired-user', accountStatus: 'retired' }));
+    await request(app).post('/api/admin/users/retired-user/roles/admin')
+      .set('Authorization', bearer()).expect(409, { error: 'account_retired' });
+    expect(mocks.assignRole).not.toHaveBeenCalled();
   });
 
   it.each(['creator', 'organizer'])('allows self-removal of %s', async (role) => {
