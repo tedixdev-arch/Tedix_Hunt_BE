@@ -275,3 +275,44 @@ describe('Creator Hunt Template persistence', () => {
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
 });
+
+describe('Admin submitted Creator Template review persistence', () => {
+  beforeEach(() => query.mockReset());
+
+  const row = {
+    key: 'algebra-trail', version: 2, status: 'submitted', origin: 'creator',
+    creator_id: 'creator-1', creator_name: 'Ada', creator_email: 'ada@example.com',
+    content: { key: 'algebra-trail', version: 2, exact: 'submitted-v2' },
+  };
+
+  it('uses one deterministic query joining submitted_version, not latest/MAX(version)', async () => {
+    // The modeled database state may also contain v3; PostgreSQL returned v2 because the join is pinned.
+    query.mockResolvedValue({ rows: [row] });
+    await expect(HuntTemplates.listSubmittedCreatorReviews()).resolves.toEqual([{
+      key: row.key, version: 2, status: 'submitted', origin: 'creator',
+      creator: { id: 'creator-1', name: 'Ada', email: 'ada@example.com' }, content: row.content,
+    }]);
+    expect(query).toHaveBeenCalledTimes(1);
+    const sql = query.mock.calls[0][0] as string;
+    expect(sql).toContain('v.version = t.submitted_version');
+    expect(sql).toContain("t.origin = 'creator'");
+    expect(sql).toContain("t.status = 'submitted'");
+    expect(sql).toContain('t.submitted_version IS NOT NULL');
+    expect(sql).toContain('ORDER BY t.key ASC');
+    expect(sql).not.toMatch(/MAX\s*\(/i);
+    expect(sql).not.toContain('ORDER BY v.version DESC');
+  });
+
+  it('finds only a queue member by key through the same exact-version join', async () => {
+    query.mockResolvedValueOnce({ rows: [row] });
+    await expect(HuntTemplates.findSubmittedCreatorReviewByKey(row.key))
+      .resolves.toMatchObject({ version: 2, content: row.content });
+    const [sql, parameters] = query.mock.calls[0];
+    expect(sql).toContain('v.version = t.submitted_version');
+    expect(sql).toContain('AND t.key = $1');
+    expect(parameters).toEqual([row.key]);
+
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.findSubmittedCreatorReviewByKey('draft')).resolves.toBeNull();
+  });
+});

@@ -45,6 +45,15 @@ export interface CreatorOwnedHuntTemplateVersion {
   content: unknown;
 }
 
+export interface AdminTemplateReview {
+  key: string;
+  version: number;
+  status: 'submitted';
+  origin: 'creator';
+  creator: { id: string; name: string | null; email: string | null };
+  content: unknown;
+}
+
 interface TemplateProvenance {
   origin: HuntTemplateOrigin;
   createdByUserId?: string | null;
@@ -358,6 +367,42 @@ export const HuntTemplates = {
       : null;
   },
 
+  async listSubmittedCreatorReviews(): Promise<AdminTemplateReview[]> {
+    // Review is pinned to submitted_version. It must never drift to a newer version.
+    const { rows } = await pool.query(
+      `SELECT t.key, t.status, t.origin, v.version, v.content,
+              creator.id AS creator_id, creator.name AS creator_name,
+              creator.email AS creator_email
+       FROM hunt_templates t
+       JOIN hunt_template_versions v
+         ON v.template_id = t.id AND v.version = t.submitted_version
+       JOIN users creator ON creator.id = t.created_by_user_id
+       WHERE t.origin = 'creator'
+         AND t.status = 'submitted'
+         AND t.submitted_version IS NOT NULL
+       ORDER BY t.key ASC`,
+    );
+    return rows.map(mapAdminReview);
+  },
+
+  async findSubmittedCreatorReviewByKey(key: string): Promise<AdminTemplateReview | null> {
+    const { rows } = await pool.query(
+      `SELECT t.key, t.status, t.origin, v.version, v.content,
+              creator.id AS creator_id, creator.name AS creator_name,
+              creator.email AS creator_email
+       FROM hunt_templates t
+       JOIN hunt_template_versions v
+         ON v.template_id = t.id AND v.version = t.submitted_version
+       JOIN users creator ON creator.id = t.created_by_user_id
+       WHERE t.origin = 'creator'
+         AND t.status = 'submitted'
+         AND t.submitted_version IS NOT NULL
+         AND t.key = $1`,
+      [key],
+    );
+    return rows[0] ? mapAdminReview(rows[0]) : null;
+  },
+
   async list(): Promise<HuntTemplateWithLatestVersion[]> {
     const { rows } = await pool.query(
       `SELECT t.*, latest.version AS latest_version,
@@ -376,3 +421,12 @@ export const HuntTemplates = {
     }));
   },
 };
+
+const mapAdminReview = (row: any): AdminTemplateReview => ({
+  key: row.key,
+  version: row.version,
+  status: row.status,
+  origin: row.origin,
+  creator: { id: row.creator_id, name: row.creator_name, email: row.creator_email },
+  content: row.content,
+});

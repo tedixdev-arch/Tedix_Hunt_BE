@@ -1,0 +1,59 @@
+import express from 'express';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { HuntTemplates } from '../models/HuntTemplate.js';
+
+const router = express.Router();
+
+/**
+ * @openapi
+ * /api/admin/templates/review:
+ *   get:
+ *     tags: [Admin Template Review]
+ *     summary: List submitted Creator Templates awaiting review
+ *     description: Admin-only, read-only queue. Each result is the exact immutable version referenced by submitted_version, never an implicit latest version.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Submitted Creator Template review artifacts
+ *         content: { application/json: { schema: { type: object, required: [templates], properties: { templates: { type: array, items: { $ref: '#/components/schemas/AdminTemplateReview' } } } } } }
+ *       401: { description: Authentication required }
+ *       403: { description: Authoritative Admin capability required }
+ */
+router.get('/', requireAuth, requireRole('admin'), async (_request, response, next) => {
+  try {
+    return response.json({ templates: await HuntTemplates.listSubmittedCreatorReviews() });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/templates/review/{key}:
+ *   get:
+ *     tags: [Admin Template Review]
+ *     summary: Inspect one submitted Creator Template
+ *     description: Admin-only, read-only inspection of the exact immutable version referenced by submitted_version, never an implicit latest version.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Exact submitted review artifact, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
+ *       401: { description: Authentication required }
+ *       403: { description: Authoritative Admin capability required }
+ *       404: { description: Key is not in the submitted Creator review queue }
+ */
+router.get('/:key', requireAuth, requireRole('admin'), async (request, response, next) => {
+  try {
+    const key = request.params.key;
+    if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
+    const template = await HuntTemplates.findSubmittedCreatorReviewByKey(key);
+    return template
+      ? response.json(template)
+      : response.status(404).json({ error: 'not_found' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+export { router as adminTemplateReviewsRouter };
