@@ -1,5 +1,5 @@
 import express from 'express';
-import { listHuntTemplates } from '../domain/huntTemplates.js';
+import { listApprovedHuntTemplates } from '../domain/huntTemplates.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -21,6 +21,12 @@ const router = express.Router();
  *               items: { $ref: '#/components/schemas/HuntTemplateMetadata' }
  *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  */
-router.get('/', requireAuth, (_req, res) => res.json(listHuntTemplates()));
+router.get('/', requireAuth, async (_req, res, next) => {
+  try {
+    res.json(await listApprovedHuntTemplates());
+  } catch (error) {
+    next(error);
+  }
+});
 
 export const huntTemplatesRouter = router;

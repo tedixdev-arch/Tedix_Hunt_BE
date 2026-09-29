@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   findOrganizationById: vi.fn(),
   isOwner: vi.fn(),
   isMember: vi.fn(),
+  listApprovedTemplates: vi.fn(),
 }));
 
 vi.mock('../models/User.js', () => ({ User: { findById: mocks.findUserById } }));
@@ -36,6 +37,9 @@ vi.mock('../models/Organization.js', () => ({
     isMember: mocks.isMember,
   },
 }));
+vi.mock('../models/HuntTemplate.js', () => ({ HuntTemplates: {
+  listApprovedWithLatestVersion: mocks.listApprovedTemplates,
+} }));
 
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
@@ -79,6 +83,10 @@ describe('Hunt routes', () => {
     mocks.transitionStatus.mockImplementation(({ to }) => Promise.resolve({ ...hunt, status: to }));
     mocks.ensureAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
     mocks.findByAccessCode.mockResolvedValue({ ...hunt, status: 'published', accessCode: '7KPM4XQ2' });
+    mocks.listApprovedTemplates.mockResolvedValue([{
+      key: 'signal-cluj-napoca', version: 1,
+      content: { displayName: 'Signal: Cluj Napoca', theme: 'Smart Theme (Signal)' },
+    }]);
   });
 
   it('requires authentication to list Hunts', async () => {
