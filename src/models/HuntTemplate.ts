@@ -58,6 +58,10 @@ export interface ApprovedAdminTemplateReview extends Omit<AdminTemplateReview, '
   status: 'approved';
 }
 
+export interface ChangesRequestedAdminTemplateReview extends Omit<AdminTemplateReview, 'status'> {
+  status: 'changes_requested';
+}
+
 interface TemplateProvenance {
   origin: HuntTemplateOrigin;
   createdByUserId?: string | null;
@@ -326,6 +330,61 @@ export const HuntTemplates = {
       );
       await client.query('COMMIT');
       return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), status: 'approved' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async requestChangesForSubmittedCreator(
+    key: string,
+  ): Promise<ChangesRequestedAdminTemplateReview | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The identity lock serializes request-changes with every other Admin decision.
+      const templateResult = await client.query(
+        `SELECT * FROM hunt_templates
+         WHERE key = $1 AND origin = 'creator'
+         FOR UPDATE`,
+        [key],
+      );
+      const row = templateResult.rows[0];
+      if (!row) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (row.status !== 'submitted' || row.submitted_version === null) {
+        throw new HuntTemplateNotReviewableError();
+      }
+
+      // Resolve only the pinned review artifact; a newer version must never replace it.
+      const reviewResult = await client.query(
+        `SELECT t.key, t.origin, v.version, v.content,
+                creator.id AS creator_id, creator.name AS creator_name,
+                creator.email AS creator_email
+         FROM hunt_templates t
+         JOIN hunt_template_versions v
+           ON v.template_id = t.id AND v.version = t.submitted_version
+         JOIN users creator ON creator.id = t.created_by_user_id
+         WHERE t.id = $1`,
+        [row.id],
+      );
+      if (!reviewResult.rows[0]) throw new HuntTemplateNotReviewableError();
+
+      // Preserve submitted_version: it records the immutable artifact that was reviewed.
+      await client.query(
+        `UPDATE hunt_templates SET status = 'changes_requested', updated_at = now()
+         WHERE id = $1 AND status = 'submitted'`,
+        [row.id],
+      );
+      await client.query('COMMIT');
+      return {
+        ...mapAdminReview({ ...reviewResult.rows[0], status: 'changes_requested' }),
+        status: 'changes_requested',
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

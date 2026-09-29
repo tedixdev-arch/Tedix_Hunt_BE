@@ -2,7 +2,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  findUserById: vi.fn(), list: vi.fn(), find: vi.fn(), approve: vi.fn(),
+  findUserById: vi.fn(), list: vi.fn(), find: vi.fn(), approve: vi.fn(), requestChanges: vi.fn(),
 }));
 vi.mock('../models/User.js', () => ({ User: { findById: mocks.findUserById } }));
 vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
@@ -12,6 +12,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
     listSubmittedCreatorReviews: mocks.list,
     findSubmittedCreatorReviewByKey: mocks.find,
     approveSubmittedCreator: mocks.approve,
+    requestChangesForSubmittedCreator: mocks.requestChanges,
   } };
 });
 
@@ -39,6 +40,7 @@ describe('Admin Template review reads', () => {
     mocks.list.mockResolvedValue([review('algebra-trail'), review('biology-path', 3)]);
     mocks.find.mockResolvedValue(review());
     mocks.approve.mockResolvedValue({ ...review(), status: 'approved' });
+    mocks.requestChanges.mockResolvedValue({ ...review(), status: 'changes_requested' });
   });
 
   it('lists submitted Creator review artifacts deterministically as supplied by persistence', async () => {
@@ -113,6 +115,39 @@ describe('Admin Template review reads', () => {
   it('allows approval for a multi-role identity containing Admin', async () => {
     mocks.findUserById.mockResolvedValue(identity(['organizer', 'creator', 'admin']));
     await request(app).post('/api/admin/templates/review/algebra-trail/approve')
+      .set('Authorization', bearer).expect(200);
+  });
+
+  it('allows an Admin to request changes to the exact submitted artifact', async () => {
+    await request(app).post('/api/admin/templates/review/algebra-trail/request-changes')
+      .set('Authorization', bearer).expect(200, { ...review(), status: 'changes_requested' });
+    expect(mocks.requestChanges).toHaveBeenCalledWith('algebra-trail');
+  });
+
+  it('does not expose missing or platform Templates through request-changes', async () => {
+    mocks.requestChanges.mockResolvedValue(null);
+    await request(app).post('/api/admin/templates/review/signal-cluj-napoca/request-changes')
+      .set('Authorization', bearer).expect(404, { error: 'not_found' });
+  });
+
+  it('rejects a repeated or otherwise ineligible request-changes transition', async () => {
+    mocks.requestChanges.mockRejectedValue(new HuntTemplateNotReviewableError());
+    await request(app).post('/api/admin/templates/review/algebra-trail/request-changes')
+      .set('Authorization', bearer).expect(409, { error: 'template_not_reviewable' });
+  });
+
+  it.each([
+    ['organizer', ['organizer']], ['creator', ['creator']], ['participant', ['participant']],
+  ])('forbids an %s-only identity from requesting changes', async (_label, roles) => {
+    mocks.findUserById.mockResolvedValue(identity(roles));
+    await request(app).post('/api/admin/templates/review/algebra-trail/request-changes')
+      .set('Authorization', bearer).expect(403, { error: 'forbidden' });
+    expect(mocks.requestChanges).not.toHaveBeenCalled();
+  });
+
+  it('allows a multi-role identity containing Admin to request changes', async () => {
+    mocks.findUserById.mockResolvedValue(identity(['organizer', 'creator', 'admin']));
+    await request(app).post('/api/admin/templates/review/algebra-trail/request-changes')
       .set('Authorization', bearer).expect(200);
   });
 });

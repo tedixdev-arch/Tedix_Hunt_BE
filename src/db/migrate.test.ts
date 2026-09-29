@@ -24,6 +24,7 @@ import { huntTemplateVersionsMigration } from './migrations/016_hunt_template_ve
 import { signalClujNapocaV1Migration } from './migrations/017_signal_cluj_napoca_v1.js';
 import { templateSubmissionMigration } from './migrations/018_template_submission.js';
 import { templateApprovalMigration } from './migrations/019_template_approval.js';
+import { templateChangesRequestedMigration } from './migrations/020_template_changes_requested.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 import type { Migration } from './migrations/index.js';
 
@@ -40,6 +41,7 @@ const migrations = [
   signalClujNapocaV1Migration,
   templateSubmissionMigration,
   templateApprovalMigration,
+  templateChangesRequestedMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -134,6 +136,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '017_signal_cluj_napoca_v1',
       '018_template_submission',
       '019_template_approval',
+      '020_template_changes_requested',
     ]);
     try {
       await expect(client.query(
@@ -206,6 +209,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '017_signal_cluj_napoca_v1' },
       { id: '018_template_submission' },
       { id: '019_template_approval' },
+      { id: '020_template_changes_requested' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
