@@ -458,8 +458,9 @@ describeWithDatabase('PostgreSQL migrations', () => {
       expect(list.body.some(({ key }: { key: string }) => key === signalClujNapocaV1.key)).toBe(false);
       expect(list.body.some(({ key }: { key: string }) => key === 'read-private-b')).toBe(false);
 
-      await request(app).get('/api/creator/templates/read-draft').set('Authorization', auth)
-        .expect(200, expect.objectContaining({ key: 'read-draft', version: 2 }));
+      const detail = await request(app).get('/api/creator/templates/read-draft')
+        .set('Authorization', auth).expect(200);
+      expect(detail.body).toEqual(expect.objectContaining({ key: 'read-draft', version: 2 }));
       const privateResponse = await request(app).get('/api/creator/templates/read-private-b')
         .set('Authorization', auth).expect(404);
       const unknownResponse = await request(app).get('/api/creator/templates/read-unknown')
