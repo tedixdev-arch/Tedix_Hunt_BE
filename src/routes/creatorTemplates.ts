@@ -1,7 +1,10 @@
 import express from 'express';
 import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
-import { HuntTemplateKeyConflictError, HuntTemplates } from '../models/HuntTemplate.js';
+import {
+  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplates, InvalidHuntTemplateContentError,
+} from '../models/HuntTemplate.js';
 
 const router = express.Router();
 
@@ -103,6 +106,60 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
   } catch (error) {
     if (error instanceof HuntTemplateKeyConflictError) {
       return res.status(409).json({ error: 'template_key_conflict' });
+    }
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/creator/templates/{key}/versions:
+ *   post:
+ *     tags: [Creator Templates]
+ *     summary: Save a new immutable version of a Creator-owned draft Template
+ *     description: The complete Template snapshot must be supplied. The backend calculates the next version; only the authenticated Creator's own draft Templates are editable.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [content]
+ *             properties:
+ *               content: { $ref: '#/components/schemas/CreatorTemplateContent' }
+ *     responses:
+ *       201: { description: New immutable Template version created }
+ *       400: { description: Invalid complete Template content, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: Template not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: Creator-owned Template is not editable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const key = req.params.key;
+  if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
+  try {
+    const result = await HuntTemplates.createCreatorVersion(key, req.body?.content, req.user!.id);
+    return res.status(201).json({
+      key: result.template.key,
+      version: result.version.version,
+      status: result.template.status,
+      origin: result.template.origin,
+      content: result.version.content,
+    });
+  } catch (error) {
+    // Missing and other-owned identities deliberately share one response.
+    if (error instanceof HuntTemplateNotFoundError) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (error instanceof HuntTemplateNotEditableError) {
+      return res.status(409).json({ error: 'template_not_editable' });
+    }
+    if (error instanceof InvalidHuntTemplateContentError) {
+      return res.status(400).json({ error: 'invalid_input' });
     }
     return next(error);
   }

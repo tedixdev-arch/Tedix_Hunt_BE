@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   findUserById: vi.fn(),
   createCreatorDraft: vi.fn(),
+  createCreatorVersion: vi.fn(),
   listCreatorOwnedWithLatestVersion: vi.fn(),
   findCreatorOwnedByKeyWithLatestVersion: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
     HuntTemplates: {
       ...actual.HuntTemplates,
       createCreatorDraft: mocks.createCreatorDraft,
+      createCreatorVersion: mocks.createCreatorVersion,
       listCreatorOwnedWithLatestVersion: mocks.listCreatorOwnedWithLatestVersion,
       findCreatorOwnedByKeyWithLatestVersion: mocks.findCreatorOwnedByKeyWithLatestVersion,
     },
@@ -23,7 +25,10 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
 
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
-import { HuntTemplateKeyConflictError } from '../models/HuntTemplate.js';
+import {
+  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  InvalidHuntTemplateContentError,
+} from '../models/HuntTemplate.js';
 
 const content = {
   key: 'algebra-trail', version: 1, displayName: 'Algebra Trail', theme: 'Numbers',
@@ -131,5 +136,57 @@ describe('POST /api/creator/templates', () => {
     mocks.createCreatorDraft.mockRejectedValue(new HuntTemplateKeyConflictError());
     await request(app).post('/api/creator/templates').set('Authorization', bearer)
       .send({ key: content.key, content }).expect(409, { error: 'template_key_conflict' });
+  });
+});
+
+describe('POST /api/creator/templates/:key/versions', () => {
+  const app = createApp();
+  const version2 = { ...content, version: 2, displayName: 'Algebra Trail revised' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findUserById.mockResolvedValue(user(['creator']));
+    mocks.createCreatorVersion.mockResolvedValue({
+      template: { key: content.key, origin: 'creator', status: 'draft' },
+      version: { version: 2, content: version2 },
+    });
+  });
+
+  it('saves and returns a complete new immutable version', async () => {
+    await request(app).post(`/api/creator/templates/${content.key}/versions`)
+      .set('Authorization', bearer).send({ content: version2 }).expect(201, {
+        key: content.key, version: 2, status: 'draft', origin: 'creator', content: version2,
+      });
+    expect(mocks.createCreatorVersion).toHaveBeenCalledWith(content.key, version2, 'user-1');
+  });
+
+  it.each([
+    ['unknown', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['other-owned', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['platform', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['submitted', new HuntTemplateNotEditableError(), 409, 'template_not_editable'],
+    ['changes requested', new HuntTemplateNotEditableError(), 409, 'template_not_editable'],
+    ['approved', new HuntTemplateNotEditableError(), 409, 'template_not_editable'],
+    ['invalid content', new InvalidHuntTemplateContentError(), 400, 'invalid_input'],
+  ])('returns a stable response for %s', async (_case, error, status, code) => {
+    mocks.createCreatorVersion.mockRejectedValue(error);
+    await request(app).post(`/api/creator/templates/${content.key}/versions`)
+      .set('Authorization', bearer).send({ content: version2 }).expect(status, { error: code });
+  });
+
+  it.each([
+    ['organizer-only', ['organizer']], ['admin-only', ['admin']],
+  ])('forbids a %s identity', async (_name, roles) => {
+    mocks.findUserById.mockResolvedValue(user(roles));
+    await request(app).post(`/api/creator/templates/${content.key}/versions`)
+      .set('Authorization', bearer).send({ content: version2 })
+      .expect(403, { error: 'forbidden' });
+    expect(mocks.createCreatorVersion).not.toHaveBeenCalled();
+  });
+
+  it('allows a multi-role identity containing Creator capability', async () => {
+    mocks.findUserById.mockResolvedValue(user(['admin', 'organizer', 'creator']));
+    await request(app).post(`/api/creator/templates/${content.key}/versions`)
+      .set('Authorization', bearer).send({ content: version2 }).expect(201);
   });
 });
