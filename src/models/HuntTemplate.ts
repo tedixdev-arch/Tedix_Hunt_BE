@@ -34,6 +34,14 @@ export interface ApprovedHuntTemplateVersion {
   content: unknown;
 }
 
+export interface CreatorOwnedHuntTemplateVersion {
+  key: string;
+  version: number;
+  status: HuntTemplateStatus;
+  origin: 'creator';
+  content: unknown;
+}
+
 interface TemplateProvenance {
   origin: HuntTemplateOrigin;
   createdByUserId?: string | null;
@@ -196,6 +204,54 @@ export const HuntTemplates = {
     );
     return rows[0]
       ? { key: rows[0].key, version: rows[0].version, content: rows[0].content }
+      : null;
+  },
+
+  async listCreatorOwnedWithLatestVersion(
+    creatorUserId: string,
+  ): Promise<CreatorOwnedHuntTemplateVersion[]> {
+    // Ownership belongs in SQL so private rows never leave PostgreSQL for route-level filtering.
+    const { rows } = await pool.query(
+      `SELECT t.key, t.status, t.origin, latest.version, latest.content
+       FROM hunt_templates t
+       JOIN LATERAL (
+         SELECT version, content
+         FROM hunt_template_versions
+         WHERE template_id = t.id
+         ORDER BY version DESC
+         LIMIT 1
+       ) latest ON TRUE
+       WHERE t.origin = 'creator' AND t.created_by_user_id = $1
+       ORDER BY t.key ASC`,
+      [creatorUserId],
+    );
+    return rows.map(({ key, version, status, origin, content }) => ({
+      key, version, status, origin, content,
+    }));
+  },
+
+  async findCreatorOwnedByKeyWithLatestVersion(
+    key: string,
+    creatorUserId: string,
+  ): Promise<CreatorOwnedHuntTemplateVersion | null> {
+    const { rows } = await pool.query(
+      `SELECT t.key, t.status, t.origin, latest.version, latest.content
+       FROM hunt_templates t
+       JOIN LATERAL (
+         SELECT version, content
+         FROM hunt_template_versions
+         WHERE template_id = t.id
+         ORDER BY version DESC
+         LIMIT 1
+       ) latest ON TRUE
+       WHERE t.origin = 'creator' AND t.created_by_user_id = $1 AND t.key = $2`,
+      [creatorUserId, key],
+    );
+    return rows[0]
+      ? {
+          key: rows[0].key, version: rows[0].version, status: rows[0].status,
+          origin: rows[0].origin, content: rows[0].content,
+        }
       : null;
   },
 

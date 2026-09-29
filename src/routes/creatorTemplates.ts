@@ -8,6 +8,61 @@ const router = express.Router();
 /**
  * @openapi
  * /api/creator/templates:
+ *   get:
+ *     tags: [Creator Templates]
+ *     summary: List the authenticated Creator's own authoring Templates
+ *     description: Owner-scoped authoring read across all lifecycle states; unlike the approved discovery catalog, platform and other Creators' Templates are excluded.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Creator-owned Templates with their latest persisted versions
+ *         content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CreatorOwnedTemplate' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.get('/', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  try {
+    // The model applies creator provenance and ownership before PostgreSQL returns rows.
+    return res.json(await HuntTemplates.listCreatorOwnedWithLatestVersion(req.user!.id));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/creator/templates/{key}:
+ *   get:
+ *     tags: [Creator Templates]
+ *     summary: Read one of the authenticated Creator's own authoring Templates
+ *     description: Returns the latest persisted version in any lifecycle state. Missing and other-owned keys are indistinguishable.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Creator-owned Template, content: { application/json: { schema: { $ref: '#/components/schemas/CreatorOwnedTemplate' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: Template not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  try {
+    const key = req.params.key;
+    if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
+    const template = await HuntTemplates.findCreatorOwnedByKeyWithLatestVersion(
+      key,
+      req.user!.id,
+    );
+    // Deliberately identical for unknown and other-owned keys to avoid disclosing private work.
+    return template ? res.json(template) : res.status(404).json({ error: 'not_found' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/creator/templates:
  *   post:
  *     tags: [Creator Templates]
  *     summary: Create a draft Competition Template with immutable version 1

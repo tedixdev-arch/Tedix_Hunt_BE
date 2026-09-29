@@ -50,6 +50,43 @@ describe('Creator Hunt Template persistence', () => {
     checkpoints: [{ id: 'one', custom: { preserved: true } }],
   };
 
+  beforeEach(() => query.mockReset());
+
+  it('lists only owner-scoped creator Templates with latest versions in one ordered query', async () => {
+    query.mockResolvedValue({ rows: [
+      { key: 'approved-own', version: 4, status: 'approved', origin: 'creator', content: { latest: true } },
+      { key: 'draft-own', version: 2, status: 'draft', origin: 'creator', content },
+    ] });
+
+    await expect(HuntTemplates.listCreatorOwnedWithLatestVersion(creatorId)).resolves.toEqual([
+      { key: 'approved-own', version: 4, status: 'approved', origin: 'creator', content: { latest: true } },
+      { key: 'draft-own', version: 2, status: 'draft', origin: 'creator', content },
+    ]);
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, parameters] = query.mock.calls[0];
+    expect(sql).toContain("t.origin = 'creator' AND t.created_by_user_id = $1");
+    expect(sql).toContain('ORDER BY version DESC');
+    expect(sql).toContain('ORDER BY t.key ASC');
+    expect(sql).not.toContain('t.status =');
+    expect(parameters).toEqual([creatorId]);
+  });
+
+  it('finds by key only when creator origin and ownership match in PostgreSQL', async () => {
+    query.mockResolvedValueOnce({ rows: [{
+      key: templateRow.key, version: 3, status: 'submitted', origin: 'creator', content,
+    }] });
+    await expect(HuntTemplates.findCreatorOwnedByKeyWithLatestVersion(templateRow.key, creatorId))
+      .resolves.toMatchObject({ key: templateRow.key, version: 3, status: 'submitted', content });
+    const [sql, parameters] = query.mock.calls[0];
+    expect(sql).toContain("t.origin = 'creator' AND t.created_by_user_id = $1 AND t.key = $2");
+    expect(sql).toContain('ORDER BY version DESC');
+    expect(parameters).toEqual([creatorId, templateRow.key]);
+
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.findCreatorOwnedByKeyWithLatestVersion('private', creatorId))
+      .resolves.toBeNull();
+  });
+
   it('atomically creates identity and immutable v1 with the same Creator provenance', async () => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
