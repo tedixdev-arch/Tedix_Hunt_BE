@@ -220,6 +220,17 @@ const options: swaggerJsdoc.Options = {
           },
           additionalProperties: true,
         },
+        CreatorOwnedTemplate: {
+          type: 'object',
+          required: ['key', 'version', 'status', 'origin', 'content'],
+          properties: {
+            key: { type: 'string' },
+            version: { type: 'integer', minimum: 1 },
+            status: { type: 'string', enum: ['draft', 'submitted', 'changes_requested', 'approved'] },
+            origin: { type: 'string', enum: ['creator'] },
+            content: { $ref: '#/components/schemas/CreatorTemplateContent' },
+          },
+        },
         HuntOptions: {
           type: 'object',
           required: ['formats', 'teamSizes', 'accessModes', 'difficulties', 'checkpointOrders'],

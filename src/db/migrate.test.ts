@@ -404,6 +404,73 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
+  it('owner-scopes Creator reads and returns each latest version across lifecycle states', async () => {
+    const { app, signJwt } = await application();
+    const creatorA = '00000000-0000-0000-0000-000000000002';
+    const creatorB = '00000000-0000-0000-0000-000000000003';
+    const auth = `Bearer ${signJwt({ sub: creatorA, type: 'access' })}`;
+    await client.query(
+      `INSERT INTO users (id, email, role, name)
+       VALUES ($1, 'creator-b@example.com', 'creator', 'Creator B') ON CONFLICT DO NOTHING`,
+      [creatorB],
+    );
+    await client.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, 'creator') ON CONFLICT DO NOTHING`,
+      [creatorB],
+    );
+
+    const keys = ['read-approved', 'read-changes', 'read-draft', 'read-submitted'];
+    try {
+      for (const [index, status] of ['approved', 'changes_requested', 'draft', 'submitted'].entries()) {
+        const template = await client.query<{ id: string }>(
+          `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
+           VALUES ($1, 'creator', $2, $3) RETURNING id`,
+          [keys[index], creatorA, status],
+        );
+        await client.query(
+          `INSERT INTO hunt_template_versions
+             (template_id, version, content, origin, created_by_user_id)
+           VALUES ($1, 1, $2, 'creator', $3), ($1, 2, $4, 'creator', $3)`,
+          [template.rows[0].id, { complete: 'old' }, creatorA, { complete: 'latest', status }],
+        );
+      }
+      const other = await client.query<{ id: string }>(
+        `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
+         VALUES ('read-private-b', 'creator', $1, 'draft') RETURNING id`,
+        [creatorB],
+      );
+      await client.query(
+        `INSERT INTO hunt_template_versions
+           (template_id, version, content, origin, created_by_user_id)
+         VALUES ($1, 1, '{"private":true}', 'creator', $2)`,
+        [other.rows[0].id, creatorB],
+      );
+
+      const list = await request(app).get('/api/creator/templates')
+        .set('Authorization', auth).expect(200);
+      const fixtures = list.body.filter(({ key }: { key: string }) => key.startsWith('read-'));
+      expect(fixtures.map(({ key }: { key: string }) => key)).toEqual(keys);
+      expect(fixtures.every(({ version }: { version: number }) => version === 2)).toBe(true);
+      expect(fixtures.map(({ status }: { status: string }) => status)).toEqual([
+        'approved', 'changes_requested', 'draft', 'submitted',
+      ]);
+      expect(fixtures[0].content).toEqual({ complete: 'latest', status: 'approved' });
+      expect(list.body.some(({ key }: { key: string }) => key === signalClujNapocaV1.key)).toBe(false);
+      expect(list.body.some(({ key }: { key: string }) => key === 'read-private-b')).toBe(false);
+
+      await request(app).get('/api/creator/templates/read-draft').set('Authorization', auth)
+        .expect(200, expect.objectContaining({ key: 'read-draft', version: 2 }));
+      const privateResponse = await request(app).get('/api/creator/templates/read-private-b')
+        .set('Authorization', auth).expect(404);
+      const unknownResponse = await request(app).get('/api/creator/templates/read-unknown')
+        .set('Authorization', auth).expect(404);
+      expect(privateResponse.body).toEqual(unknownResponse.body);
+    } finally {
+      await client.query("DELETE FROM hunt_templates WHERE key LIKE 'read-%'");
+      await client.query('DELETE FROM users WHERE id = $1', [creatorB]);
+    }
+  });
+
   it('persists Template identities and immutable version content with provenance', async () => {
     await application();
     const { HuntTemplates } = await import('../models/HuntTemplate.js');
