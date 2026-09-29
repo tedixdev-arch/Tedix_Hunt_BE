@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   isOwner: vi.fn(),
   isMember: vi.fn(),
   listApprovedTemplates: vi.fn(),
+  findApprovedTemplate: vi.fn(),
 }));
 
 vi.mock('../models/User.js', () => ({ User: { findById: mocks.findUserById } }));
@@ -39,10 +40,12 @@ vi.mock('../models/Organization.js', () => ({
 }));
 vi.mock('../models/HuntTemplate.js', () => ({ HuntTemplates: {
   listApprovedWithLatestVersion: mocks.listApprovedTemplates,
+  findApprovedByKeyWithLatestVersion: mocks.findApprovedTemplate,
 } }));
 
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
+import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 
 const now = new Date('2026-09-17T12:00:00Z');
 const user = {
@@ -57,7 +60,7 @@ const hunt = {
   capacity: 24, contactName: 'Ana Pop', templateKey: 'signal-cluj-napoca', templateVersion: 1,
   templateSnapshot: {
     key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
-    theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
+    theme: 'Smart Theme (Signal)', checkpoints: [{ location: 'Matthias Rex Statue' }],
   },
   format: 'team' as const, teamSize: 4, accessMode: 'invitation_only' as const,
   difficulty: 'easy' as const, checkpointOrder: 'recommended' as const,
@@ -87,6 +90,9 @@ describe('Hunt routes', () => {
       key: 'signal-cluj-napoca', version: 1,
       content: { displayName: 'Signal: Cluj Napoca', theme: 'Smart Theme (Signal)' },
     }]);
+    mocks.findApprovedTemplate.mockResolvedValue({
+      key: signalClujNapocaV1.key, version: 1, content: signalClujNapocaV1,
+    });
   });
 
   it('requires authentication to list Hunts', async () => {
@@ -221,13 +227,7 @@ describe('Hunt routes', () => {
   });
 
   it('selects the approved template using the backend version and snapshot', async () => {
-    const snapshot = {
-      key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
-      theme: 'Smart Theme (Signal)', checkpointNames: [
-        'Matthias Rex Statue', 'Stone Gate', 'Clock Tower', 'Fountain Court',
-        'Lantern Lane', 'North Passage', 'City Wall · FinishPoint',
-      ],
-    };
+    const snapshot = signalClujNapocaV1;
     mocks.updateDraft.mockResolvedValueOnce({
       ...hunt, templateKey: snapshot.key, templateVersion: snapshot.version, templateSnapshot: snapshot,
     });
@@ -237,6 +237,7 @@ describe('Hunt routes', () => {
     expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
       templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
     });
+    expect(mocks.findApprovedTemplate).toHaveBeenCalledWith(snapshot.key);
     expect(response.body).toMatchObject({
       templateKey: snapshot.key, templateVersion: 1, templateSnapshot: snapshot,
     });
@@ -284,9 +285,32 @@ describe('Hunt routes', () => {
     [{ templateVersion: 99 }],
     [{ templateSnapshot: {} }],
   ])('rejects client-controlled or unknown template input %#', async (body) => {
+    if ('templateKey' in body && body.templateKey === 'unknown') {
+      mocks.findApprovedTemplate.mockResolvedValueOnce(null);
+    }
     await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
       .send(body).expect(400, { error: 'invalid_input' });
     expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'submitted', 'changes_requested'])('%s Templates cannot be selected', async () => {
+    // The approved-only repository intentionally makes all non-approved states indistinguishable.
+    mocks.findApprovedTemplate.mockResolvedValueOnce(null);
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'not-approved' }).expect(400, { error: 'invalid_input' });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+  });
+
+  it('uses the one resolved latest version and complete persisted content', async () => {
+    const content = { key: 'multi-version', version: 3, displayName: 'V3', theme: 'Theme', checkpoints: [{ id: 1 }] };
+    mocks.findApprovedTemplate.mockResolvedValueOnce({ key: 'multi-version', version: 3, content });
+
+    await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)
+      .send({ templateKey: 'multi-version' }).expect(200);
+    expect(mocks.findApprovedTemplate).toHaveBeenCalledTimes(1);
+    expect(mocks.updateDraft).toHaveBeenCalledWith('hunt-1', {
+      templateKey: 'multi-version', templateVersion: 3, templateSnapshot: content,
+    });
   });
 
   it('rejects template selection by supervisors and on non-draft Hunts', async () => {

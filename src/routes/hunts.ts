@@ -3,7 +3,7 @@ import { requireAnyRole, requireAuth, type AuthRequest } from '../middleware/aut
 import { Hunt, type HuntStatus, type UpdateHuntGeneralSetupInput } from '../models/Hunt.js';
 import { HuntRoles } from '../models/HuntRole.js';
 import { Organization } from '../models/Organization.js';
-import { findHuntTemplate } from '../domain/huntTemplates.js';
+import { HuntTemplates } from '../models/HuntTemplate.js';
 import { supportedHuntOptionValues } from '../domain/huntOptions.js';
 import { validateHuntForPublish } from '../domain/huntReadiness.js';
 
@@ -71,11 +71,7 @@ const parseDraftUpdate = (body: unknown): UpdateHuntGeneralSetupInput | null => 
       update[key] = value as number;
     } else if (key === 'templateKey') {
       if (typeof value !== 'string' || !value.trim()) return null;
-      const template = findHuntTemplate(value.trim());
-      if (!template) return null;
-      update.templateKey = template.key;
-      update.templateVersion = template.version;
-      update.templateSnapshot = template;
+      update.templateKey = value.trim();
     } else if (key in supportedHuntOptionValues) {
       // Prototype choices are rejected until the pilot runtime actually supports them.
       if (value !== supportedHuntOptionValues[key as keyof typeof supportedHuntOptionValues]) return null;
@@ -249,6 +245,15 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const update = parseDraftUpdate(req.body);
   if (!update) return res.status(400).json({ error: 'invalid_input' });
   if (hunt.status !== 'draft') return res.status(409).json({ error: 'invalid_hunt_state' });
+  if (update.templateKey) {
+    // Only an approved identity may be instantiated. Keep the version and its complete content
+    // together from this single resolution so the Hunt records exactly what was selected.
+    const template = await HuntTemplates.findApprovedByKeyWithLatestVersion(update.templateKey);
+    if (!template) return res.status(400).json({ error: 'invalid_input' });
+    update.templateKey = template.key;
+    update.templateVersion = template.version;
+    update.templateSnapshot = template.content as Record<string, unknown>;
+  }
   const updated = await Hunt.updateDraft(id, update);
   if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });
   return res.json(updated);

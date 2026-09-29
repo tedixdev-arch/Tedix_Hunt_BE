@@ -1,7 +1,8 @@
 import { pool } from '../lib/postgres.js';
 import { HuntRoles, type HuntRole } from './HuntRole.js';
-import type { HuntTemplateSnapshot } from '../domain/huntTemplates.js';
 import { generateHuntAccessCode } from '../domain/huntAccess.js';
+
+export type HuntTemplateSnapshot = Record<string, unknown>;
 
 const isUniqueViolation = (error: unknown): boolean => (error as { code?: string })?.code === '23505';
 

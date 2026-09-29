@@ -9,7 +9,7 @@ const completeHunt: IHunt = {
   contactName: 'Ana Pop', templateKey: 'signal-cluj-napoca', templateVersion: 1,
   templateSnapshot: {
     key: 'signal-cluj-napoca', version: 1, displayName: 'Signal: Cluj Napoca',
-    theme: 'Smart Theme (Signal)', checkpointNames: ['Matthias Rex Statue'],
+    theme: 'Smart Theme (Signal)', checkpoints: [{ location: 'Matthias Rex Statue' }],
   },
   format: 'team', teamSize: 4, accessMode: 'invitation_only', difficulty: 'easy',
   checkpointOrder: 'recommended', accessCode: null, createdAt: new Date(), updatedAt: new Date(),
@@ -39,7 +39,7 @@ describe('validateHuntForPublish', () => {
   });
 
   it.each([
-    ['empty checkpoints', { ...completeHunt.templateSnapshot!, checkpointNames: [] }],
+    ['empty checkpoints', { ...completeHunt.templateSnapshot!, checkpoints: [] }],
     ['key mismatch', { ...completeHunt.templateSnapshot!, key: 'other' }],
     ['version mismatch', { ...completeHunt.templateSnapshot!, version: 2 }],
     ['missing display name', { ...completeHunt.templateSnapshot!, displayName: '' }],
