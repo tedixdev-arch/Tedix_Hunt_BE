@@ -344,7 +344,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(draft.key)).resolves.toBeNull();
 
     // A missing approved row must stay missing rather than being masked by the legacy descriptor.
-    await client.query("UPDATE hunt_templates SET status = 'submitted' WHERE key = $1", [signalClujNapocaV1.key]);
+    await client.query(
+      "UPDATE hunt_templates SET status = 'submitted', submitted_version = 1 WHERE key = $1",
+      [signalClujNapocaV1.key],
+    );
     await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(signalClujNapocaV1.key))
       .resolves.toBeNull();
     await client.query("UPDATE hunt_templates SET status = 'approved' WHERE key = $1", [signalClujNapocaV1.key]);
@@ -581,7 +584,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       await request(app).post(`/api/creator/templates/${key}/versions`)
         .set('Authorization', auth).send({ content: { ...v4, version: 5 } })
         .expect(409, { error: 'template_not_editable' });
-      const catalog = await request(app).get('/api/hunt-templates').expect(200);
+      const catalog = await request(app).get('/api/hunt-templates')
+        .set('Authorization', auth).expect(200);
       expect(catalog.body.some((entry: { key: string }) => entry.key === key)).toBe(false);
       await expect(client.query(
         'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [huntId],
