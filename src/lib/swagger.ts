@@ -222,12 +222,16 @@ const options: swaggerJsdoc.Options = {
         },
         CreatorOwnedTemplate: {
           type: 'object',
-          required: ['key', 'version', 'status', 'origin', 'content'],
+          required: ['key', 'version', 'status', 'origin', 'submittedVersion', 'content'],
           properties: {
             key: { type: 'string' },
             version: { type: 'integer', minimum: 1 },
             status: { type: 'string', enum: ['draft', 'submitted', 'changes_requested', 'approved'] },
             origin: { type: 'string', enum: ['creator'] },
+            submittedVersion: {
+              type: 'integer', minimum: 1, nullable: true,
+              description: 'Exact immutable version currently submitted for review, or null.',
+            },
             content: { $ref: '#/components/schemas/CreatorTemplateContent' },
           },
         },

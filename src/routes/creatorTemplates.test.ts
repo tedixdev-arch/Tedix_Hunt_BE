@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   findUserById: vi.fn(),
   createCreatorDraft: vi.fn(),
   createCreatorVersion: vi.fn(),
+  submitCreatorDraft: vi.fn(),
   listCreatorOwnedWithLatestVersion: vi.fn(),
   findCreatorOwnedByKeyWithLatestVersion: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
       ...actual.HuntTemplates,
       createCreatorDraft: mocks.createCreatorDraft,
       createCreatorVersion: mocks.createCreatorVersion,
+      submitCreatorDraft: mocks.submitCreatorDraft,
       listCreatorOwnedWithLatestVersion: mocks.listCreatorOwnedWithLatestVersion,
       findCreatorOwnedByKeyWithLatestVersion: mocks.findCreatorOwnedByKeyWithLatestVersion,
     },
@@ -27,6 +29,7 @@ import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
 import {
   HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplateNotSubmittableError, HuntTemplateVersionNotLatestError,
   InvalidHuntTemplateContentError,
 } from '../models/HuntTemplate.js';
 
@@ -43,7 +46,7 @@ const bearer = `Bearer ${signJwt({ sub: 'user-1', type: 'access' })}`;
 
 describe('Creator-owned Template reads', () => {
   const app = createApp();
-  const result = { key: content.key, version: 3, status: 'changes_requested', origin: 'creator', content };
+  const result = { key: content.key, version: 3, status: 'changes_requested', origin: 'creator', submittedVersion: null, content };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -84,6 +87,64 @@ describe('Creator-owned Template reads', () => {
   it('allows a multi-role identity containing Creator capability', async () => {
     mocks.findUserById.mockResolvedValue(user(['admin', 'organizer', 'creator']));
     await request(app).get('/api/creator/templates').set('Authorization', bearer).expect(200);
+  });
+});
+
+describe('POST /api/creator/templates/:key/submit', () => {
+  const app = createApp();
+  const version3 = { ...content, version: 3, displayName: 'Exact submitted content' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findUserById.mockResolvedValue(user(['creator']));
+    mocks.submitCreatorDraft.mockResolvedValue({
+      template: { key: content.key, origin: 'creator', status: 'submitted', submittedVersion: 3 },
+      version: { version: 3, content: version3 },
+    });
+  });
+
+  it('submits and returns the explicitly requested immutable version', async () => {
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version: 3 }).expect(200, {
+        key: content.key, version: 3, status: 'submitted', origin: 'creator', content: version3,
+      });
+    expect(mocks.submitCreatorDraft).toHaveBeenCalledWith(content.key, 3, 'user-1');
+  });
+
+  it.each([
+    ['unknown', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['other-owned', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['platform', new HuntTemplateNotFoundError(), 404, 'not_found'],
+    ['older version', new HuntTemplateVersionNotLatestError(), 409, 'template_version_not_latest'],
+    ['future version', new HuntTemplateVersionNotLatestError(), 409, 'template_version_not_latest'],
+    ['submitted', new HuntTemplateNotSubmittableError(), 409, 'template_not_submittable'],
+    ['approved', new HuntTemplateNotSubmittableError(), 409, 'template_not_submittable'],
+    ['changes requested', new HuntTemplateNotSubmittableError(), 409, 'template_not_submittable'],
+  ])('returns a stable response for %s', async (_case, error, status, code) => {
+    mocks.submitCreatorDraft.mockRejectedValue(error);
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version: 3 }).expect(status, { error: code });
+  });
+
+  it.each([undefined, null, 0, 1.5, '3'])('rejects invalid version %s', async (version) => {
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version }).expect(400, { error: 'invalid_input' });
+    expect(mocks.submitCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['organizer-only', ['organizer']], ['admin-only', ['admin']],
+  ])('forbids a %s identity', async (_name, roles) => {
+    mocks.findUserById.mockResolvedValue(user(roles));
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version: 3 }).expect(403, { error: 'forbidden' });
+    expect(mocks.submitCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it('allows a multi-role identity containing Creator capability', async () => {
+    mocks.findUserById.mockResolvedValue(user(['admin', 'organizer', 'creator']));
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version: 3 }).expect(200);
   });
 });
 
