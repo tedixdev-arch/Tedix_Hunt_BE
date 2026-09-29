@@ -205,6 +205,21 @@ const options: swaggerJsdoc.Options = {
             theme: { type: 'string' },
           },
         },
+        CreatorTemplateContent: {
+          type: 'object',
+          required: ['key', 'version', 'displayName', 'theme', 'mission', 'configuration', 'scoring', 'checkpoints'],
+          properties: {
+            key: { type: 'string' },
+            version: { type: 'integer', enum: [1] },
+            displayName: { type: 'string', minLength: 1 },
+            theme: { type: 'string', minLength: 1 },
+            mission: { type: 'object', minProperties: 1, additionalProperties: true },
+            configuration: { type: 'object', minProperties: 1, additionalProperties: true },
+            scoring: { type: 'object', minProperties: 1, additionalProperties: true },
+            checkpoints: { type: 'array', minItems: 1, items: { type: 'object' } },
+          },
+          additionalProperties: true,
+        },
         HuntOptions: {
           type: 'object',
           required: ['formats', 'teamSizes', 'accessModes', 'difficulties', 'checkpointOrders'],

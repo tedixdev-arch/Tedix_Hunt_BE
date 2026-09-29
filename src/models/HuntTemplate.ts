@@ -50,6 +50,13 @@ export interface CreateHuntTemplateVersionInput extends TemplateProvenance {
   content: unknown;
 }
 
+export class HuntTemplateKeyConflictError extends Error {
+  constructor() {
+    super('Hunt Template key already exists');
+    this.name = 'HuntTemplateKeyConflictError';
+  }
+}
+
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
   id: row.id,
   key: row.key,
@@ -71,6 +78,42 @@ const mapVersion = (row: any): PersistedHuntTemplateVersion => ({
 });
 
 export const HuntTemplates = {
+  async createCreatorDraft(
+    key: string,
+    content: unknown,
+    creatorUserId: string,
+  ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
+    const client = await pool.connect();
+    try {
+      // Identity and immutable version 1 are one persistence operation: neither may exist alone.
+      await client.query('BEGIN');
+      const templateResult = await client.query(
+        `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
+         VALUES ($1, 'creator', $2, 'draft') RETURNING *`,
+        [key, creatorUserId],
+      );
+      const template = mapTemplate(templateResult.rows[0]);
+      const versionResult = await client.query(
+        `INSERT INTO hunt_template_versions
+           (template_id, version, content, origin, created_by_user_id)
+         VALUES ($1, 1, $2, 'creator', $3) RETURNING *`,
+        [template.id, content, creatorUserId],
+      );
+      const version = mapVersion(versionResult.rows[0]);
+      await client.query('COMMIT');
+      return { template, version };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      // Convert the key's unique constraint violation into a stable domain error.
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+        throw new HuntTemplateKeyConflictError();
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async create(input: CreateHuntTemplateInput): Promise<PersistedHuntTemplate> {
     const { rows } = await pool.query(
       `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
