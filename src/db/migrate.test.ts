@@ -472,6 +472,90 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
+  it('creates sequential immutable Creator versions without changing an existing Hunt snapshot', async () => {
+    const { app, signJwt } = await application();
+    const creatorId = '00000000-0000-0000-0000-000000000002';
+    const key = 'versioned-creator-draft';
+    const auth = `Bearer ${signJwt({ sub: creatorId, type: 'access' })}`;
+    const base = {
+      key, version: 1, displayName: 'Version one', theme: 'Integration',
+      mission: { title: 'Mission', complete: true },
+      configuration: { duration: 30, nested: { retained: true } },
+      scoring: { start: 100 }, checkpoints: [{ id: 'first', order: 1 }],
+    };
+    const huntId = '00000000-0000-0000-0000-000000000092';
+
+    try {
+      await request(app).post('/api/creator/templates').set('Authorization', auth)
+        .send({ key, content: base }).expect(201);
+      await client.query(
+        `INSERT INTO hunts
+           (id, organization_id, created_by_user_id, name, status,
+            template_key, template_version, template_snapshot)
+         VALUES ($1, '00000000-0000-0000-0000-000000000090', $2,
+                 'Immutable snapshot fixture', 'draft', $3, 1, $4)`,
+        [huntId, creatorId, key, base],
+      );
+
+      const v2 = {
+        ...base, version: 2, displayName: 'Version two',
+        checkpoints: [...base.checkpoints, { id: 'second', order: 2, payload: ['round-trip'] }],
+      };
+      await request(app).post(`/api/creator/templates/${key}/versions`)
+        .set('Authorization', auth).send({ content: v2 }).expect(201, {
+          key, version: 2, status: 'draft', origin: 'creator', content: v2,
+        });
+      const v3 = { ...v2, version: 3, displayName: 'Version three' };
+      await request(app).post(`/api/creator/templates/${key}/versions`)
+        .set('Authorization', auth).send({ content: v3 }).expect(201);
+
+      const template = await client.query<{ id: string }>(
+        'SELECT id FROM hunt_templates WHERE key = $1', [key],
+      );
+      const versions = await client.query(
+        `SELECT version, content, origin, created_by_user_id
+         FROM hunt_template_versions WHERE template_id = $1 ORDER BY version`,
+        [template.rows[0].id],
+      );
+      expect(versions.rows).toEqual([
+        { version: 1, content: base, origin: 'creator', created_by_user_id: creatorId },
+        { version: 2, content: v2, origin: 'creator', created_by_user_id: creatorId },
+        { version: 3, content: v3, origin: 'creator', created_by_user_id: creatorId },
+      ]);
+      await request(app).get(`/api/creator/templates/${key}`).set('Authorization', auth)
+        .expect(200, { key, version: 3, status: 'draft', origin: 'creator', content: v3 });
+      await expect(client.query(
+        'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [huntId],
+      )).resolves.toMatchObject({ rows: [{ template_version: 1, template_snapshot: base }] });
+
+      const invalidV5 = { ...v3, version: 5 };
+      await request(app).post(`/api/creator/templates/${key}/versions`)
+        .set('Authorization', auth).send({ content: invalidV5 })
+        .expect(400, { error: 'invalid_input' });
+      await expect(client.query(
+        'SELECT count(*)::integer AS count FROM hunt_template_versions WHERE template_id = $1',
+        [template.rows[0].id],
+      )).resolves.toMatchObject({ rows: [{ count: 3 }] });
+
+      // Both requests calculate under the same identity row lock; at most the correct v4 succeeds.
+      const v4 = { ...v3, version: 4, displayName: 'Concurrent version four' };
+      const concurrent = await Promise.all([
+        request(app).post(`/api/creator/templates/${key}/versions`)
+          .set('Authorization', auth).send({ content: v4 }),
+        request(app).post(`/api/creator/templates/${key}/versions`)
+          .set('Authorization', auth).send({ content: v4 }),
+      ]);
+      expect(concurrent.map(({ status }) => status).sort()).toEqual([201, 400]);
+      await expect(client.query(
+        `SELECT version FROM hunt_template_versions WHERE template_id = $1 ORDER BY version`,
+        [template.rows[0].id],
+      )).resolves.toMatchObject({ rows: [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }] });
+    } finally {
+      await client.query('DELETE FROM hunts WHERE id = $1', [huntId]);
+      await client.query('DELETE FROM hunt_templates WHERE key = $1', [key]);
+    }
+  });
+
   it('persists Template identities and immutable version content with provenance', async () => {
     await application();
     const { HuntTemplates } = await import('../models/HuntTemplate.js');

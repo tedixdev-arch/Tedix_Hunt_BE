@@ -1,4 +1,5 @@
 import { pool } from '../lib/postgres.js';
+import { isTemplateContent } from '../domain/creatorTemplates.js';
 
 export type HuntTemplateOrigin = 'platform' | 'creator';
 export type HuntTemplateStatus = 'draft' | 'submitted' | 'changes_requested' | 'approved';
@@ -65,6 +66,10 @@ export class HuntTemplateKeyConflictError extends Error {
   }
 }
 
+export class HuntTemplateNotFoundError extends Error {}
+export class HuntTemplateNotEditableError extends Error {}
+export class InvalidHuntTemplateContentError extends Error {}
+
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
   id: row.id,
   key: row.key,
@@ -86,6 +91,52 @@ const mapVersion = (row: any): PersistedHuntTemplateVersion => ({
 });
 
 export const HuntTemplates = {
+  async createCreatorVersion(
+    key: string,
+    content: unknown,
+    creatorUserId: string,
+  ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The identity lock serializes version allocation across application instances.
+      const templateResult = await client.query(
+        `SELECT * FROM hunt_templates
+         WHERE key = $1 AND origin = 'creator' AND created_by_user_id = $2
+         FOR UPDATE`,
+        [key, creatorUserId],
+      );
+      if (!templateResult.rows[0]) throw new HuntTemplateNotFoundError();
+      const template = mapTemplate(templateResult.rows[0]);
+      // Only draft authoring is editable in this workflow slice.
+      if (template.status !== 'draft') throw new HuntTemplateNotEditableError();
+
+      const versionResult = await client.query(
+        `SELECT COALESCE(MAX(version), 0)::integer AS current_version
+         FROM hunt_template_versions WHERE template_id = $1`,
+        [template.id],
+      );
+      const nextVersion = versionResult.rows[0].current_version + 1;
+      if (!isTemplateContent(content, key, nextVersion)) {
+        throw new InvalidHuntTemplateContentError();
+      }
+      // Versions are complete immutable snapshots; existing rows are never updated.
+      const inserted = await client.query(
+        `INSERT INTO hunt_template_versions
+           (template_id, version, content, origin, created_by_user_id)
+         VALUES ($1, $2, $3, 'creator', $4) RETURNING *`,
+        [template.id, nextVersion, content, creatorUserId],
+      );
+      await client.query('COMMIT');
+      return { template, version: mapVersion(inserted.rows[0]) };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async createCreatorDraft(
     key: string,
     content: unknown,

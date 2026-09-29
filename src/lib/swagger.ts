@@ -210,7 +210,7 @@ const options: swaggerJsdoc.Options = {
           required: ['key', 'version', 'displayName', 'theme', 'mission', 'configuration', 'scoring', 'checkpoints'],
           properties: {
             key: { type: 'string' },
-            version: { type: 'integer', enum: [1] },
+            version: { type: 'integer', minimum: 1 },
             displayName: { type: 'string', minLength: 1 },
             theme: { type: 'string', minLength: 1 },
             mission: { type: 'object', minProperties: 1, additionalProperties: true },

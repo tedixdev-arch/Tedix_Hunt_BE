@@ -4,7 +4,10 @@ const query = vi.hoisted(() => vi.fn());
 const connect = vi.hoisted(() => vi.fn());
 vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
-import { HuntTemplateKeyConflictError, HuntTemplates } from './HuntTemplate.js';
+import {
+  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplates, InvalidHuntTemplateContentError,
+} from './HuntTemplate.js';
 
 describe('approved Hunt Template catalog persistence', () => {
   beforeEach(() => query.mockReset());
@@ -131,5 +134,76 @@ describe('Creator Hunt Template persistence', () => {
     await expect(HuntTemplates.createCreatorDraft(templateRow.key, content, creatorId))
       .rejects.toBeInstanceOf(HuntTemplateKeyConflictError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+  });
+
+  it('locks ownership, allocates the next version, and inserts Creator provenance', async () => {
+    const v2 = { ...content, version: 2, nested: { survives: ['jsonb'] } };
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+      .mockResolvedValueOnce({ rows: [{ current_version: 1 }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: 'version-2', template_id: templateRow.id, version: 2, content: v2,
+        origin: 'creator', created_by_user_id: creatorId, created_at: new Date(),
+      }] }).mockResolvedValueOnce({ rows: [] });
+
+    await expect(HuntTemplates.createCreatorVersion(templateRow.key, v2, creatorId)).resolves
+      .toMatchObject({ version: { version: 2, content: v2, createdByUserId: creatorId } });
+    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[1][0]).toContain("origin = 'creator'");
+    expect(client.query.mock.calls[1][1]).toEqual([templateRow.key, creatorId]);
+    expect(client.query.mock.calls[3][1]).toEqual([templateRow.id, 2, v2, creatorId]);
+    expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
+      'BEGIN', 'SELECT', 'SELECT', 'INSERT', 'COMMIT',
+    ]);
+  });
+
+  it('rejects non-owned and non-editable Templates inside the transaction', async () => {
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.createCreatorVersion('private', content, creatorId))
+      .rejects.toBeInstanceOf(HuntTemplateNotFoundError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+
+    client.query.mockReset();
+    client.query.mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...templateRow, status: 'submitted' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.createCreatorVersion(templateRow.key, content, creatorId))
+      .rejects.toBeInstanceOf(HuntTemplateNotEditableError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+  });
+
+  it.each([
+    ['skipped', { ...content, version: 3 }],
+    ['reused', content],
+    ['wrong key', { ...content, key: 'wrong', version: 2 }],
+    ['malformed', { ...content, version: 2, checkpoints: [] }],
+  ])('rolls back %s content without inserting', async (_case, invalid) => {
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+      .mockResolvedValueOnce({ rows: [{ current_version: 1 }] }).mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.createCreatorVersion(templateRow.key, invalid, creatorId))
+      .rejects.toBeInstanceOf(InvalidHuntTemplateContentError);
+    expect(client.query.mock.calls.some(([sql]) => String(sql).includes('INSERT'))).toBe(false);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+  });
+
+  it('rolls back cleanly when the new immutable row cannot be inserted', async () => {
+    const failure = new Error('version insert failed');
+    const v2 = { ...content, version: 2 };
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+      .mockResolvedValueOnce({ rows: [{ current_version: 1 }] }).mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(HuntTemplates.createCreatorVersion(templateRow.key, v2, creatorId))
+      .rejects.toBe(failure);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    expect(client.release).toHaveBeenCalled();
   });
 });
