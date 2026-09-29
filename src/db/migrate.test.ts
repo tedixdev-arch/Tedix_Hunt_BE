@@ -466,7 +466,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
         const template = await client.query<{ id: string }>(
           `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
            VALUES ($1, 'creator', $2, $3) RETURNING id`,
-          [keys[index], creatorA, ['submitted', 'approved'].includes(status) ? 'draft' : status],
+          [
+            keys[index], creatorA,
+            ['submitted', 'approved', 'changes_requested'].includes(status) ? 'draft' : status,
+          ],
         );
         await client.query(
           `INSERT INTO hunt_template_versions
@@ -474,7 +477,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
            VALUES ($1, 1, $2, 'creator', $3), ($1, 2, $4, 'creator', $3)`,
           [template.rows[0].id, { complete: 'old' }, creatorA, { complete: 'latest', status }],
         );
-        if (status === 'submitted' || status === 'approved') {
+        if (['submitted', 'approved', 'changes_requested'].includes(status)) {
           await client.query(
             `UPDATE hunt_templates SET status = $2, submitted_version = 2 WHERE id = $1`,
             [template.rows[0].id, status],
@@ -502,7 +505,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
         'approved', 'changes_requested', 'draft', 'submitted',
       ]);
       expect(fixtures.map(({ submittedVersion }: { submittedVersion: number | null }) => submittedVersion))
-        .toEqual([2, null, null, 2]);
+        .toEqual([2, 2, null, 2]);
       expect(fixtures[0].content).toEqual({ complete: 'latest', status: 'approved' });
       expect(list.body.some(({ key }: { key: string }) => key === signalClujNapocaV1.key)).toBe(false);
       expect(list.body.some(({ key }: { key: string }) => key === 'read-private-b')).toBe(false);
