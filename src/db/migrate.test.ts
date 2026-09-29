@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,6 +22,11 @@ import { userAccountStatusMigration } from './migrations/013_user_account_status
 import { retiredAccountStatusMigration } from './migrations/014_retired_account_status.js';
 import { creatorApplicationsMigration } from './migrations/015_creator_applications.js';
 import { huntTemplateVersionsMigration } from './migrations/016_hunt_template_versions.js';
+import { signalClujNapocaV1Migration } from './migrations/017_signal_cluj_napoca_v1.js';
+import {
+  SIGNAL_CLUJ_NAPOCA_V1_CHECKPOINTS_SHA256,
+  signalClujNapocaV1,
+} from '../domain/templates/signalClujNapocaV1.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -33,6 +39,7 @@ const migrations = [
   retiredAccountStatusMigration,
   creatorApplicationsMigration,
   huntTemplateVersionsMigration,
+  signalClujNapocaV1Migration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -124,6 +131,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '014_retired_account_status',
       '015_creator_applications',
       '016_hunt_template_versions',
+      '017_signal_cluj_napoca_v1',
     ]);
     try {
       await expect(client.query(
@@ -193,6 +201,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '014_retired_account_status' },
       { id: '015_creator_applications' },
       { id: '016_hunt_template_versions' },
+      { id: '017_signal_cluj_napoca_v1' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -249,6 +258,54 @@ describeWithDatabase('PostgreSQL migrations', () => {
       ]);
       expect(result.rows[0]?.exists).toBe(table);
     }
+  });
+
+  it('round-trips the immutable platform Signal v1 payload through PostgreSQL JSONB', async () => {
+    const result = await client.query<{
+      key: string;
+      template_origin: string;
+      template_created_by_user_id: string | null;
+      status: string;
+      version: number;
+      version_origin: string;
+      version_created_by_user_id: string | null;
+      content: typeof signalClujNapocaV1;
+    }>(
+      `SELECT t.key, t.origin AS template_origin,
+              t.created_by_user_id AS template_created_by_user_id, t.status,
+              v.version, v.origin AS version_origin,
+              v.created_by_user_id AS version_created_by_user_id, v.content
+       FROM hunt_templates t
+       JOIN hunt_template_versions v ON v.template_id = t.id
+       WHERE t.key = $1`,
+      [signalClujNapocaV1.key],
+    );
+
+    expect(result.rows).toHaveLength(1);
+    const persisted = result.rows[0];
+    expect(persisted).toMatchObject({
+      key: 'signal-cluj-napoca', template_origin: 'platform',
+      template_created_by_user_id: null, status: 'approved', version: 1,
+      version_origin: 'platform', version_created_by_user_id: null,
+    });
+    expect(persisted.content).toEqual(signalClujNapocaV1);
+    expect(persisted.content.checkpoints).toHaveLength(7);
+    expect(persisted.content.checkpoints.map(({ checkpoint }) => checkpoint))
+      .toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+    const stoneGate = persisted.content.checkpoints[1];
+    expect(stoneGate).toMatchObject({
+      mistakeSegments: signalClujNapocaV1.checkpoints[1].mistakeSegments,
+      mistakeExplanations: signalClujNapocaV1.checkpoints[1].mistakeExplanations,
+      correctedExpression: '6x = 42, then x = 7',
+    });
+    expect(persisted.content.checkpoints[2]).toMatchObject({
+      teamRule: 'A = 1, B = 2 ... Z = 26',
+    });
+    expect(persisted.content.scoring).toEqual(signalClujNapocaV1.scoring);
+    expect(createHash('sha256')
+      .update(JSON.stringify(persisted.content.checkpoints)).digest('hex'))
+      .toBe(SIGNAL_CLUJ_NAPOCA_V1_CHECKPOINTS_SHA256);
   });
 
   it('persists Template identities and immutable version content with provenance', async () => {
