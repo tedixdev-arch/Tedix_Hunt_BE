@@ -12,24 +12,10 @@ vi.mock('../models/HuntTemplate.js', () => ({ HuntTemplates: {
 
 import {
   findApprovedHuntTemplate,
-  findHuntTemplate,
   listApprovedHuntTemplates,
 } from './huntTemplates.js';
 
 describe('approved Hunt template catalog', () => {
-  it('contains the expected Signal: Cluj Napoca pilot template', () => {
-    expect(findHuntTemplate('signal-cluj-napoca')).toEqual({
-      key: 'signal-cluj-napoca',
-      version: 1,
-      displayName: 'Signal: Cluj Napoca',
-      theme: 'Smart Theme (Signal)',
-      checkpointNames: [
-        'Matthias Rex Statue', 'Stone Gate', 'Clock Tower', 'Fountain Court',
-        'Lantern Lane', 'North Passage', 'City Wall · FinishPoint',
-      ],
-    });
-  });
-
   it('maps persisted content to the existing public metadata contract', async () => {
     mocks.listApproved.mockResolvedValue([{
       key: 'signal-cluj-napoca', version: 1,

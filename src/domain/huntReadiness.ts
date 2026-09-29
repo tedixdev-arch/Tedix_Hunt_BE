@@ -39,9 +39,9 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
 
   const snapshot = hunt.templateSnapshot;
   const usableSnapshot = snapshot !== null && typeof snapshot === 'object'
-    && hasText(snapshot.key) && Number.isInteger(snapshot.version) && snapshot.version >= 1
+    && hasText(snapshot.key) && Number.isInteger(snapshot.version) && (snapshot.version as number) >= 1
     && hasText(snapshot.displayName) && hasText(snapshot.theme)
-    && Array.isArray(snapshot.checkpointNames) && snapshot.checkpointNames.length > 0;
+    && Array.isArray(snapshot.checkpoints) && snapshot.checkpoints.length > 0;
   if (!hasText(hunt.templateKey)) {
     add({ section: 'template', field: 'templateKey', message: 'Select a Hunt template' });
   }

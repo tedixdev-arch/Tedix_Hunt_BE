@@ -346,6 +346,64 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await client.query("UPDATE hunt_templates SET status = 'approved' WHERE key = $1", [signalClujNapocaV1.key]);
   });
 
+  it('snapshots the approved latest persisted Template version into each Hunt', async () => {
+    const { app, signJwt } = await application();
+    const userId = '00000000-0000-0000-0000-000000000002';
+    const organizationId = '00000000-0000-0000-0000-000000000090';
+    const existingHuntId = '00000000-0000-0000-0000-000000000091';
+    const auth = `Bearer ${signJwt({ sub: userId, type: 'access' })}`;
+    await client.query(
+      `INSERT INTO hunt_roles (hunt_id, user_id, role) VALUES ($1, $2, 'organizer')
+       ON CONFLICT DO NOTHING`,
+      [existingHuntId, userId],
+    );
+
+    try {
+      const selectedV1 = await request(app).patch(`/api/hunts/${existingHuntId}`)
+        .set('Authorization', auth).send({ templateKey: signalClujNapocaV1.key })
+        .expect(200);
+      expect(selectedV1.body).toMatchObject({
+        templateKey: signalClujNapocaV1.key, templateVersion: 1,
+        templateSnapshot: signalClujNapocaV1,
+      });
+      expect(selectedV1.body.templateSnapshot).toEqual(signalClujNapocaV1);
+
+      const template = await client.query<{ id: string }>(
+        'SELECT id FROM hunt_templates WHERE key = $1', [signalClujNapocaV1.key],
+      );
+      const version2Content = { ...signalClujNapocaV1, version: 2, displayName: 'Signal v2 fixture' };
+      await client.query(
+        `INSERT INTO hunt_template_versions (template_id, version, content, origin)
+         VALUES ($1, 2, $2, 'platform')`,
+        [template.rows[0].id, version2Content],
+      );
+
+      const created = await request(app).post('/api/hunts').set('Authorization', auth)
+        .send({ organizationId, name: 'Latest Template Hunt' }).expect(201);
+      const selectedV2 = await request(app).patch(`/api/hunts/${created.body.id}`)
+        .set('Authorization', auth).send({ templateKey: signalClujNapocaV1.key })
+        .expect(200);
+      expect(selectedV2.body).toMatchObject({
+        templateKey: signalClujNapocaV1.key, templateVersion: 2,
+        templateSnapshot: version2Content,
+      });
+
+      const unchanged = await client.query(
+        'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [existingHuntId],
+      );
+      expect(unchanged.rows[0]).toEqual({
+        template_version: 1, template_snapshot: signalClujNapocaV1,
+      });
+    } finally {
+      await client.query(
+        `DELETE FROM hunt_template_versions WHERE template_id =
+         (SELECT id FROM hunt_templates WHERE key = $1) AND version = 2`,
+        [signalClujNapocaV1.key],
+      );
+      await client.query("DELETE FROM hunts WHERE name = 'Latest Template Hunt'");
+    }
+  });
+
   it('persists Template identities and immutable version content with provenance', async () => {
     await application();
     const { HuntTemplates } = await import('../models/HuntTemplate.js');
