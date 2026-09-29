@@ -28,6 +28,12 @@ export interface HuntTemplateWithLatestVersion extends PersistedHuntTemplate {
   latestVersionCreatedAt: Date | null;
 }
 
+export interface ApprovedHuntTemplateVersion {
+  key: string;
+  version: number;
+  content: unknown;
+}
+
 interface TemplateProvenance {
   origin: HuntTemplateOrigin;
   createdByUserId?: string | null;
@@ -110,6 +116,44 @@ export const HuntTemplates = {
       [templateId],
     );
     return rows[0] ? mapVersion(rows[0]) : null;
+  },
+
+  async listApprovedWithLatestVersion(): Promise<ApprovedHuntTemplateVersion[]> {
+    const { rows } = await pool.query(
+      `SELECT t.key, latest.version, latest.content
+       FROM hunt_templates t
+       JOIN LATERAL (
+         SELECT version, content
+         FROM hunt_template_versions
+         WHERE template_id = t.id
+         ORDER BY version DESC
+         LIMIT 1
+       ) latest ON TRUE
+       WHERE t.status = 'approved'
+       ORDER BY t.key ASC`,
+    );
+    return rows.map(({ key, version, content }) => ({ key, version, content }));
+  },
+
+  async findApprovedByKeyWithLatestVersion(
+    key: string,
+  ): Promise<ApprovedHuntTemplateVersion | null> {
+    const { rows } = await pool.query(
+      `SELECT t.key, latest.version, latest.content
+       FROM hunt_templates t
+       JOIN LATERAL (
+         SELECT version, content
+         FROM hunt_template_versions
+         WHERE template_id = t.id
+         ORDER BY version DESC
+         LIMIT 1
+       ) latest ON TRUE
+       WHERE t.status = 'approved' AND t.key = $1`,
+      [key],
+    );
+    return rows[0]
+      ? { key: rows[0].key, version: rows[0].version, content: rows[0].content }
+      : null;
   },
 
   async list(): Promise<HuntTemplateWithLatestVersion[]> {

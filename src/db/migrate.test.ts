@@ -303,6 +303,49 @@ describeWithDatabase('PostgreSQL migrations', () => {
     expect(persisted.content.scoring).toEqual(signalClujNapocaV1.scoring);
   });
 
+  it('reads only approved Templates and their latest versions for the catalog', async () => {
+    await application();
+    const { HuntTemplates } = await import('../models/HuntTemplate.js');
+    const approved = await HuntTemplates.create({
+      key: 'catalog-approved-fixture', origin: 'platform', status: 'approved',
+    });
+    await HuntTemplates.createVersion1({
+      templateId: approved.id, origin: 'platform',
+      content: { displayName: 'Old persisted name', theme: 'Old persisted theme' },
+    });
+    await HuntTemplates.createVersion({
+      templateId: approved.id, version: 3, origin: 'platform',
+      content: { displayName: 'Latest persisted name', theme: 'Latest persisted theme' },
+    });
+    const draft = await HuntTemplates.create({
+      key: 'catalog-draft-fixture', origin: 'platform', status: 'draft',
+    });
+    await HuntTemplates.createVersion1({
+      templateId: draft.id, origin: 'platform',
+      content: { displayName: 'Hidden draft', theme: 'Hidden' },
+    });
+
+    const catalog = await HuntTemplates.listApprovedWithLatestVersion();
+    expect(catalog.map(({ key }) => key)).toEqual([...catalog.map(({ key }) => key)].sort());
+    expect(catalog).toContainEqual({
+      key: 'signal-cluj-napoca', version: 1, content: signalClujNapocaV1,
+    });
+    expect(catalog).toContainEqual({
+      key: approved.key, version: 3,
+      content: { displayName: 'Latest persisted name', theme: 'Latest persisted theme' },
+    });
+    expect(catalog.some(({ key }) => key === draft.key)).toBe(false);
+    await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(approved.key)).resolves
+      .toMatchObject({ key: approved.key, version: 3 });
+    await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(draft.key)).resolves.toBeNull();
+
+    // A missing approved row must stay missing rather than being masked by the legacy descriptor.
+    await client.query("UPDATE hunt_templates SET status = 'submitted' WHERE key = $1", [signalClujNapocaV1.key]);
+    await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(signalClujNapocaV1.key))
+      .resolves.toBeNull();
+    await client.query("UPDATE hunt_templates SET status = 'approved' WHERE key = $1", [signalClujNapocaV1.key]);
+  });
+
   it('persists Template identities and immutable version content with provenance', async () => {
     await application();
     const { HuntTemplates } = await import('../models/HuntTemplate.js');
