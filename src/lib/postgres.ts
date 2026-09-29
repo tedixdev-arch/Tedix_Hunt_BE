@@ -88,9 +88,12 @@ CREATE TABLE IF NOT EXISTS hunt_templates (
   -- Provenance only: a Creator account does not own platform content lifecycle.
   created_by_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
   status TEXT NOT NULL CHECK (status IN ('draft', 'submitted', 'changes_requested', 'approved')),
+  submitted_version INTEGER CHECK (submitted_version IS NULL OR submitted_version >= 1),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL)
+  CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL),
+  CHECK (status <> 'draft' OR submitted_version IS NULL),
+  CHECK (status <> 'submitted' OR submitted_version IS NOT NULL)
 );
 
 -- A Template version is an immutable implementation snapshot, not a catalog of framework options.
@@ -106,6 +109,17 @@ CREATE TABLE IF NOT EXISTS hunt_template_versions (
   UNIQUE (template_id, version),
   CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL)
 );
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hunt_templates_submitted_version_fkey'
+  ) THEN
+    ALTER TABLE hunt_templates ADD CONSTRAINT hunt_templates_submitted_version_fkey
+      FOREIGN KEY (id, submitted_version)
+      REFERENCES hunt_template_versions (template_id, version)
+      DEFERRABLE INITIALLY DEFERRED;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS hunts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

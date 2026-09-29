@@ -3,7 +3,8 @@ import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemp
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
   HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
-  HuntTemplates, InvalidHuntTemplateContentError,
+  HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
+  InvalidHuntTemplateContentError,
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
@@ -160,6 +161,65 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
     }
     if (error instanceof InvalidHuntTemplateContentError) {
       return res.status(400).json({ error: 'invalid_input' });
+    }
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/creator/templates/{key}/submit:
+ *   post:
+ *     tags: [Creator Templates]
+ *     summary: Submit an exact immutable Template version for Admin review
+ *     description: Only the authenticated Creator's own draft Template may be submitted, and the explicitly supplied version must be its latest persisted version. Submission does not approve or publish the Template.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [version]
+ *             properties:
+ *               version: { type: integer, minimum: 1 }
+ *     responses:
+ *       200: { description: Exact immutable version submitted for review, content: { application/json: { schema: { $ref: '#/components/schemas/CreatorOwnedTemplate' } } } }
+ *       400: { description: Invalid version, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: Template not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: Template is not a draft or version is not latest, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const key = req.params.key;
+  const version = req.body?.version;
+  if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
+  if (!Number.isInteger(version) || version < 1) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+
+  try {
+    const result = await HuntTemplates.submitCreatorDraft(key, version, req.user!.id);
+    return res.json({
+      key: result.template.key,
+      version: result.version.version,
+      status: result.template.status,
+      origin: result.template.origin,
+      content: result.version.content,
+    });
+  } catch (error) {
+    // Unknown, other-owned, and platform keys are deliberately indistinguishable.
+    if (error instanceof HuntTemplateNotFoundError) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (error instanceof HuntTemplateVersionNotLatestError) {
+      return res.status(409).json({ error: 'template_version_not_latest' });
+    }
+    if (error instanceof HuntTemplateNotSubmittableError) {
+      return res.status(409).json({ error: 'template_not_submittable' });
     }
     return next(error);
   }
