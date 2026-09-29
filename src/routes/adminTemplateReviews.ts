@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { HuntTemplates } from '../models/HuntTemplate.js';
+import { HuntTemplateNotReviewableError, HuntTemplates } from '../models/HuntTemplate.js';
 
 const router = express.Router();
 
@@ -23,6 +23,39 @@ router.get('/', requireAuth, requireRole('admin'), async (_request, response, ne
   try {
     return response.json({ templates: await HuntTemplates.listSubmittedCreatorReviews() });
   } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/templates/review/{key}/approve:
+ *   post:
+ *     tags: [Admin Template Review]
+ *     summary: Approve a submitted Creator Template
+ *     description: Admin-only. Approves the exact immutable submitted_version without creating a version, making that artifact available for Organizer catalog selection and Hunt snapshotting.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Exact approved immutable artifact, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
+ *       401: { description: Authentication required }
+ *       403: { description: Authoritative Admin capability required }
+ *       404: { description: Creator Template key not found }
+ *       409: { description: Creator Template is not currently reviewable }
+ */
+router.post('/:key/approve', requireAuth, requireRole('admin'), async (request, response, next) => {
+  try {
+    const key = request.params.key;
+    if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
+    const approved = await HuntTemplates.approveSubmittedCreator(key);
+    return approved
+      ? response.json(approved)
+      : response.status(404).json({ error: 'not_found' });
+  } catch (error) {
+    if (error instanceof HuntTemplateNotReviewableError) {
+      return response.status(409).json({ error: 'template_not_reviewable' });
+    }
     return next(error);
   }
 });

@@ -238,11 +238,11 @@ const options: swaggerJsdoc.Options = {
         AdminTemplateReview: {
           type: 'object',
           required: ['key', 'version', 'status', 'origin', 'creator', 'content'],
-          description: 'Read-only Admin review artifact pinned to hunt_templates.submitted_version.',
+          description: 'Admin review artifact pinned to hunt_templates.submitted_version.',
           properties: {
             key: { type: 'string' },
             version: { type: 'integer', minimum: 1, description: 'Exact immutable submitted_version.' },
-            status: { type: 'string', enum: ['submitted'] },
+            status: { type: 'string', enum: ['submitted', 'approved'] },
             origin: { type: 'string', enum: ['creator'] },
             creator: {
               type: 'object', required: ['id', 'name', 'email'],

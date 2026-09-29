@@ -7,13 +7,13 @@ vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 import {
   HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
-  InvalidHuntTemplateContentError,
+  InvalidHuntTemplateContentError, HuntTemplateNotReviewableError,
 } from './HuntTemplate.js';
 
 describe('approved Hunt Template catalog persistence', () => {
   beforeEach(() => query.mockReset());
 
-  it('lists approved Templates and maps their latest persisted versions', async () => {
+  it('lists approved Templates using pinned Creator versions and latest platform versions', async () => {
     query.mockResolvedValue({ rows: [{
       key: 'signal-cluj-napoca', version: 1,
       content: { displayName: 'Signal from PostgreSQL' },
@@ -25,6 +25,7 @@ describe('approved Hunt Template catalog persistence', () => {
     }]);
     const sql = query.mock.calls[0][0] as string;
     expect(sql).toContain("t.status = 'approved'");
+    expect(sql).toContain("t.origin = 'platform' OR version = t.submitted_version");
     expect(sql).toContain('ORDER BY version DESC');
     expect(sql).toContain('ORDER BY t.key ASC');
   });
@@ -35,6 +36,7 @@ describe('approved Hunt Template catalog persistence', () => {
       key: 'approved', version: 3, content: { ok: true },
     });
     expect(query.mock.calls[0][0]).toContain("t.status = 'approved' AND t.key = $1");
+    expect(query.mock.calls[0][0]).toContain("t.origin = 'platform' OR version = t.submitted_version");
     expect(query.mock.calls[0][1]).toEqual(['approved']);
 
     query.mockResolvedValueOnce({ rows: [] });
@@ -55,6 +57,52 @@ describe('Creator Hunt Template persistence', () => {
   };
 
   beforeEach(() => query.mockReset());
+
+  it('approves only the locked submitted version and preserves immutable content', async () => {
+    const approvedContent = { ...content, version: 2, marker: 'approved-not-latest' };
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+      ...templateRow, status: 'submitted', submitted_version: 2,
+    }] }).mockResolvedValueOnce({ rows: [{
+      key: templateRow.key, origin: 'creator', version: 2, content: approvedContent,
+      creator_id: creatorId, creator_name: 'Ada', creator_email: 'ada@example.com',
+    }] }).mockResolvedValueOnce({ rowCount: 1, rows: [] }).mockResolvedValueOnce({ rows: [] });
+
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key)).resolves.toEqual({
+      key: templateRow.key, version: 2, status: 'approved', origin: 'creator',
+      creator: { id: creatorId, name: 'Ada', email: 'ada@example.com' }, content: approvedContent,
+    });
+    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[2][0]).toContain('v.version = t.submitted_version');
+    expect(client.query.mock.calls[2][0]).not.toContain('MAX(');
+    expect(client.query.mock.calls[3][0]).not.toContain('submitted_version =');
+    expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
+      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'COMMIT',
+    ]);
+  });
+
+  it.each(['draft', 'approved', 'changes_requested'])('rolls back %s approval', async (status) => {
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+      ...templateRow, status, submitted_version: status === 'draft' ? null : 1,
+    }] }).mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key))
+      .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+  });
+
+  it('rolls back if exact submitted version cannot be loaded', async () => {
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+      ...templateRow, status: 'submitted', submitted_version: 2,
+    }] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key))
+      .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+  });
 
   it('lists only owner-scoped creator Templates with latest versions in one ordered query', async () => {
     query.mockResolvedValue({ rows: [
