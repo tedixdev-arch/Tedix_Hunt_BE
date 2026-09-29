@@ -23,6 +23,7 @@ import { creatorApplicationsMigration } from './migrations/015_creator_applicati
 import { huntTemplateVersionsMigration } from './migrations/016_hunt_template_versions.js';
 import { signalClujNapocaV1Migration } from './migrations/017_signal_cluj_napoca_v1.js';
 import { templateSubmissionMigration } from './migrations/018_template_submission.js';
+import { templateApprovalMigration } from './migrations/019_template_approval.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 import type { Migration } from './migrations/index.js';
 
@@ -38,6 +39,7 @@ const migrations = [
   huntTemplateVersionsMigration,
   signalClujNapocaV1Migration,
   templateSubmissionMigration,
+  templateApprovalMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -131,6 +133,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '016_hunt_template_versions',
       '017_signal_cluj_napoca_v1',
       '018_template_submission',
+      '019_template_approval',
     ]);
     try {
       await expect(client.query(
@@ -202,6 +205,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '016_hunt_template_versions' },
       { id: '017_signal_cluj_napoca_v1' },
       { id: '018_template_submission' },
+      { id: '019_template_approval' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -328,6 +332,28 @@ describeWithDatabase('PostgreSQL migrations', () => {
       templateId: draft.id, origin: 'platform',
       content: { displayName: 'Hidden draft', theme: 'Hidden' },
     });
+    const creatorPinned = await HuntTemplates.create({
+      key: 'catalog-creator-pinned', origin: 'creator', status: 'draft',
+      createdByUserId: '00000000-0000-0000-0000-000000000002',
+    });
+    const creatorV2 = { displayName: 'Approved Creator v2', theme: 'Pinned' };
+    await HuntTemplates.createVersion({
+      templateId: creatorPinned.id, version: 1, origin: 'creator',
+      createdByUserId: creatorPinned.createdByUserId, content: { displayName: 'v1', theme: 'old' },
+    });
+    await HuntTemplates.createVersion({
+      templateId: creatorPinned.id, version: 2, origin: 'creator',
+      createdByUserId: creatorPinned.createdByUserId, content: creatorV2,
+    });
+    await HuntTemplates.createVersion({
+      templateId: creatorPinned.id, version: 3, origin: 'creator',
+      createdByUserId: creatorPinned.createdByUserId,
+      content: { displayName: 'Unapproved Creator v3', theme: 'Latest but hidden' },
+    });
+    await client.query(
+      `UPDATE hunt_templates SET status = 'approved', submitted_version = 2 WHERE id = $1`,
+      [creatorPinned.id],
+    );
 
     const catalog = await HuntTemplates.listApprovedWithLatestVersion();
     expect(catalog.map(({ key }) => key)).toEqual([...catalog.map(({ key }) => key)].sort());
@@ -338,6 +364,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
       key: approved.key, version: 3,
       content: { displayName: 'Latest persisted name', theme: 'Latest persisted theme' },
     });
+    // Regression: an approved Creator artifact is explicit and may differ from MAX(version).
+    expect(catalog).toContainEqual({ key: creatorPinned.key, version: 2, content: creatorV2 });
+    await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(creatorPinned.key)).resolves
+      .toEqual({ key: creatorPinned.key, version: 2, content: creatorV2 });
     expect(catalog.some(({ key }) => key === draft.key)).toBe(false);
     await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(approved.key)).resolves
       .toMatchObject({ key: approved.key, version: 3 });
@@ -432,7 +462,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
         const template = await client.query<{ id: string }>(
           `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
            VALUES ($1, 'creator', $2, $3) RETURNING id`,
-          [keys[index], creatorA, status === 'submitted' ? 'draft' : status],
+          [keys[index], creatorA, ['submitted', 'approved'].includes(status) ? 'draft' : status],
         );
         await client.query(
           `INSERT INTO hunt_template_versions
@@ -440,10 +470,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
            VALUES ($1, 1, $2, 'creator', $3), ($1, 2, $4, 'creator', $3)`,
           [template.rows[0].id, { complete: 'old' }, creatorA, { complete: 'latest', status }],
         );
-        if (status === 'submitted') {
+        if (status === 'submitted' || status === 'approved') {
           await client.query(
-            `UPDATE hunt_templates SET status = 'submitted', submitted_version = 2 WHERE id = $1`,
-            [template.rows[0].id],
+            `UPDATE hunt_templates SET status = $2, submitted_version = 2 WHERE id = $1`,
+            [template.rows[0].id, status],
           );
         }
       }
@@ -468,7 +498,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
         'approved', 'changes_requested', 'draft', 'submitted',
       ]);
       expect(fixtures.map(({ submittedVersion }: { submittedVersion: number | null }) => submittedVersion))
-        .toEqual([null, null, null, 2]);
+        .toEqual([2, null, null, 2]);
       expect(fixtures[0].content).toEqual({ complete: 'latest', status: 'approved' });
       expect(list.body.some(({ key }: { key: string }) => key === signalClujNapocaV1.key)).toBe(false);
       expect(list.body.some(({ key }: { key: string }) => key === 'read-private-b')).toBe(false);

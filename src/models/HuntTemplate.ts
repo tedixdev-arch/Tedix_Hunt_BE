@@ -54,6 +54,10 @@ export interface AdminTemplateReview {
   content: unknown;
 }
 
+export interface ApprovedAdminTemplateReview extends Omit<AdminTemplateReview, 'status'> {
+  status: 'approved';
+}
+
 interface TemplateProvenance {
   origin: HuntTemplateOrigin;
   createdByUserId?: string | null;
@@ -81,6 +85,7 @@ export class HuntTemplateNotFoundError extends Error {}
 export class HuntTemplateNotEditableError extends Error {}
 export class HuntTemplateNotSubmittableError extends Error {}
 export class HuntTemplateVersionNotLatestError extends Error {}
+export class HuntTemplateNotReviewableError extends Error {}
 export class InvalidHuntTemplateContentError extends Error {}
 
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
@@ -280,6 +285,55 @@ export const HuntTemplates = {
     return rows[0] ? mapVersion(rows[0]) : null;
   },
 
+  async approveSubmittedCreator(key: string): Promise<ApprovedAdminTemplateReview | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Lock the Creator identity first: only one concurrent Admin can perform the transition.
+      const templateResult = await client.query(
+        `SELECT * FROM hunt_templates
+         WHERE key = $1 AND origin = 'creator'
+         FOR UPDATE`,
+        [key],
+      );
+      const row = templateResult.rows[0];
+      if (!row) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (row.status !== 'submitted' || row.submitted_version === null) {
+        throw new HuntTemplateNotReviewableError();
+      }
+
+      // submitted_version is the approved artifact; never substitute the latest version.
+      const reviewResult = await client.query(
+        `SELECT t.key, t.origin, v.version, v.content,
+                creator.id AS creator_id, creator.name AS creator_name,
+                creator.email AS creator_email
+         FROM hunt_templates t
+         JOIN hunt_template_versions v
+           ON v.template_id = t.id AND v.version = t.submitted_version
+         JOIN users creator ON creator.id = t.created_by_user_id
+         WHERE t.id = $1`,
+        [row.id],
+      );
+      if (!reviewResult.rows[0]) throw new HuntTemplateNotReviewableError();
+
+      await client.query(
+        `UPDATE hunt_templates SET status = 'approved', updated_at = now()
+         WHERE id = $1 AND status = 'submitted'`,
+        [row.id],
+      );
+      await client.query('COMMIT');
+      return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), status: 'approved' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async listApprovedWithLatestVersion(): Promise<ApprovedHuntTemplateVersion[]> {
     const { rows } = await pool.query(
       `SELECT t.key, latest.version, latest.content
@@ -288,6 +342,7 @@ export const HuntTemplates = {
          SELECT version, content
          FROM hunt_template_versions
          WHERE template_id = t.id
+           AND (t.origin = 'platform' OR version = t.submitted_version)
          ORDER BY version DESC
          LIMIT 1
        ) latest ON TRUE
@@ -307,6 +362,7 @@ export const HuntTemplates = {
          SELECT version, content
          FROM hunt_template_versions
          WHERE template_id = t.id
+           AND (t.origin = 'platform' OR version = t.submitted_version)
          ORDER BY version DESC
          LIMIT 1
        ) latest ON TRUE
