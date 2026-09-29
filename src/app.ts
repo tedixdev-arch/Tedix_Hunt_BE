@@ -17,6 +17,7 @@ import { creatorApplicationsRouter } from './routes/creatorApplications.js';
 import { adminUsersRouter } from './routes/adminUsers.js';
 import { meRouter } from './routes/me.js';
 import { creatorTemplatesRouter } from './routes/creatorTemplates.js';
+import { adminTemplateReviewsRouter } from './routes/adminTemplateReviews.js';
 
 interface CreateAppOptions {
   includeErrorProbe?: boolean;
@@ -48,6 +49,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
   app.use('/api/admin/users', adminUsersRouter);
+  app.use('/api/admin/templates/review', adminTemplateReviewsRouter);
   app.use('/api/organizer-applications', organizerApplicationsRouter);
   app.use('/api/creator-applications', creatorApplicationsRouter);
   app.use('/api/creator/templates', creatorTemplatesRouter);
