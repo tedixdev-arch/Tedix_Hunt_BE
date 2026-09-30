@@ -35,7 +35,14 @@ import {
 
 const content = {
   key: 'algebra-trail', version: 1, displayName: 'Algebra Trail', theme: 'Numbers',
-  mission: { name: 'Recover the code' }, configuration: { durationMinutes: 45 },
+  mission: { name: 'Recover the code' },
+  configuration: {
+    durationMinutes: 45, normalCheckpointCount: 1,
+    checkpointPositions: [{
+      checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
+      longitude: 23.6236, radiusMeters: 30,
+    }],
+  },
   scoring: { startingScore: 100 }, checkpoints: [{ id: 'one', arbitrary: ['kept'] }],
 };
 const user = (roles: string[]) => ({
@@ -132,6 +139,13 @@ describe('POST /api/creator/templates/:key/submit', () => {
     expect(mocks.submitCreatorDraft).not.toHaveBeenCalled();
   });
 
+  it('returns deterministic invalid_input when geographic content is incomplete', async () => {
+    mocks.submitCreatorDraft.mockRejectedValue(new InvalidHuntTemplateContentError());
+    await request(app).post(`/api/creator/templates/${content.key}/submit`)
+      .set('Authorization', bearer).send({ version: 3 })
+      .expect(400, { error: 'invalid_input' });
+  });
+
   it.each([
     ['organizer-only', ['organizer']], ['admin-only', ['admin']],
   ])('forbids a %s identity', async (_name, roles) => {
@@ -165,6 +179,31 @@ describe('POST /api/creator/templates', () => {
       .send({ key: '  Algebra-Trail ', content }).expect(201);
     expect(response.body).toEqual({ key: content.key, version: 1, status: 'draft', origin: 'creator', content });
     expect(mocks.createCreatorDraft).toHaveBeenCalledWith(content.key, content, 'user-1');
+  });
+
+  it('accepts and preserves progressive geographic draft content', async () => {
+    const geographicDraft = {
+      ...content,
+      configuration: {
+        normalCheckpointCount: 2,
+        checkpointPositions: [{
+          checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
+          longitude: 23.6236, radiusMeters: 30,
+        }],
+      },
+    };
+    mocks.createCreatorDraft.mockResolvedValueOnce({
+      template: { key: content.key, origin: 'creator', status: 'draft' },
+      version: { version: 1, content: geographicDraft },
+    });
+    await request(app).post('/api/creator/templates').set('Authorization', bearer)
+      .send({ key: content.key, content: geographicDraft }).expect(201, {
+        key: content.key, version: 1, status: 'draft', origin: 'creator',
+        content: geographicDraft,
+      });
+    expect(mocks.createCreatorDraft).toHaveBeenCalledWith(
+      content.key, geographicDraft, 'user-1',
+    );
   });
 
   it.each([

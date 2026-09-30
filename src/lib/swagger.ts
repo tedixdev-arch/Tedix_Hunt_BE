@@ -214,7 +214,30 @@ const options: swaggerJsdoc.Options = {
             displayName: { type: 'string', minLength: 1 },
             theme: { type: 'string', minLength: 1 },
             mission: { type: 'object', minProperties: 1, additionalProperties: true },
-            configuration: { type: 'object', minProperties: 1, additionalProperties: true },
+            configuration: {
+              type: 'object', minProperties: 1, additionalProperties: true,
+              properties: {
+                normalCheckpointCount: {
+                  type: 'integer', minimum: 1, maximum: 20,
+                  description: 'Number of normal route checkpoints; FinishPoint is separate Feature 6.',
+                },
+                checkpointPositions: {
+                  type: 'array',
+                  description: 'Geographic positions for normal checkpoints only; complete at submission.',
+                  items: {
+                    type: 'object', additionalProperties: false,
+                    required: ['checkpointNumber', 'name', 'latitude', 'longitude', 'radiusMeters'],
+                    properties: {
+                      checkpointNumber: { type: 'integer', minimum: 1, maximum: 20 },
+                      name: { type: 'string', minLength: 1, maxLength: 100 },
+                      latitude: { type: 'number', minimum: -90, maximum: 90 },
+                      longitude: { type: 'number', minimum: -180, maximum: 180 },
+                      radiusMeters: { type: 'number', minimum: 10, maximum: 500 },
+                    },
+                  },
+                },
+              },
+            },
             scoring: { type: 'object', minProperties: 1, additionalProperties: true },
             checkpoints: { type: 'array', minItems: 1, items: { type: 'object' } },
           },

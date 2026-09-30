@@ -1,5 +1,5 @@
 import { pool } from '../lib/postgres.js';
-import { isTemplateContent } from '../domain/creatorTemplates.js';
+import { isTemplateContent, isTemplateContentSubmittable } from '../domain/creatorTemplates.js';
 
 export type HuntTemplateOrigin = 'platform' | 'creator';
 export type HuntTemplateStatus = 'draft' | 'submitted' | 'changes_requested' | 'approved';
@@ -141,6 +141,11 @@ export const HuntTemplates = {
       const latest = versionResult.rows[0];
       if (!latest || latest.version !== requestedVersion) {
         throw new HuntTemplateVersionNotLatestError();
+      }
+      // Only the submission boundary requires a complete 1..N geographic structure. Draft
+      // versions stay progressively authorable, while legacy content without the contract works.
+      if (!isTemplateContentSubmittable(latest.content)) {
+        throw new InvalidHuntTemplateContentError();
       }
 
       // Status and its exact immutable review artifact change in one transaction.
