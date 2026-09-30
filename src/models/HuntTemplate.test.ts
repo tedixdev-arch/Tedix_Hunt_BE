@@ -52,7 +52,13 @@ describe('Creator Hunt Template persistence', () => {
   };
   const content = {
     key: 'algebra-trail', version: 1, displayName: 'Algebra Trail', theme: 'Numbers',
-    mission: { name: 'Go' }, configuration: { duration: 30 }, scoring: { start: 10 },
+    mission: { name: 'Go' }, configuration: {
+      duration: 30, normalCheckpointCount: 1,
+      checkpointPositions: [{
+        checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
+        longitude: 23.6236, radiusMeters: 30,
+      }],
+    }, scoring: { start: 10 },
     checkpoints: [{ id: 'one', custom: { preserved: true } }],
   };
 
@@ -329,6 +335,29 @@ describe('Creator Hunt Template persistence', () => {
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
       'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'COMMIT',
     ]);
+  });
+
+  it('rejects an incomplete geographic draft before changing submission state', async () => {
+    const incompleteContent = {
+      ...content,
+      configuration: {
+        normalCheckpointCount: 2,
+        checkpointPositions: [{
+          checkpointNumber: 1, name: 'Start', latitude: 46.77, longitude: 23.62,
+          radiusMeters: 25,
+        }],
+      },
+    };
+    const client = { query: vi.fn(), release: vi.fn() };
+    connect.mockResolvedValue(client);
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+      .mockResolvedValueOnce({ rows: [{ version: 1, content: incompleteContent }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(HuntTemplates.submitCreatorDraft(templateRow.key, 1, creatorId))
+      .rejects.toBeInstanceOf(InvalidHuntTemplateContentError);
+    expect(client.query.mock.calls.some(([sql]) => String(sql).trim().startsWith('UPDATE'))).toBe(false);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
 
   it.each([2, 4])('rolls back when requested version %i is not latest', async (requested) => {

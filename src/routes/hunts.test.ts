@@ -302,7 +302,17 @@ describe('Hunt routes', () => {
   });
 
   it('uses the one resolved latest version and complete persisted content', async () => {
-    const content = { key: 'multi-version', version: 3, displayName: 'V3', theme: 'Theme', checkpoints: [{ id: 1 }] };
+    const content = {
+      key: 'multi-version', version: 3, displayName: 'V3', theme: 'Theme',
+      configuration: {
+        normalCheckpointCount: 1,
+        checkpointPositions: [{
+          checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
+          longitude: 23.6236, radiusMeters: 30,
+        }],
+      },
+      checkpoints: [{ id: 1 }],
+    };
     mocks.findApprovedTemplate.mockResolvedValueOnce({ key: 'multi-version', version: 3, content });
 
     await request(app).patch('/api/hunts/hunt-1').set('Authorization', auth)

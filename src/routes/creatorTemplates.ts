@@ -221,6 +221,9 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
     if (error instanceof HuntTemplateNotSubmittableError) {
       return res.status(409).json({ error: 'template_not_submittable' });
     }
+    if (error instanceof InvalidHuntTemplateContentError) {
+      return res.status(400).json({ error: 'invalid_input' });
+    }
     return next(error);
   }
 });
