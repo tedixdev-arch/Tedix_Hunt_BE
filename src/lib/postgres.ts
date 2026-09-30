@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS hunt_templates (
   CHECK (origin = 'platform' OR created_by_user_id IS NOT NULL),
   CHECK (status <> 'draft' OR submitted_version IS NULL),
   CHECK (status <> 'submitted' OR submitted_version IS NOT NULL),
-  CHECK (origin <> 'creator' OR status <> 'approved' OR submitted_version IS NOT NULL)
+  CHECK (origin <> 'creator' OR status <> 'approved' OR submitted_version IS NOT NULL),
+  CHECK (origin <> 'creator' OR status <> 'changes_requested' OR submitted_version IS NOT NULL)
 );
 
 -- A Template version is an immutable implementation snapshot, not a catalog of framework options.

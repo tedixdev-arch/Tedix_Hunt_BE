@@ -24,6 +24,7 @@ import { huntTemplateVersionsMigration } from './migrations/016_hunt_template_ve
 import { signalClujNapocaV1Migration } from './migrations/017_signal_cluj_napoca_v1.js';
 import { templateSubmissionMigration } from './migrations/018_template_submission.js';
 import { templateApprovalMigration } from './migrations/019_template_approval.js';
+import { templateChangesRequestedMigration } from './migrations/020_template_changes_requested.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 import type { Migration } from './migrations/index.js';
 
@@ -40,6 +41,7 @@ const migrations = [
   signalClujNapocaV1Migration,
   templateSubmissionMigration,
   templateApprovalMigration,
+  templateChangesRequestedMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -134,6 +136,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '017_signal_cluj_napoca_v1',
       '018_template_submission',
       '019_template_approval',
+      '020_template_changes_requested',
     ]);
     try {
       await expect(client.query(
@@ -206,6 +209,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '017_signal_cluj_napoca_v1' },
       { id: '018_template_submission' },
       { id: '019_template_approval' },
+      { id: '020_template_changes_requested' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -462,7 +466,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
         const template = await client.query<{ id: string }>(
           `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
            VALUES ($1, 'creator', $2, $3) RETURNING id`,
-          [keys[index], creatorA, ['submitted', 'approved'].includes(status) ? 'draft' : status],
+          [
+            keys[index], creatorA,
+            ['submitted', 'approved', 'changes_requested'].includes(status) ? 'draft' : status,
+          ],
         );
         await client.query(
           `INSERT INTO hunt_template_versions
@@ -470,7 +477,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
            VALUES ($1, 1, $2, 'creator', $3), ($1, 2, $4, 'creator', $3)`,
           [template.rows[0].id, { complete: 'old' }, creatorA, { complete: 'latest', status }],
         );
-        if (status === 'submitted' || status === 'approved') {
+        if (['submitted', 'approved', 'changes_requested'].includes(status)) {
           await client.query(
             `UPDATE hunt_templates SET status = $2, submitted_version = 2 WHERE id = $1`,
             [template.rows[0].id, status],
@@ -498,7 +505,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
         'approved', 'changes_requested', 'draft', 'submitted',
       ]);
       expect(fixtures.map(({ submittedVersion }: { submittedVersion: number | null }) => submittedVersion))
-        .toEqual([2, null, null, 2]);
+        .toEqual([2, 2, null, 2]);
       expect(fixtures[0].content).toEqual({ complete: 'latest', status: 'approved' });
       expect(list.body.some(({ key }: { key: string }) => key === signalClujNapocaV1.key)).toBe(false);
       expect(list.body.some(({ key }: { key: string }) => key === 'read-private-b')).toBe(false);

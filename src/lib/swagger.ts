@@ -242,7 +242,7 @@ const options: swaggerJsdoc.Options = {
           properties: {
             key: { type: 'string' },
             version: { type: 'integer', minimum: 1, description: 'Exact immutable submitted_version.' },
-            status: { type: 'string', enum: ['submitted', 'approved'] },
+            status: { type: 'string', enum: ['submitted', 'approved', 'changes_requested'] },
             origin: { type: 'string', enum: ['creator'] },
             creator: {
               type: 'object', required: ['id', 'name', 'email'],
