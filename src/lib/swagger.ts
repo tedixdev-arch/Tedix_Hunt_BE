@@ -232,7 +232,10 @@ const options: swaggerJsdoc.Options = {
                       name: { type: 'string', minLength: 1, maxLength: 100 },
                       latitude: { type: 'number', minimum: -90, maximum: 90 },
                       longitude: { type: 'number', minimum: -180, maximum: 180 },
-                      radiusMeters: { type: 'number', minimum: 10, maximum: 500 },
+                      radiusMeters: {
+                        type: 'number', minimum: 5, maximum: 500,
+                        description: 'Configured discovery target in meters; not a guarantee of GPS precision.',
+                      },
                     },
                   },
                 },

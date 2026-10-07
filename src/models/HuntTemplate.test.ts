@@ -44,7 +44,7 @@ describe('approved Hunt Template catalog persistence', () => {
   });
 });
 
-describe('Creator Hunt Template persistence', () => {
+describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (radiusMeters) => {
   const creatorId = 'creator-1';
   const templateRow = {
     id: 'template-1', key: 'algebra-trail', origin: 'creator', created_by_user_id: creatorId,
@@ -56,7 +56,7 @@ describe('Creator Hunt Template persistence', () => {
       duration: 30, normalCheckpointCount: 1,
       checkpointPositions: [{
         checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
-        longitude: 23.6236, radiusMeters: 30,
+        longitude: 23.6236, radiusMeters,
       }],
     }, scoring: { start: 10 },
     checkpoints: [{ id: 'one', custom: { preserved: true } }],
