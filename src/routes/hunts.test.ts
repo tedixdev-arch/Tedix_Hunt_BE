@@ -301,14 +301,14 @@ describe('Hunt routes', () => {
     expect(mocks.updateDraft).not.toHaveBeenCalled();
   });
 
-  it('uses the one resolved latest version and complete persisted content', async () => {
+  it.each([5, 30])('snapshots complete approved content with radius %i m', async (radiusMeters) => {
     const content = {
       key: 'multi-version', version: 3, displayName: 'V3', theme: 'Theme',
       configuration: {
         normalCheckpointCount: 1,
         checkpointPositions: [{
           checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
-          longitude: 23.6236, radiusMeters: 30,
+          longitude: 23.6236, radiusMeters,
         }],
       },
       checkpoints: [{ id: 1 }],

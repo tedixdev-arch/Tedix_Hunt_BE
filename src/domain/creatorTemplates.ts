@@ -2,7 +2,7 @@ export type TemplateContent = Record<string, unknown> & { key: string; version: 
 
 const MIN_NORMAL_CHECKPOINTS = 1;
 const MAX_NORMAL_CHECKPOINTS = 20;
-const MIN_RADIUS_METERS = 10;
+const MIN_RADIUS_METERS = 5;
 const MAX_RADIUS_METERS = 500;
 const MAX_CHECKPOINT_NAME_LENGTH = 100;
 

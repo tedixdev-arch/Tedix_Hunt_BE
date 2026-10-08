@@ -65,13 +65,28 @@ describe('Creator Template geographic content', () => {
     }), 'geo-trail', 1)).toBe(false);
   });
 
-  it.each([0, 9, 501, Number.NaN, Number.POSITIVE_INFINITY])(
-    'rejects radius %s metres',
-    (radiusMeters) => expect(isTemplateContent(content({
+  it.each([5, 9, 10, 30, 100, 500])('accepts radius %s metres without alteration', (radiusMeters) => {
+    const value = content({
       normalCheckpointCount: 1,
       checkpointPositions: [{ ...position(1), radiusMeters }],
-    }), 'geo-trail', 1)).toBe(false),
-  );
+    });
+    const original = structuredClone(value);
+    expect(isTemplateContent(value, 'geo-trail', 1)).toBe(true);
+    expect(isTemplateContentSubmittable(value)).toBe(true);
+    expect(value).toEqual(original);
+  });
+
+  it.each([
+    -1, 0, 4, 4.999, 500.001, 501, Number.NaN,
+    Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, '5', null, undefined, {}, [],
+  ])('rejects invalid radius %s in drafts and submissions', (radiusMeters) => {
+    const value = content({
+      normalCheckpointCount: 1,
+      checkpointPositions: [{ ...position(1), radiusMeters }],
+    });
+    expect(isTemplateContent(value, 'geo-trail', 1)).toBe(false);
+    expect(isTemplateContentSubmittable(value)).toBe(false);
+  });
 
   it('allows incomplete positions in a draft but not at submission', () => {
     const draft = content({ normalCheckpointCount: 3, checkpointPositions: [position(1)] });

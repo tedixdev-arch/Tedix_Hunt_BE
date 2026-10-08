@@ -445,6 +445,90 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
+  it('preserves a 5 m discovery target through approval and Hunt snapshotting', async () => {
+    const { app, signJwt } = await application();
+    const { HuntTemplates } = await import('../models/HuntTemplate.js');
+    const creatorId = '00000000-0000-0000-0000-000000000002';
+    const organizationId = '00000000-0000-0000-0000-000000000090';
+    const adminId = await insertAdmin('radius-review-admin@example.com');
+    const creatorAuth = `Bearer ${signJwt({ sub: creatorId, type: 'access' })}`;
+    const adminAuth = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
+    const key = 'radius-lifecycle-fixture';
+    const historical = {
+      key, version: 1, displayName: 'Radius Trail', theme: 'Navigation',
+      mission: { name: 'Explore' }, scoring: { startingScore: 100 },
+      checkpoints: [{ id: 'one' }],
+      configuration: {
+        normalCheckpointCount: 1,
+        checkpointPositions: [{
+          checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
+          longitude: 23.6236, radiusMeters: 30,
+        }],
+      },
+    };
+    const content = {
+      ...historical, version: 2,
+      configuration: {
+        ...historical.configuration,
+        checkpointPositions: [{ ...historical.configuration.checkpointPositions[0], radiusMeters: 5 }],
+      },
+    };
+    const huntIds: string[] = [];
+    try {
+      await request(app).post('/api/creator/templates').set('Authorization', creatorAuth)
+        .send({ key, content: historical }).expect(201);
+      const template = await HuntTemplates.findByKey(key);
+      const oldHunt = await request(app).post('/api/hunts').set('Authorization', creatorAuth)
+        .send({ organizationId, name: 'Historical radius snapshot' }).expect(201);
+      huntIds.push(oldHunt.body.id);
+      await client.query(
+        'UPDATE hunts SET template_key = $2, template_version = 1, template_snapshot = $3 WHERE id = $1',
+        [oldHunt.body.id, key, historical],
+      );
+
+      const draft = await request(app).post(`/api/creator/templates/${key}/versions`)
+        .set('Authorization', creatorAuth).send({ content }).expect(201);
+      expect(draft.body.content).toEqual(content);
+      await expect(HuntTemplates.getVersion(template!.id, 2)).resolves.toMatchObject({ content });
+      const submitted = await request(app).post(`/api/creator/templates/${key}/submit`)
+        .set('Authorization', creatorAuth).send({ version: 2 }).expect(200);
+      expect(submitted.body.content).toEqual(content);
+      const review = await request(app).get(`/api/admin/templates/review/${key}`)
+        .set('Authorization', adminAuth).expect(200);
+      expect(review.body.content).toEqual(content);
+      const approved = await request(app).post(`/api/admin/templates/review/${key}/approve`)
+        .set('Authorization', adminAuth).expect(200);
+      expect(approved.body.content).toEqual(content);
+
+      const catalog = await request(app).get('/api/hunt-templates')
+        .set('Authorization', creatorAuth).expect(200);
+      expect(catalog.body).toContainEqual({ key, version: 2, displayName: content.displayName, theme: content.theme });
+      await expect(HuntTemplates.findApprovedByKeyWithLatestVersion(key)).resolves
+        .toEqual({ key, version: 2, content });
+      const newHunt = await request(app).post('/api/hunts').set('Authorization', creatorAuth)
+        .send({ organizationId, name: 'Five meter radius snapshot' }).expect(201);
+      huntIds.push(newHunt.body.id);
+      const selected = await request(app).patch(`/api/hunts/${newHunt.body.id}`)
+        .set('Authorization', creatorAuth).send({ templateKey: key }).expect(200);
+      expect(selected.body.templateSnapshot).toEqual(content);
+      const persisted = await client.query(
+        'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [newHunt.body.id],
+      );
+      expect(persisted.rows[0]).toEqual({ template_version: 2, template_snapshot: content });
+      expect(persisted.rows[0].template_snapshot.configuration.checkpointPositions[0].radiusMeters).toBe(5);
+
+      await expect(HuntTemplates.getVersion(template!.id, 1)).resolves.toMatchObject({ content: historical });
+      await expect(HuntTemplates.getVersion(template!.id, 2)).resolves.toMatchObject({ content });
+      await expect(client.query(
+        'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [oldHunt.body.id],
+      )).resolves.toMatchObject({ rows: [{ template_version: 1, template_snapshot: historical }] });
+    } finally {
+      await client.query('DELETE FROM hunts WHERE id = ANY($1::uuid[])', [huntIds]);
+      await client.query('DELETE FROM hunt_templates WHERE key = $1', [key]);
+      await client.query('DELETE FROM users WHERE id = $1', [adminId]);
+    }
+  });
+
   it('owner-scopes Creator reads and returns each latest version across lifecycle states', async () => {
     const { app, signJwt } = await application();
     const creatorA = '00000000-0000-0000-0000-000000000002';
