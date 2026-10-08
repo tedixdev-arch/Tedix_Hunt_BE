@@ -466,8 +466,10 @@ describeWithDatabase('PostgreSQL migrations', () => {
         }],
       },
     };
+    const { checkpoint: terminalNumber, ...terminalGameplay } = signalClujNapocaV1.checkpoints[6];
     const content = {
       ...historical, version: 2,
+      checkpoints: [...historical.checkpoints, { ...terminalGameplay, role: 'terminal' }],
       configuration: {
         ...historical.configuration,
         finishPoint: { name: 'City Wall', latitude: 46.778123, longitude: 23.641234, radiusMeters: 17 },

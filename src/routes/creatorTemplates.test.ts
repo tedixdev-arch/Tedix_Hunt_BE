@@ -44,7 +44,7 @@ const content = {
       longitude: 23.6236, radiusMeters: 30,
     }],
   },
-  scoring: { startingScore: 100 }, checkpoints: [{ id: 'one', arbitrary: ['kept'] }],
+  scoring: { startingScore: 100 }, checkpoints: [{ id: 'one', arbitrary: ['kept'] }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' }],
 };
 const user = (roles: string[]) => ({
   id: 'user-1', email: 'person@example.com', passwordHash: null, role: 'participant', roles,

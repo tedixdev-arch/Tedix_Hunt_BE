@@ -253,7 +253,20 @@ const options: swaggerJsdoc.Options = {
               },
             },
             scoring: { type: 'object', minProperties: 1, additionalProperties: true },
-            checkpoints: { type: 'array', minItems: 1, items: { type: 'object' } },
+            checkpoints: {
+              type: 'array', minItems: 1,
+              description: 'Shared flat gameplay entries. New geographic submissions require exactly one role=terminal entry for FinishPoint; drafts may omit it. Terminal entries have no checkpoint number and never enter checkpointPositions or normalCheckpointCount. Role omission preserves historical content; no role or scoring defaults are inserted. Challenge and navigation fields remain optional. Scoring uses the existing top-level scoring object, including finishPointPuzzle; approval and snapshots preserve exact content.',
+              items: {
+                type: 'object', additionalProperties: true,
+                properties: {
+                  role: { type: 'string', enum: ['normal', 'terminal'] },
+                  checkpoint: { type: 'integer', description: 'Existing normal gameplay number; forbidden on terminal entries.' },
+                  kind: { type: 'string', enum: ['hidden-rule', 'find-sabotage', 'square', 'build-key', 'radial', 'identify-signal', 'shared-final-key'] },
+                  teamKind: { type: 'string', enum: ['scrambled-word', 'distributed-information', 'hypothesis', 'assemble-machine', 'clue-synthesis', 'filter-noise', 'shared-final-key'] },
+                  navigationMode: { type: 'string', enum: ['compass', 'landmark', 'decoded-route', 'signal-strength', 'none'] },
+                },
+              },
+            },
           },
           additionalProperties: true,
         },

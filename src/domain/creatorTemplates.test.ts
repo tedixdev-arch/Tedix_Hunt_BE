@@ -19,7 +19,7 @@ const content = (configuration: Record<string, unknown>) => ({
     finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
     ...configuration,
   }, scoring: { startingScore: 100 },
-  checkpoints: [{ id: 'one' }],
+  checkpoints: [{ id: 'one' }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' }],
 });
 
 describe('Creator Template geographic content', () => {
@@ -177,5 +177,64 @@ describe('FinishPoint geography', () => {
     expect(isTemplateContent(legacy, 'geo-trail', 1)).toBe(true);
     expect(isTemplateContentSubmittable(legacy)).toBe(true);
     expect(legacy).toEqual(original);
+  });
+});
+
+describe('Shared terminal checkpoint gameplay', () => {
+  const geographic = () => content({ normalCheckpointCount: 1, checkpointPositions: [position(1)] });
+
+  it('requires a terminal only for new geographic submissions and preserves historical content', () => {
+    const draft = { ...geographic(), checkpoints: [{ id: 'one' }] };
+    const original = structuredClone(draft);
+    expect(isTemplateContent(draft, draft.key, 1)).toBe(true);
+    expect(isTemplateContentSubmittable(draft)).toBe(false);
+    expect(draft).toEqual(original);
+    const legacy = { ...draft, configuration: { durationMinutes: 45 } };
+    expect(isTemplateContentSubmittable(legacy)).toBe(true);
+    const untypedLegacy = { ...legacy, checkpoints: [{ kind: 'historical-custom-type' }] };
+    expect(isTemplateContent(untypedLegacy, legacy.key, 1)).toBe(true);
+    expect(isTemplateContentSubmittable(untypedLegacy)).toBe(true);
+    expect(signalClujNapocaV1.checkpoints[6]).not.toHaveProperty('role');
+  });
+
+  it('allows an incomplete terminal draft without inventing mandatory challenges', () => {
+    const value = { ...geographic(), checkpoints: [{ role: 'normal' }, { role: 'terminal' }] };
+    expect(isTemplateContent(value, value.key, 1)).toBe(true);
+    expect(isTemplateContentSubmittable(value)).toBe(true);
+    const incomplete = { ...value, configuration: { normalCheckpointCount: 1 } };
+    expect(isTemplateContent(incomplete, value.key, 1)).toBe(true);
+    expect(isTemplateContentSubmittable(incomplete)).toBe(false);
+  });
+
+  it.each(signalClujNapocaV1.checkpoints)('shares the existing gameplay types for $id', (checkpoint) => {
+    for (const role of ['normal', 'terminal']) {
+      const { checkpoint: number, ...gameplay } = checkpoint;
+      const entry = { ...gameplay, role };
+      const value = { ...geographic(), checkpoints: [entry, ...(role === 'normal' ? [{ role: 'terminal' }] : [])] };
+      const original = structuredClone(value);
+      expect(isTemplateContent(value, value.key, 1)).toBe(true);
+      expect(isTemplateContentSubmittable(value)).toBe(true);
+      expect(value).toEqual(original);
+    }
+  });
+
+  it.each(['kind', 'teamKind', 'navigationMode'])('rejects unsupported %s equally for both roles', (field) => {
+    for (const role of ['normal', 'terminal']) {
+      for (const unsupported of ['new-type', null, 1, {}]) {
+        const value = { ...geographic(), checkpoints: [{ role, [field]: unsupported }] };
+        expect(isTemplateContent(value, value.key, 1)).toBe(false);
+        expect(isTemplateContentSubmittable(value)).toBe(false);
+      }
+    }
+  });
+
+  it.each([
+    [{ role: 'terminal' }, { role: 'terminal' }],
+    [{ role: 'finish' }], [{ role: null }], [{ role: 'terminal', checkpoint: 2 }],
+    [{ role: 'terminal', checkpointNumber: 2 }],
+  ].map((checkpoints) => ({ checkpoints })))('rejects duplicate or invalid terminal definitions %#', ({ checkpoints }) => {
+    const value = { ...geographic(), checkpoints };
+    expect(isTemplateContent(value, value.key, 1)).toBe(false);
+    expect(isTemplateContentSubmittable(value)).toBe(false);
   });
 });
