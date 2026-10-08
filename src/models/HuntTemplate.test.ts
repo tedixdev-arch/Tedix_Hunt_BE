@@ -54,6 +54,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     key: 'algebra-trail', version: 1, displayName: 'Algebra Trail', theme: 'Numbers',
     mission: { name: 'Go' }, configuration: {
       duration: 30, normalCheckpointCount: 1,
+      finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
       checkpointPositions: [{
         checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
         longitude: 23.6236, radiusMeters,

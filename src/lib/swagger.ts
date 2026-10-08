@@ -221,6 +221,17 @@ const options: swaggerJsdoc.Options = {
                   type: 'integer', minimum: 1, maximum: 20,
                   description: 'Number of normal route checkpoints; FinishPoint is separate Feature 6.',
                 },
+                finishPoint: {
+                  type: 'object', additionalProperties: false,
+                  description: 'Exactly one FinishPoint, separate from checkpointPositions and normalCheckpointCount, with no checkpointNumber. Optional in drafts; required when submitting geographic normal checkpoints. Supplied objects must be complete. Legacy content without geographic normal checkpoints remains submittable. Values are preserved exactly; the backend never inserts the FE authoring default radius of 5 m.',
+                  required: ['name', 'latitude', 'longitude', 'radiusMeters'],
+                  properties: {
+                    name: { type: 'string', minLength: 1, maxLength: 100, description: 'Must contain a non-whitespace character.' },
+                    latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Finite number.' },
+                    longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Finite number.' },
+                    radiusMeters: { type: 'integer', minimum: 5, maximum: 500 },
+                  },
+                },
                 checkpointPositions: {
                   type: 'array',
                   description: 'Geographic positions for normal checkpoints only; complete at submission.',

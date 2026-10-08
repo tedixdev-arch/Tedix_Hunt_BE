@@ -12,7 +12,21 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+// A supplied FinishPoint is one complete object. Never default or normalize persisted values.
+const hasValidFinishPoint = (value: unknown): boolean =>
+  isObject(value) && Object.keys(value).every((key) =>
+    ['name', 'latitude', 'longitude', 'radiusMeters'].includes(key))
+  && typeof value.name === 'string' && value.name.trim().length > 0
+  && value.name.length <= MAX_CHECKPOINT_NAME_LENGTH
+  && isFiniteNumber(value.latitude) && value.latitude >= -90 && value.latitude <= 90
+  && isFiniteNumber(value.longitude) && value.longitude >= -180 && value.longitude <= 180
+  && Number.isInteger(value.radiusMeters) && (value.radiusMeters as number) >= MIN_RADIUS_METERS
+  && (value.radiusMeters as number) <= MAX_RADIUS_METERS;
+
 const hasValidGeographicDraft = (configuration: Record<string, unknown>): boolean => {
+  if (configuration.finishPoint !== undefined && !hasValidFinishPoint(configuration.finishPoint)) {
+    return false;
+  }
   const count = configuration.normalCheckpointCount;
   const positions = configuration.checkpointPositions;
   const usesGeographicContract = count !== undefined || positions !== undefined;
@@ -66,13 +80,14 @@ export const isTemplateContentV1 = (value: unknown, key: string): value is Templ
 
 /**
  * Drafts may progressively collect positions, but a submitted geographic contract must describe
- * every normal checkpoint exactly once. FinishPoint is separate Feature 6 and is never N + 1 here.
+ * every normal checkpoint exactly once and one FinishPoint. Feature 6 never contributes to N.
  */
 export const isTemplateContentSubmittable = (value: unknown): value is TemplateContent => {
   if (!isObject(value) || !isObject(value.configuration)) return false;
   const { normalCheckpointCount: count, checkpointPositions: positions } = value.configuration;
+  if (!hasValidGeographicDraft(value.configuration)) return false;
   if (count === undefined && positions === undefined) return true; // Pre-contract Creator content.
-  if (!hasValidGeographicDraft(value.configuration) || !Number.isInteger(count)
+  if (!hasValidFinishPoint(value.configuration.finishPoint) || !Number.isInteger(count)
     || !Array.isArray(positions) || positions.length !== count) return false;
   return true; // Draft validation plus N unique in-range entries implies the complete set 1..N.
 };

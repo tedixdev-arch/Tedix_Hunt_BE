@@ -172,7 +172,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
  *   post:
  *     tags: [Creator Templates]
  *     summary: Submit an exact immutable Template version for Admin review
- *     description: Only the authenticated Creator's own draft Template may be submitted, and the explicitly supplied version must be its latest persisted version. Submission does not approve or publish the Template.
+ *     description: Only the authenticated Creator's own draft Template may be submitted, and the explicitly supplied version must be its latest persisted version. Geographic normal-checkpoint configuration requires all normal positions and one complete FinishPoint; legacy non-geographic content remains supported. Submission does not approve or publish the Template.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
