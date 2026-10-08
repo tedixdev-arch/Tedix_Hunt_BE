@@ -38,6 +38,7 @@ const content = {
   mission: { name: 'Recover the code' },
   configuration: {
     durationMinutes: 45, normalCheckpointCount: 1,
+    finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
     checkpointPositions: [{
       checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
       longitude: 23.6236, radiusMeters: 30,
@@ -221,6 +222,9 @@ describe('POST /api/creator/templates', () => {
   });
 
   it.each([
+    ['multiple FinishPoints', { ...content, configuration: { ...content.configuration, finishPoint: [content.configuration.finishPoint, content.configuration.finishPoint] } }],
+    ['numbered FinishPoint', { ...content, configuration: { ...content.configuration, finishPoint: { ...content.configuration.finishPoint, checkpointNumber: 2 } } }],
+    ['incomplete FinishPoint', { ...content, configuration: { ...content.configuration, finishPoint: { name: 'City Wall' } } }],
     ['empty content', {}],
     ['missing required structure', { ...content, scoring: {} }],
     ['empty checkpoints', { ...content, checkpoints: [] }],

@@ -306,6 +306,7 @@ describe('Hunt routes', () => {
       key: 'multi-version', version: 3, displayName: 'V3', theme: 'Theme',
       configuration: {
         normalCheckpointCount: 1,
+        finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
         checkpointPositions: [{
           checkpointNumber: 1, name: 'Central Square', latitude: 46.7712,
           longitude: 23.6236, radiusMeters,

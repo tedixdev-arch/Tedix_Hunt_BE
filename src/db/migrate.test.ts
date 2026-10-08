@@ -445,7 +445,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
-  it('preserves a 5 m discovery target through approval and Hunt snapshotting', async () => {
+  it('preserves FinishPoint and a 5 m target through approval and Hunt snapshotting', async () => {
     const { app, signJwt } = await application();
     const { HuntTemplates } = await import('../models/HuntTemplate.js');
     const creatorId = '00000000-0000-0000-0000-000000000002';
@@ -470,6 +470,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       ...historical, version: 2,
       configuration: {
         ...historical.configuration,
+        finishPoint: { name: 'City Wall', latitude: 46.778123, longitude: 23.641234, radiusMeters: 17 },
         checkpointPositions: [{ ...historical.configuration.checkpointPositions[0], radiusMeters: 5 }],
       },
     };
@@ -478,6 +479,9 @@ describeWithDatabase('PostgreSQL migrations', () => {
       await request(app).post('/api/creator/templates').set('Authorization', creatorAuth)
         .send({ key, content: historical }).expect(201);
       const template = await HuntTemplates.findByKey(key);
+      // Historical geography stays readable, but new submission requires the Feature 6 artifact.
+      await request(app).post(`/api/creator/templates/${key}/submit`)
+        .set('Authorization', creatorAuth).send({ version: 1 }).expect(400, { error: 'invalid_input' });
       const oldHunt = await request(app).post('/api/hunts').set('Authorization', creatorAuth)
         .send({ organizationId, name: 'Historical radius snapshot' }).expect(201);
       huntIds.push(oldHunt.body.id);
@@ -493,6 +497,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       const submitted = await request(app).post(`/api/creator/templates/${key}/submit`)
         .set('Authorization', creatorAuth).send({ version: 2 }).expect(200);
       expect(submitted.body.content).toEqual(content);
+      await request(app).post(`/api/creator/templates/${key}/versions`)
+        .set('Authorization', creatorAuth).send({ content: { ...content, version: 3 } }).expect(409);
       const review = await request(app).get(`/api/admin/templates/review/${key}`)
         .set('Authorization', adminAuth).expect(200);
       expect(review.body.content).toEqual(content);
@@ -516,6 +522,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       );
       expect(persisted.rows[0]).toEqual({ template_version: 2, template_snapshot: content });
       expect(persisted.rows[0].template_snapshot.configuration.checkpointPositions[0].radiusMeters).toBe(5);
+      expect(persisted.rows[0].template_snapshot.configuration.finishPoint).toEqual(content.configuration.finishPoint);
 
       await expect(HuntTemplates.getVersion(template!.id, 1)).resolves.toMatchObject({ content: historical });
       await expect(HuntTemplates.getVersion(template!.id, 2)).resolves.toMatchObject({ content });

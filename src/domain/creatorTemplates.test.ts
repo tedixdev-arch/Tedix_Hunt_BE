@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { signalClujNapocaV1 } from './templates/signalClujNapocaV1.js';
 import {
   isTemplateContent,
   isTemplateContentSubmittable,
@@ -14,7 +15,10 @@ const position = (checkpointNumber: number) => ({
 
 const content = (configuration: Record<string, unknown>) => ({
   key: 'geo-trail', version: 1, displayName: 'Geo Trail', theme: 'Navigation',
-  mission: { name: 'Go' }, configuration, scoring: { startingScore: 100 },
+  mission: { name: 'Go' }, configuration: {
+    finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
+    ...configuration,
+  }, scoring: { startingScore: 100 },
   checkpoints: [{ id: 'one' }],
 });
 
@@ -109,12 +113,69 @@ describe('Creator Template geographic content', () => {
   });
 
   it('keeps legacy Creator and platform Signal-shaped content compatible', () => {
-    const legacy = content({ durationMinutes: 45 });
+    const legacy = content({ durationMinutes: 45, finishPoint: undefined });
     expect(isTemplateContent(legacy, 'geo-trail', 1)).toBe(true);
     expect(isTemplateContentSubmittable(legacy)).toBe(true);
 
-    const signalShape = content({ category: 'Mathematics', checkpointOrder: 'Creator fixed' });
-    expect(isTemplateContent(signalShape, 'geo-trail', 1)).toBe(true);
+    const signalShape = signalClujNapocaV1;
+    expect(isTemplateContent(signalShape, signalShape.key, 1)).toBe(true);
     expect(isTemplateContentSubmittable(signalShape)).toBe(true);
+  });
+});
+
+describe('FinishPoint geography', () => {
+  const finishPoint = { name: ' City Wall ', latitude: 46.778123, longitude: 23.641234, radiusMeters: 17 };
+  const geographic = (finish: unknown) => content({
+    normalCheckpointCount: 1, checkpointPositions: [position(1)], finishPoint: finish,
+  });
+
+  it('allows omission in drafts but requires FinishPoint at geographic submission without defaulting', () => {
+    const draft = geographic(undefined);
+    expect(isTemplateContent(draft, 'geo-trail', 1)).toBe(true);
+    expect(isTemplateContentSubmittable(draft)).toBe(false);
+    expect(draft.configuration.finishPoint).toBeUndefined();
+  });
+
+  it.each([5, 500])('preserves valid FinishPoint with radius %i and excludes it from normal count', (radiusMeters) => {
+    const value = geographic({ ...finishPoint, radiusMeters });
+    const original = structuredClone(value);
+    expect(isTemplateContent(value, 'geo-trail', 1)).toBe(true);
+    expect(isTemplateContentSubmittable(value)).toBe(true);
+    expect(value).toEqual(original);
+    expect(value.configuration).toMatchObject({ normalCheckpointCount: 1 });
+    expect(value.configuration).toMatchObject({ checkpointPositions: [position(1)] });
+  });
+
+  it.each([
+    { latitude: -91 }, { latitude: 91 }, { latitude: Number.NaN }, { latitude: Infinity },
+    { longitude: -181 }, { longitude: 181 }, { longitude: -Infinity }, { longitude: '23' },
+    { radiusMeters: 4 }, { radiusMeters: 501 }, { radiusMeters: 5.5 }, { radiusMeters: '5' },
+    { radiusMeters: undefined }, { name: '' }, { name: '  ' }, { name: 'x'.repeat(101) },
+    { checkpointNumber: 2 },
+  ])('rejects invalid or incomplete FinishPoint %# in drafts and submissions', (override) => {
+    const value = geographic({ ...finishPoint, ...override });
+    expect(isTemplateContent(value, 'geo-trail', 1)).toBe(false);
+    expect(isTemplateContentSubmittable(value)).toBe(false);
+  });
+
+  it.each([null, [], [finishPoint], [finishPoint, finishPoint], {}])(
+    'rejects non-single-object FinishPoint %#', (finish) => {
+      expect(isTemplateContent(geographic(finish), 'geo-trail', 1)).toBe(false);
+      expect(isTemplateContentSubmittable(geographic(finish))).toBe(false);
+    },
+  );
+
+  it.each([[-90, -180], [90, 180]])('accepts coordinate boundaries %s, %s', (latitude, longitude) => {
+    expect(isTemplateContentSubmittable(geographic({
+      ...finishPoint, latitude, longitude, name: 'x'.repeat(100),
+    }))).toBe(true);
+  });
+
+  it('keeps non-geographic legacy submissions valid without adding FinishPoint', () => {
+    const legacy = content({ durationMinutes: 45, finishPoint: undefined });
+    const original = structuredClone(legacy);
+    expect(isTemplateContent(legacy, 'geo-trail', 1)).toBe(true);
+    expect(isTemplateContentSubmittable(legacy)).toBe(true);
+    expect(legacy).toEqual(original);
   });
 });
