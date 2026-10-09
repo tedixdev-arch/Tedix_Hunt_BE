@@ -1,3 +1,4 @@
+import { checkpointGameplayTypes } from '../domain/checkpointGameplay.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { environment } from '../config/environment.js';
 
@@ -255,15 +256,15 @@ const options: swaggerJsdoc.Options = {
             scoring: { type: 'object', minProperties: 1, additionalProperties: true },
             checkpoints: {
               type: 'array', minItems: 1,
-              description: 'Shared flat gameplay entries. New geographic submissions require exactly one role=terminal entry for FinishPoint; drafts may omit it. Terminal entries have no checkpoint number and never enter checkpointPositions or normalCheckpointCount. Role omission preserves historical content; no role or scoring defaults are inserted. Challenge and navigation fields remain optional. Scoring uses the existing top-level scoring object, including finishPointPuzzle; approval and snapshots preserve exact content.',
+              description: 'Shared flat gameplay entries. New geographic submissions require N normal gameplay entries numbered exactly 1..normalCheckpointCount using checkpoint (matching geographic checkpointNumber), plus exactly one role=terminal entry for FinishPoint; drafts may omit it. Terminal entries have no checkpoint number and never enter checkpointPositions or normalCheckpointCount. Role omission preserves historical content; no role or scoring defaults are inserted. Challenge and navigation fields remain optional. Scoring uses the existing top-level scoring object, including finishPointPuzzle; approval and snapshots preserve exact content.',
               items: {
                 type: 'object', additionalProperties: true,
                 properties: {
                   role: { type: 'string', enum: ['normal', 'terminal'] },
-                  checkpoint: { type: 'integer', description: 'Existing normal gameplay number; forbidden on terminal entries.' },
-                  kind: { type: 'string', enum: ['hidden-rule', 'find-sabotage', 'square', 'build-key', 'radial', 'identify-signal', 'shared-final-key'] },
-                  teamKind: { type: 'string', enum: ['scrambled-word', 'distributed-information', 'hypothesis', 'assemble-machine', 'clue-synthesis', 'filter-noise', 'shared-final-key'] },
-                  navigationMode: { type: 'string', enum: ['compass', 'landmark', 'decoded-route', 'signal-strength', 'none'] },
+                  checkpoint: { type: 'integer', description: 'Existing normal gameplay number; required at geographic submission, unique and in 1..normalCheckpointCount. Matches geographic checkpointNumber; forbidden on terminal entries.' },
+                  kind: { type: 'string', enum: [...checkpointGameplayTypes.kind] },
+                  teamKind: { type: 'string', enum: [...checkpointGameplayTypes.teamKind] },
+                  navigationMode: { type: 'string', enum: [...checkpointGameplayTypes.navigationMode] },
                 },
               },
             },
@@ -321,7 +322,7 @@ const options: swaggerJsdoc.Options = {
           required: ['provider', 'kind', 'quantity'],
           properties: {
             provider: { type: 'string', enum: ['organizer', 'tedix_inventory'] },
-            kind: { type: 'string', enum: ['physical', 'virtual'] },
+            kind: { type: 'string', enum: [...checkpointGameplayTypes.kind] },
             category: { type: 'string', nullable: true, enum: ['achievement', 'digital_certificate', 'profile_badge', 'hunt_passport_collectible', 'partner_digital_benefit'] },
             name: { type: 'string', nullable: true },
             description: { type: 'string', nullable: true },

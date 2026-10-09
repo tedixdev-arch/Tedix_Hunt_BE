@@ -312,7 +312,7 @@ describe('Hunt routes', () => {
           longitude: 23.6236, radiusMeters,
         }],
       },
-      checkpoints: [{ id: 1 }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', navigationMode: 'none' }],
+      checkpoints: [{ id: 1, checkpoint: 1 }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', navigationMode: 'none' }],
     };
     mocks.findApprovedTemplate.mockResolvedValueOnce({ key: 'multi-version', version: 3, content });
 

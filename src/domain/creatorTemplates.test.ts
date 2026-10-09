@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { checkpointGameplayTypes } from './checkpointGameplay.js';
 import { signalClujNapocaV1 } from './templates/signalClujNapocaV1.js';
 import {
   isTemplateContent,
@@ -19,7 +20,14 @@ const content = (configuration: Record<string, unknown>) => ({
     finishPoint: { name: 'City Wall', latitude: 46.78, longitude: 23.64, radiusMeters: 5 },
     ...configuration,
   }, scoring: { startingScore: 100 },
-  checkpoints: [{ id: 'one' }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' }],
+  checkpoints: [
+    ...Array.from({ length: typeof configuration.normalCheckpointCount === 'number'
+      && configuration.normalCheckpointCount >= 1 && configuration.normalCheckpointCount <= 20
+      ? Math.floor(configuration.normalCheckpointCount) : 1 }, (_, index) => ({
+      id: `normal-${index + 1}`, checkpoint: index + 1,
+    })),
+    { id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' },
+  ],
 });
 
 describe('Creator Template geographic content', () => {
@@ -198,7 +206,7 @@ describe('Shared terminal checkpoint gameplay', () => {
   });
 
   it('allows an incomplete terminal draft without inventing mandatory challenges', () => {
-    const value = { ...geographic(), checkpoints: [{ role: 'normal' }, { role: 'terminal' }] };
+    const value = { ...geographic(), checkpoints: [{ role: 'normal', checkpoint: 1 }, { role: 'terminal' }] };
     expect(isTemplateContent(value, value.key, 1)).toBe(true);
     expect(isTemplateContentSubmittable(value)).toBe(true);
     const incomplete = { ...value, configuration: { normalCheckpointCount: 1 } };
@@ -209,8 +217,8 @@ describe('Shared terminal checkpoint gameplay', () => {
   it.each(signalClujNapocaV1.checkpoints)('shares the existing gameplay types for $id', (checkpoint) => {
     for (const role of ['normal', 'terminal']) {
       const { checkpoint: number, ...gameplay } = checkpoint;
-      const entry = { ...gameplay, role };
-      const value = { ...geographic(), checkpoints: [entry, ...(role === 'normal' ? [{ role: 'terminal' }] : [])] };
+      const entry = { ...gameplay, role, ...(role === 'normal' ? { checkpoint: 1 } : {}) };
+      const value = { ...geographic(), checkpoints: [entry, ...(role === 'normal' ? [{ role: 'terminal' }] : [{ checkpoint: 1 }])] };
       const original = structuredClone(value);
       expect(isTemplateContent(value, value.key, 1)).toBe(true);
       expect(isTemplateContentSubmittable(value)).toBe(true);
@@ -236,5 +244,55 @@ describe('Shared terminal checkpoint gameplay', () => {
     const value = { ...geographic(), checkpoints };
     expect(isTemplateContent(value, value.key, 1)).toBe(false);
     expect(isTemplateContentSubmittable(value)).toBe(false);
+  });
+});
+
+
+describe('Geographic normal gameplay submission consistency', () => {
+  const terminal = { id: 'finish', role: 'terminal' };
+  const geographic = (checkpoints: Record<string, unknown>[]) => ({
+    ...content({ normalCheckpointCount: 2, checkpointPositions: [position(2), position(1)] }),
+    checkpoints,
+  });
+
+  it('accepts exactly N normal + 1 terminal in any order without mutating identity or roles', () => {
+    const value = geographic([terminal, { id: 'two', checkpoint: 2, role: 'normal' }, { id: 'one', checkpoint: 1 }]);
+    const original = structuredClone(value);
+    expect(isTemplateContentSubmittable(value)).toBe(true);
+    expect(value).toEqual(original);
+    expect(value.checkpoints[2]).not.toHaveProperty('role');
+  });
+
+  it.each([
+    ['missing normal', [{ checkpoint: 1 }, terminal]],
+    ['extra normal', [{ checkpoint: 1 }, { checkpoint: 2 }, { checkpoint: 3 }, terminal]],
+    ['duplicate number', [{ checkpoint: 1 }, { checkpoint: 1 }, terminal]],
+    ['out of range', [{ checkpoint: 1 }, { checkpoint: 3 }, terminal]],
+    ['zero', [{ checkpoint: 0 }, { checkpoint: 2 }, terminal]],
+    ['fractional', [{ checkpoint: 1.5 }, { checkpoint: 2 }, terminal]],
+    ['string number', [{ checkpoint: '1' }, { checkpoint: 2 }, terminal]],
+    ['missing number', [{ id: 'one' }, { checkpoint: 2 }, terminal]],
+    ['geographic alias only', [{ checkpointNumber: 1 }, { checkpoint: 2 }, terminal]],
+    ['inconsistent alias', [{ checkpoint: 1, checkpointNumber: 2 }, { checkpoint: 2 }, terminal]],
+    ['missing terminal', [{ checkpoint: 1 }, { checkpoint: 2 }]],
+  ])('allows progressive drafts but rejects %s at submission', (_case, checkpoints) => {
+    const value = geographic(checkpoints);
+    const original = structuredClone(value);
+    expect(isTemplateContent(value, value.key, 1)).toBe(true);
+    expect(isTemplateContentSubmittable(value)).toBe(false);
+    expect(value).toEqual(original);
+  });
+
+  it('shares exactly the canonical vocabulary for validation and documentation', async () => {
+    const { swaggerSpec } = await import('../lib/swagger.js');
+    const spec = swaggerSpec as { components: { schemas: { CreatorTemplateContent: {
+      properties: { checkpoints: { items: { properties: Record<string, { enum: string[] }> } } };
+    } } } };
+    for (const [field, supported] of Object.entries(checkpointGameplayTypes)) {
+      expect(spec.components.schemas.CreatorTemplateContent.properties.checkpoints.items.properties[field].enum)
+        .toEqual(supported);
+      expect(supported).toEqual([...new Set(signalClujNapocaV1.checkpoints.map((checkpoint) =>
+        (checkpoint as Record<string, unknown>)[field]))]);
+    }
   });
 });

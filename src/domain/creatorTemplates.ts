@@ -1,3 +1,5 @@
+import { checkpointGameplayTypes } from './checkpointGameplay.js';
+
 export type TemplateContent = Record<string, unknown> & { key: string; version: number };
 
 const MIN_NORMAL_CHECKPOINTS = 1;
@@ -55,12 +57,7 @@ const hasValidGeographicDraft = (configuration: Record<string, unknown>): boolea
 // The existing flat checkpoint fields are shared by normal and terminal gameplay.
 // Omitted challenge/navigation fields remain optional, as in the original Creator contract.
 const hasValidCheckpointGameplay = (checkpoint: Record<string, unknown>): boolean => {
-  const supportedTypes: Record<string, readonly string[]> = {
-    kind: ['hidden-rule', 'find-sabotage', 'square', 'build-key', 'radial', 'identify-signal', 'shared-final-key'],
-    teamKind: ['scrambled-word', 'distributed-information', 'hypothesis', 'assemble-machine', 'clue-synthesis', 'filter-noise', 'shared-final-key'],
-    navigationMode: ['compass', 'landmark', 'decoded-route', 'signal-strength', 'none'],
-  };
-  return Object.entries(supportedTypes).every(([field, types]) =>
+  return Object.entries(checkpointGameplayTypes).every(([field, types]) =>
     checkpoint[field] === undefined || (typeof checkpoint[field] === 'string'
       && types.includes(checkpoint[field] as string)));
 };
@@ -121,5 +118,17 @@ export const isTemplateContentSubmittable = (value: unknown): value is TemplateC
   if (!hasValidFinishPoint(value.configuration.finishPoint) || !Number.isInteger(count)
     || !Array.isArray(positions) || positions.length !== count) return false;
   // Enforce new authoring only at submission; never infer roles or rewrite old versions/snapshots.
-  return value.checkpoints.filter((checkpoint) => checkpoint.role === 'terminal').length === 1;
+  if (value.checkpoints.filter((checkpoint) => checkpoint.role === 'terminal').length !== 1) return false;
+  const normal = value.checkpoints.filter((checkpoint) => checkpoint.role !== 'terminal');
+  if (normal.length !== count) return false;
+  // Gameplay uses the existing `checkpoint`; geography uses `checkpointNumber` for the same 1..N.
+  // Check completeness only at submission, allowing progressive draft authoring without defaults.
+  const numbers = new Set<number>();
+  return normal.every((checkpoint) => {
+    const number = checkpoint.checkpoint;
+    if (!Number.isInteger(number) || (number as number) < 1 || (number as number) > (count as number)
+      || numbers.has(number as number)) return false;
+    numbers.add(number as number);
+    return checkpoint.checkpointNumber === undefined || checkpoint.checkpointNumber === number;
+  });
 };
