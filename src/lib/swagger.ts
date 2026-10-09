@@ -322,7 +322,7 @@ const options: swaggerJsdoc.Options = {
           required: ['provider', 'kind', 'quantity'],
           properties: {
             provider: { type: 'string', enum: ['organizer', 'tedix_inventory'] },
-            kind: { type: 'string', enum: [...checkpointGameplayTypes.kind] },
+            kind: { type: 'string', enum: ['physical', 'virtual'] },
             category: { type: 'string', nullable: true, enum: ['achievement', 'digital_certificate', 'profile_badge', 'hunt_passport_collectible', 'partner_digital_benefit'] },
             name: { type: 'string', nullable: true },
             description: { type: 'string', nullable: true },
