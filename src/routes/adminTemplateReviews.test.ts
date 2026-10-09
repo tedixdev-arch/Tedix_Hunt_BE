@@ -28,7 +28,7 @@ const bearer = `Bearer ${signJwt({ sub: 'admin-1', type: 'access' })}`;
 const review = (key = 'algebra-trail', version = 2) => ({
   key, version, status: 'submitted', origin: 'creator',
   creator: { id: 'creator-1', name: 'Ada', email: 'ada@example.com' },
-  content: { key, version, displayName: `Immutable v${version}` },
+  content: { key, version, displayName: `Immutable v${version}`, checkpoints: [{ id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' }] },
 });
 
 describe('Admin Template review reads', () => {

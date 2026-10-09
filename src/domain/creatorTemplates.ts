@@ -1,3 +1,5 @@
+import { checkpointGameplayTypes } from './checkpointGameplay.js';
+
 export type TemplateContent = Record<string, unknown> & { key: string; version: number };
 
 const MIN_NORMAL_CHECKPOINTS = 1;
@@ -52,6 +54,32 @@ const hasValidGeographicDraft = (configuration: Record<string, unknown>): boolea
   });
 };
 
+// The existing flat checkpoint fields are shared by normal and terminal gameplay.
+// Omitted challenge/navigation fields remain optional, as in the original Creator contract.
+const hasValidCheckpointGameplay = (checkpoint: Record<string, unknown>): boolean => {
+  return Object.entries(checkpointGameplayTypes).every(([field, types]) =>
+    checkpoint[field] === undefined || (typeof checkpoint[field] === 'string'
+      && types.includes(checkpoint[field] as string)));
+};
+
+const hasValidGameplayDraft = (checkpoints: unknown, validateTypes = true): checkpoints is Record<string, unknown>[] => {
+  if (!Array.isArray(checkpoints) || checkpoints.length === 0 || !checkpoints.every(isObject)) return false;
+  const terminal = checkpoints.filter((checkpoint) => checkpoint.role === 'terminal');
+  if (terminal.length > 1) return false;
+  return checkpoints.every((checkpoint) =>
+    (checkpoint.role === undefined || checkpoint.role === 'normal' || checkpoint.role === 'terminal')
+    && (checkpoint.role !== 'terminal' || (checkpoint.checkpoint === undefined && checkpoint.checkpointNumber === undefined))
+    && (!validateTypes || hasValidCheckpointGameplay(checkpoint)));
+};
+
+// Legacy non-geographic JSON had no typed gameplay validation; explicit roles opt into it.
+const usesGameplayContract = (value: Record<string, unknown>): boolean => {
+  const configuration = value.configuration as Record<string, unknown>;
+  return configuration.normalCheckpointCount !== undefined || configuration.checkpointPositions !== undefined
+    || (Array.isArray(value.checkpoints) && value.checkpoints.some((checkpoint) =>
+      isObject(checkpoint) && checkpoint.role !== undefined));
+};
+
 export const normalizeTemplateKey = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const key = value.trim().toLowerCase();
@@ -71,8 +99,7 @@ export const isTemplateContent = (
   if (!isObject(value.configuration) || Object.keys(value.configuration).length === 0
     || !hasValidGeographicDraft(value.configuration)) return false;
   if (!isObject(value.scoring) || Object.keys(value.scoring).length === 0) return false;
-  return Array.isArray(value.checkpoints) && value.checkpoints.length > 0
-    && value.checkpoints.every(isObject);
+  return hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value));
 };
 
 export const isTemplateContentV1 = (value: unknown, key: string): value is TemplateContent =>
@@ -85,9 +112,23 @@ export const isTemplateContentV1 = (value: unknown, key: string): value is Templ
 export const isTemplateContentSubmittable = (value: unknown): value is TemplateContent => {
   if (!isObject(value) || !isObject(value.configuration)) return false;
   const { normalCheckpointCount: count, checkpointPositions: positions } = value.configuration;
-  if (!hasValidGeographicDraft(value.configuration)) return false;
+  if (!hasValidGeographicDraft(value.configuration)
+    || !hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value))) return false;
   if (count === undefined && positions === undefined) return true; // Pre-contract Creator content.
   if (!hasValidFinishPoint(value.configuration.finishPoint) || !Number.isInteger(count)
     || !Array.isArray(positions) || positions.length !== count) return false;
-  return true; // Draft validation plus N unique in-range entries implies the complete set 1..N.
+  // Enforce new authoring only at submission; never infer roles or rewrite old versions/snapshots.
+  if (value.checkpoints.filter((checkpoint) => checkpoint.role === 'terminal').length !== 1) return false;
+  const normal = value.checkpoints.filter((checkpoint) => checkpoint.role !== 'terminal');
+  if (normal.length !== count) return false;
+  // Gameplay uses the existing `checkpoint`; geography uses `checkpointNumber` for the same 1..N.
+  // Check completeness only at submission, allowing progressive draft authoring without defaults.
+  const numbers = new Set<number>();
+  return normal.every((checkpoint) => {
+    const number = checkpoint.checkpoint;
+    if (!Number.isInteger(number) || (number as number) < 1 || (number as number) > (count as number)
+      || numbers.has(number as number)) return false;
+    numbers.add(number as number);
+    return checkpoint.checkpointNumber === undefined || checkpoint.checkpointNumber === number;
+  });
 };

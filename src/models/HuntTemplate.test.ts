@@ -60,7 +60,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
         longitude: 23.6236, radiusMeters,
       }],
     }, scoring: { start: 10 },
-    checkpoints: [{ id: 'one', custom: { preserved: true } }],
+    checkpoints: [{ id: 'one', checkpoint: 1, custom: { preserved: true } }, { id: 'finish', role: 'terminal', kind: 'shared-final-key', teamKind: 'shared-final-key', navigationMode: 'none' }],
   };
 
   beforeEach(() => query.mockReset());
@@ -338,8 +338,9 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     ]);
   });
 
-  it('rejects an incomplete geographic draft before changing submission state', async () => {
-    const incompleteContent = {
+  it.each(['geography', 'terminal', 'normal'])('rejects incomplete %s before changing submission state', async (missing) => {
+    const incompleteContent = missing === 'terminal' ? { ...content, checkpoints: [content.checkpoints[0]] }
+      : missing === 'normal' ? { ...content, checkpoints: [content.checkpoints[1]] } : {
       ...content,
       configuration: {
         normalCheckpointCount: 2,
