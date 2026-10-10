@@ -294,3 +294,81 @@ describe('POST /api/creator/templates/:key/versions', () => {
       .set('Authorization', bearer).send({ content: version2 }).expect(201);
   });
 });
+
+describe('POST /api/creator/templates/starters/signal-cluj-napoca', () => {
+  const app = createApp();
+  const path = '/api/creator/templates/starters/signal-cluj-napoca';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findUserById.mockResolvedValue(user(['creator']));
+    mocks.createCreatorDraft.mockImplementation(async (key, content) => ({
+      template: { key, origin: 'creator', status: 'draft', submittedVersion: null },
+      version: { version: 1, content },
+    }));
+  });
+
+  it('requires authentication before creating a starter', async () => {
+    await request(app).post(path).expect(401, { error: 'unauthorized' });
+    await request(app).post(path).set('Authorization', 'Bearer invalid').expect(401);
+    expect(mocks.createCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([{ roles: ['participant'] }, { roles: ['organizer'] }, { roles: ['admin'] }, { roles: [] }])
+    ('rejects non-Creator capabilities $roles', async ({ roles }) => {
+      mocks.findUserById.mockResolvedValue(user(roles));
+      await request(app).post(path).set('Authorization', bearer).expect(403, { error: 'forbidden' });
+      expect(mocks.createCreatorDraft).not.toHaveBeenCalled();
+    });
+
+  it('rejects a guest even if its saved role set contains Creator', async () => {
+    mocks.findUserById.mockResolvedValue({ ...user(['creator']), isGuest: true });
+    await request(app).post(path).set('Authorization', bearer).expect(403);
+    expect(mocks.createCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['blocked', 'retired'])('rejects an %s Creator', async (accountStatus) => {
+    mocks.findUserById.mockResolvedValue({ ...user(['creator']), accountStatus });
+    await request(app).post(path).set('Authorization', bearer).expect(401);
+    expect(mocks.createCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it('creates server-owned content and uses the authenticated multi-role Creator as owner', async () => {
+    mocks.findUserById.mockResolvedValue(user(['participant', 'admin', 'creator']));
+    const response = await request(app).post(path).set('Authorization', bearer)
+      .send({ key: '  My-Signal  ' }).expect(201);
+    expect(response.body).toMatchObject({ key: 'my-signal', version: 1, origin: 'creator', status: 'draft' });
+    expect(response.body.content.configuration.normalCheckpointCount).toBe(6);
+    expect(response.body.content.checkpoints.filter((entry: any) => entry.role === 'terminal')).toHaveLength(1);
+    expect(mocks.createCreatorDraft).toHaveBeenCalledWith('my-signal', response.body.content, 'user-1');
+    expect(mocks.createCreatorVersion).not.toHaveBeenCalled();
+    expect(mocks.submitCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it('generates distinct valid keys when key is omitted', async () => {
+    const first = await request(app).post(path).set('Authorization', bearer).expect(201);
+    const second = await request(app).post(path).set('Authorization', bearer).send({}).expect(201);
+    expect(first.body.key).toMatch(/^signal-cluj-napoca-[a-f0-9-]{36}$/);
+    expect(second.body.key).not.toBe(first.body.key);
+    expect(first.body.content.key).toBe(first.body.key);
+    expect(second.body.content.key).toBe(second.body.key);
+  });
+
+  it.each([
+    { key: '' }, { key: null }, { key: 42 }, { key: 'bad/key' }, { key: 'x'.repeat(101) },
+    { content: {} }, { createdByUserId: 'another-creator' }, { status: 'approved' }, [],
+  ])('rejects invalid input or client overrides %j', async (body) => {
+    await request(app).post(path).set('Authorization', bearer).send(body)
+      .expect(400, { error: 'invalid_input' });
+    expect(mocks.createCreatorDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['own-draft', 'other-creators-key', 'signal-cluj-napoca'])
+    ('returns the existing conflict response without overwriting %s', async (key) => {
+      mocks.createCreatorDraft.mockRejectedValueOnce(new HuntTemplateKeyConflictError());
+      await request(app).post(path).set('Authorization', bearer).send({ key })
+        .expect(409, { error: 'template_key_conflict' });
+      expect(mocks.createCreatorDraft).toHaveBeenCalledTimes(1);
+      expect(mocks.createCreatorVersion).not.toHaveBeenCalled();
+    });
+});
