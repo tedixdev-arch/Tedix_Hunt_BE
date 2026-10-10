@@ -538,6 +538,121 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
+  it('projects only the pinned approved geography, tracks approval changes and leaves selection/content intact', async () => {
+    const { app, signJwt } = await application();
+    const creatorId = '00000000-0000-0000-0000-000000000002';
+    const auth = `Bearer ${signJwt({ sub: creatorId, type: 'access' })}`;
+    const key = 'approved-geography-fixture';
+    const path = `/api/hunt-templates/${key}/geography`;
+    const configuration = {
+      normalCheckpointCount: 2,
+      checkpointPositions: [
+        { checkpointNumber: 2, name: '  Second  ', latitude: 46.781234, longitude: 23.631234, radiusMeters: 5 },
+        { checkpointNumber: 1, name: 'First', latitude: 46.771234, longitude: 23.621234, radiusMeters: 17 },
+      ],
+      finishPoint: { name: 'Finish', latitude: 46.791234, longitude: 23.641234, radiusMeters: 5 },
+    };
+    const content = {
+      key, version: 3, displayName: 'Same display name', theme: 'Saved theme',
+      mission: { answer: 'private mission' }, checkpoints: [{ question: 'private question', answer: 'private answer' }],
+      scoring: { secret: true }, rewards: { secret: true }, reviewNotes: 'private notes',
+      configuration: {
+        ...configuration, privateAnswers: ['private'],
+        checkpointPositions: configuration.checkpointPositions.map((point) => ({ ...point, challenge: { answer: 'private' } })),
+      },
+    };
+    const later = {
+      ...content, version: 4, configuration: { ...content.configuration, finishPoint: { ...configuration.finishPoint, latitude: 47.123456 } },
+    };
+    let huntId: string | undefined;
+    try {
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
+         VALUES ($1, 'creator', $2, 'draft') RETURNING id`, [key, creatorId],
+      );
+      const templateId = inserted.rows[0].id;
+      for (const version of [1, 3, 4]) {
+        await client.query(
+          `INSERT INTO hunt_template_versions (template_id, version, content, origin, created_by_user_id)
+           VALUES ($1, $2, $3, 'creator', $4)`,
+          [templateId, version, version === 4 ? later : { ...content, version }, creatorId],
+        );
+      }
+      await client.query("UPDATE hunt_templates SET status = 'approved', submitted_version = 3 WHERE id = $1", [templateId]);
+      const before = await client.query('SELECT * FROM hunt_templates WHERE id = $1', [templateId]);
+      const versionsBefore = await client.query(
+        'SELECT * FROM hunt_template_versions WHERE template_id = $1 ORDER BY version', [templateId],
+      );
+      await request(app).get(path).expect(401, { error: 'unauthorized' });
+      const catalog = await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200);
+      expect(catalog.body).toContainEqual({ key, version: 3, displayName: content.displayName, theme: content.theme });
+      await request(app).get(`${path}?version=4`).set('Authorization', auth)
+        .expect(200, { key, version: 3, configuration }); // v4 and historical v1 must not override submitted_version.
+      expect((await client.query('SELECT * FROM hunt_templates WHERE id = $1', [templateId])).rows).toEqual(before.rows);
+      expect((await client.query(
+        'SELECT * FROM hunt_template_versions WHERE template_id = $1 ORDER BY version', [templateId],
+      )).rows).toEqual(versionsBefore.rows);
+
+      const created = await request(app).post('/api/hunts').set('Authorization', auth)
+        .send({ organizationId: '00000000-0000-0000-0000-000000000090', name: 'Geography selection regression' }).expect(201);
+      huntId = created.body.id;
+      const selected = await request(app).patch(`/api/hunts/${huntId}`).set('Authorization', auth)
+        .send({ templateKey: key }).expect(200);
+      expect(selected.body).toMatchObject({ templateKey: key, templateVersion: 3, templateSnapshot: content });
+
+      // Fixture changes the approval authority between requests; the endpoint must not cache v3.
+      await client.query('UPDATE hunt_templates SET submitted_version = 4 WHERE id = $1', [templateId]);
+      const current = await request(app).get(path).set('Authorization', auth).expect(200);
+      expect(current.body).toEqual({ key, version: 4, configuration: { ...configuration, finishPoint: later.configuration.finishPoint } });
+      const currentCatalog = await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200);
+      expect(currentCatalog.body).toContainEqual({ key, version: 4, displayName: content.displayName, theme: content.theme });
+      expect((await client.query('SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [huntId])).rows)
+        .toEqual([{ template_version: 3, template_snapshot: content }]);
+      for (const status of ['draft', 'submitted', 'changes_requested']) {
+        await client.query('UPDATE hunt_templates SET status = $2, submitted_version = $3 WHERE id = $1',
+          [templateId, status, status === 'draft' ? null : 4]);
+        await request(app).get(path).set('Authorization', auth).expect(404, { error: 'not_found' });
+        const hiddenCatalog = await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200);
+        expect(hiddenCatalog.body.some((entry: { key: string }) => entry.key === key)).toBe(false);
+      }
+      await request(app).get('/api/hunt-templates/no-such-template/geography').set('Authorization', auth)
+        .expect(404, { error: 'not_found' });
+    } finally {
+      if (huntId) await client.query('DELETE FROM hunts WHERE id = $1', [huntId]);
+      await client.query('DELETE FROM hunt_templates WHERE key = $1', [key]);
+    }
+  });
+
+  it('uses latest approved platform geography and preserves legacy omissions without Signal fallback', async () => {
+    const { app, signJwt } = await application();
+    const auth = `Bearer ${signJwt({ sub: '00000000-0000-0000-0000-000000000002', type: 'access' })}`;
+    const key = 'platform-geography-fixture';
+    try {
+      const inserted = await client.query<{ id: string }>(
+        "INSERT INTO hunt_templates (key, origin, status) VALUES ($1, 'platform', 'approved') RETURNING id", [key],
+      );
+      const id = inserted.rows[0].id;
+      for (const version of [1, 2]) {
+        await client.query(
+          `INSERT INTO hunt_template_versions (template_id, version, content, origin)
+           VALUES ($1, $2, $3, 'platform')`,
+          [id, version, { key, version, displayName: 'Legacy', theme: 'Legacy', configuration: { duration: 30 } }],
+        );
+      }
+      await request(app).get(`/api/hunt-templates/${key}/geography`).set('Authorization', auth)
+        .expect(200, { key, version: 2, configuration: {} });
+      const partial = { normalCheckpointCount: 7, checkpointPositions: [{ checkpointNumber: 5, name: 'Incomplete' }] };
+      await client.query(
+        `INSERT INTO hunt_template_versions (template_id, version, content, origin)
+         VALUES ($1, 3, $2, 'platform')`, [id, { key, version: 3, configuration: partial }],
+      );
+      await request(app).get(`/api/hunt-templates/${key}/geography`).set('Authorization', auth)
+        .expect(200, { key, version: 3, configuration: partial });
+    } finally {
+      await client.query('DELETE FROM hunt_templates WHERE key = $1', [key]);
+    }
+  });
+
   it('owner-scopes Creator reads and returns each latest version across lifecycle states', async () => {
     const { app, signJwt } = await application();
     const creatorA = '00000000-0000-0000-0000-000000000002';

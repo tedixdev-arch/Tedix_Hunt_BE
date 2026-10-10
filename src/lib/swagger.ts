@@ -206,6 +206,46 @@ const options: swaggerJsdoc.Options = {
             theme: { type: 'string' },
           },
         },
+        HuntTemplateGeographicPoint: {
+          type: 'object', additionalProperties: false,
+          description: 'Only saved fields; missing legacy fields are omitted. Values are not normalized or constrained to current authoring ranges.',
+          properties: {
+            name: { type: 'string' },
+            latitude: { type: 'number' },
+            longitude: { type: 'number' },
+            radiusMeters: { type: 'number' },
+          },
+        },
+        HuntTemplateCheckpointPosition: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            checkpointNumber: { type: 'number', description: 'Stored number, without renumbering.' },
+            name: { type: 'string' },
+            latitude: { type: 'number' },
+            longitude: { type: 'number' },
+            radiusMeters: { type: 'number' },
+          },
+        },
+        HuntTemplateGeography: {
+          type: 'object', additionalProperties: false,
+          required: ['key', 'version', 'configuration'],
+          properties: {
+            key: { type: 'string' },
+            version: { type: 'integer', minimum: 1, description: 'Currently authoritative approved version, resolved by the same query as catalog and Hunt selection.' },
+            configuration: {
+              type: 'object', additionalProperties: false,
+              description: 'Missing geographic fields are omitted; no saved geography yields {}. Partial/empty positions stay partial/empty. Malformed present fields return 409.',
+              properties: {
+                normalCheckpointCount: { type: 'integer' },
+                checkpointPositions: {
+                  type: 'array', description: 'Saved order, numbers and values; no sorting, repairs or inferred positions.',
+                  items: { $ref: '#/components/schemas/HuntTemplateCheckpointPosition' },
+                },
+                finishPoint: { $ref: '#/components/schemas/HuntTemplateGeographicPoint' },
+              },
+            },
+          },
+        },
         CreatorTemplateContent: {
           type: 'object',
           required: ['key', 'version', 'displayName', 'theme', 'mission', 'configuration', 'scoring', 'checkpoints'],
