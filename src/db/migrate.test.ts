@@ -26,6 +26,7 @@ import { templateSubmissionMigration } from './migrations/018_template_submissio
 import { templateApprovalMigration } from './migrations/019_template_approval.js';
 import { templateChangesRequestedMigration } from './migrations/020_template_changes_requested.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
+import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import type { Migration } from './migrations/index.js';
 
 const migrations = [
@@ -313,6 +314,118 @@ describeWithDatabase('PostgreSQL migrations', () => {
       teamRule: 'A = 1, B = 2 ... Z = 26',
     });
     expect(persisted.content.scoring).toEqual(signalClujNapocaV1.scoring);
+  });
+
+  it('round-trips a Creator Signal starter through editing, submission and approval without changing canonical content or Hunts', async () => {
+    const { app, signJwt } = await application();
+    const { User } = await import('../models/User.js');
+    const creatorId = '00000000-0000-0000-0000-000000000002';
+    const other = await User.create({ role: 'creator', email: 'signal-other@example.com' });
+    const adminId = await insertAdmin('signal-review-admin@example.com');
+    const auth = (id: string) => `Bearer ${signJwt({ sub: id, type: 'access' })}`;
+    const creatorAuth = auth(creatorId);
+    const key = 'signal-starter-lifecycle';
+    const starterPath = '/api/creator/templates/starters/signal-cluj-napoca';
+    const draftPath = `/api/creator/templates/${key}`;
+    const keys = [key];
+    const canonicalBefore = await client.query(
+      `SELECT t.*, v.id AS version_id, v.version, v.content, v.created_at AS version_created_at
+       FROM hunt_templates t JOIN hunt_template_versions v ON v.template_id = t.id
+       WHERE t.status = 'approved' ORDER BY t.key, v.version`,
+    );
+    const snapshot = await client.query<{ id: string }>(
+      `INSERT INTO hunts (organization_id, created_by_user_id, name, status,
+                          template_key, template_version, template_snapshot)
+       VALUES ('00000000-0000-0000-0000-000000000090', $1, 'Signal snapshot preservation',
+               'draft', $2, 1, $3) RETURNING id`,
+      [creatorId, signalClujNapocaV1.key, signalClujNapocaV1],
+    );
+    const huntsBefore = await client.query('SELECT * FROM hunts ORDER BY id');
+
+    try {
+      await request(app).post(starterPath).expect(401);
+      await request(app).post(starterPath).set('Authorization', auth('00000000-0000-0000-0000-000000000001'))
+        .expect(403);
+      await request(app).post(starterPath).set('Authorization', auth(adminId)).expect(403);
+      await request(app).post(starterPath).set('Authorization', creatorAuth)
+        .send({ key: signalClujNapocaV1.key }).expect(409, { error: 'template_key_conflict' });
+
+      const concurrent = await Promise.all([1, 2].map(() => request(app).post(starterPath)
+        .set('Authorization', creatorAuth).send({ key })));
+      expect(concurrent.map(({ status }) => status).sort()).toEqual([201, 409]);
+      const created = concurrent.find(({ status }) => status === 201)!;
+      const v1 = createSignalClujNapocaStarter(key);
+      expect(created.body).toEqual({ key, version: 1, origin: 'creator', status: 'draft', content: v1 });
+      const persisted = await client.query(
+        `SELECT t.status, t.origin, t.created_by_user_id, v.version, v.content,
+                v.origin AS version_origin, v.created_by_user_id AS version_creator
+         FROM hunt_templates t JOIN hunt_template_versions v ON v.template_id = t.id WHERE t.key = $1`,
+        [key],
+      );
+      expect(persisted.rows).toEqual([{
+        status: 'draft', origin: 'creator', created_by_user_id: creatorId, version: 1, content: v1,
+        version_origin: 'creator', version_creator: creatorId,
+      }]);
+      await request(app).get(draftPath).set('Authorization', creatorAuth).expect(200, {
+        key, version: 1, origin: 'creator', status: 'draft', submittedVersion: null, content: v1,
+      });
+      await request(app).get(draftPath).set('Authorization', auth(other.id)).expect(404);
+      await request(app).post(`${draftPath}/versions`).set('Authorization', auth(other.id))
+        .send({ content: { ...v1, version: 2 } }).expect(404);
+      await request(app).post(`${draftPath}/submit`).set('Authorization', auth(other.id))
+        .send({ version: 1 }).expect(404);
+      await request(app).post(`${draftPath}/submit`).set('Authorization', creatorAuth)
+        .send({ version: 1 }).expect(400, { error: 'invalid_input' });
+
+      for (let i = 0; i < 2; i++) {
+        const generated = await request(app).post(starterPath).set('Authorization', creatorAuth).expect(201);
+        expect(keys).not.toContain(generated.body.key);
+        keys.push(generated.body.key);
+      }
+      // These are deliberately synthetic test positions, not verified real-world navigation.
+      const v2 = {
+        ...v1, version: 2,
+        configuration: {
+          ...v1.configuration,
+          checkpointPositions: [1, 2, 3, 4, 5, 6].map((checkpointNumber) => ({
+            checkpointNumber, name: `Test point ${checkpointNumber}`, latitude: 0, longitude: 0, radiusMeters: 5,
+          })),
+          finishPoint: { name: 'Test FinishPoint', latitude: 0, longitude: 0, radiusMeters: 5 },
+        },
+      };
+      await request(app).post(`${draftPath}/versions`).set('Authorization', creatorAuth)
+        .send({ content: v2 }).expect(201, { key, version: 2, status: 'draft', origin: 'creator', content: v2 });
+      await request(app).get(draftPath).set('Authorization', creatorAuth).expect(200, {
+        key, version: 2, status: 'draft', origin: 'creator', submittedVersion: null, content: v2,
+      });
+      await request(app).post(`${draftPath}/submit`).set('Authorization', creatorAuth)
+        .send({ version: 1 }).expect(409, { error: 'template_version_not_latest' });
+      await request(app).post(`${draftPath}/submit`).set('Authorization', creatorAuth)
+        .send({ version: 2 }).expect(200, { key, version: 2, status: 'submitted', origin: 'creator', content: v2 });
+      const reviewPath = `/api/admin/templates/review/${key}`;
+      const review = await request(app).get(reviewPath).set('Authorization', auth(adminId)).expect(200);
+      expect(review.body).toMatchObject({ version: 2, content: v2, creator: { id: creatorId } });
+      await request(app).post(`${reviewPath}/approve`).set('Authorization', creatorAuth).expect(403);
+      const approved = await request(app).post(`${reviewPath}/approve`).set('Authorization', auth(adminId)).expect(200);
+      expect(approved.body).toMatchObject({ status: 'approved', version: 2, content: v2 });
+      await request(app).post(`${draftPath}/versions`).set('Authorization', creatorAuth)
+        .send({ content: { ...v2, version: 3 } }).expect(409);
+      const versions = await client.query(
+        `SELECT v.version, v.content FROM hunt_template_versions v
+         JOIN hunt_templates t ON t.id = v.template_id WHERE t.key = $1 ORDER BY v.version`, [key],
+      );
+      expect(versions.rows).toEqual([{ version: 1, content: v1 }, { version: 2, content: v2 }]);
+      expect((await client.query(
+        `SELECT t.*, v.id AS version_id, v.version, v.content, v.created_at AS version_created_at
+         FROM hunt_templates t JOIN hunt_template_versions v ON v.template_id = t.id
+         WHERE t.status = 'approved' AND t.key <> $1 ORDER BY t.key, v.version`, [key],
+      )).rows).toEqual(canonicalBefore.rows);
+      expect((await client.query('SELECT * FROM hunts ORDER BY id')).rows).toEqual(huntsBefore.rows);
+    } finally {
+      await client.query('DELETE FROM hunts WHERE id = $1', [snapshot.rows[0].id]);
+      await client.query('DELETE FROM hunt_templates WHERE key = ANY($1::text[])', [keys]);
+      await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [[other.id, adminId]]);
+    }
   });
 
   it('reads only approved Templates and their latest versions for the catalog', async () => {

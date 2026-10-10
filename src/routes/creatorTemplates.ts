@@ -1,5 +1,7 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
+import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
   HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
@@ -8,6 +10,59 @@ import {
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
+
+/**
+ * @openapi
+ * /api/creator/templates/starters/signal-cluj-napoca:
+ *   post:
+ *     tags: [Creator Templates]
+ *     summary: Create a Creator-owned Signal Cluj geographic draft starter
+ *     description: Copies canonical Signal v1 server-side into six normal gameplay entries and one unnumbered terminal FinishPoint entry. Preserves all puzzles, story and scoring. Fictional route clues are stored in fictionalNavigation with scope=puzzle-only; they are not real walking instructions. Route research and physical verification are pending; positions are empty and geographic finishPoint is omitted. The ordinary version-1 draft must be edited with researched geography before existing submission/review. Ownership comes from the authenticated Creator; no approval or publishing occurs. Omit key for a unique generated key, or supply a key for the existing 409 conflict behavior.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             properties:
+ *               key: { type: string, maxLength: 100, description: Normalized with the existing Creator key rules }
+ *     responses:
+ *       201: { description: Ordinary Creator-owned draft and immutable version 1 created }
+ *       400: { description: Invalid starter input, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: Template key already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.post('/starters/signal-cluj-napoca', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const body = req.body;
+  if (body !== undefined && (typeof body !== 'object' || body === null || Array.isArray(body)
+    || Object.keys(body).some((field) => field !== 'key'))) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  const key = body?.key === undefined
+    ? `signal-cluj-napoca-${randomUUID()}` : normalizeTemplateKey(body.key);
+  if (!key) return res.status(400).json({ error: 'invalid_input' });
+  const content = createSignalClujNapocaStarter(key);
+  if (!isTemplateContentV1(content, key)) return next(new InvalidHuntTemplateContentError());
+
+  try {
+    const result = await HuntTemplates.createCreatorDraft(key, content, req.user!.id);
+    return res.status(201).json({
+      key: result.template.key,
+      version: result.version.version,
+      status: result.template.status,
+      origin: result.template.origin,
+      content: result.version.content,
+    });
+  } catch (error) {
+    if (error instanceof HuntTemplateKeyConflictError) {
+      return res.status(409).json({ error: 'template_key_conflict' });
+    }
+    return next(error);
+  }
+});
 
 /**
  * @openapi
