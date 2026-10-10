@@ -339,6 +339,10 @@ describe('POST /api/creator/templates/starters/signal-cluj-napoca', () => {
       .send({ key: '  My-Signal  ' }).expect(201);
     expect(response.body).toMatchObject({ key: 'my-signal', version: 1, origin: 'creator', status: 'draft' });
     expect(response.body.content.configuration.normalCheckpointCount).toBe(6);
+    expect(response.body.content.routeResearch.proposal.candidates).toHaveLength(7);
+    expect(response.body.content.routeResearch.proposal.physicalVerification).toBe('pending');
+    expect(response.body.content.configuration.checkpointPositions).toEqual([]);
+    expect(response.body.content.configuration).not.toHaveProperty('finishPoint');
     expect(response.body.content.checkpoints.filter((entry: any) => entry.role === 'terminal')).toHaveLength(1);
     expect(mocks.createCreatorDraft).toHaveBeenCalledWith('my-signal', response.body.content, 'user-1');
     expect(mocks.createCreatorVersion).not.toHaveBeenCalled();

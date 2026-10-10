@@ -45,6 +45,10 @@ the existing endpoints and immutable version rules.
 - `starterSource` records canonical key/version/checkpoint digest.
   `routeResearch` marks research, physical verification and walking navigation
   `"pending"`, with an explicit explanation of the fictional content.
+  New drafts also include `routeResearch.proposal`: seven ordered, sourced
+  landmark candidates with exterior arrival descriptions and pending field checks.
+  See [route proposal](signal-cluj-route-proposal.md). Landmark reference pins
+  in that metadata never populate authoritative configuration geography.
 - `createCreatorDraft` atomically inserts the new identity and immutable v1,
   using the authenticated Creator for both provenance fields. Existing unique
   constraints, owner-scoped reads, version locks, submission checks and exact
@@ -52,8 +56,8 @@ the existing endpoints and immutable version rules.
 
 ## Limitations
 
-No GPS coordinates, discovery radii, real walking distances, verified route or
-safety certification are generated. The retained configuration description
+No authoritative GPS coordinates, discovery radii, real walking distances,
+verified route or safety certification are generated. The retained configuration description
 `Outdoor · walkable city centre` belongs to the canonical scenario and does not
 establish physical route verification. Creators must research real locations and
 author six complete geographic positions and one complete FinishPoint in a new
