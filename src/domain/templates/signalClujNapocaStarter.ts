@@ -2,6 +2,7 @@ import {
   SIGNAL_CLUJ_NAPOCA_V1_CHECKPOINTS_SHA256,
   signalClujNapocaV1,
 } from './signalClujNapocaV1.js';
+import { signalClujRouteProposal } from './signalClujRouteProposal.js';
 
 /** A fresh authoring copy only; never persist changes to the canonical platform identity. */
 export const createSignalClujNapocaStarter = (key: string) => {
@@ -16,6 +17,7 @@ export const createSignalClujNapocaStarter = (key: string) => {
       checkpointsSha256: SIGNAL_CLUJ_NAPOCA_V1_CHECKPOINTS_SHA256,
     },
     routeResearch: {
+      proposal: structuredClone(signalClujRouteProposal),
       status: 'pending',
       physicalVerification: 'pending',
       walkingNavigation: 'pending',
