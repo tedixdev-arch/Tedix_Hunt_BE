@@ -297,9 +297,9 @@ describe('POST /api/creator/templates/:key/versions', () => {
   });
 });
 
-describe('POST /api/creator/templates/starters/signal-cluj-napoca', () => {
+describe.each(['signal-cluj-napoca', 'signal-overload-cluj-napoca'])('POST /api/creator/templates/starters/%s', (starterKey) => {
   const app = createApp();
-  const path = '/api/creator/templates/starters/signal-cluj-napoca';
+  const path = `/api/creator/templates/starters/${starterKey}`;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -354,7 +354,8 @@ describe('POST /api/creator/templates/starters/signal-cluj-napoca', () => {
   it('generates distinct valid keys when key is omitted', async () => {
     const first = await request(app).post(path).set('Authorization', bearer).expect(201);
     const second = await request(app).post(path).set('Authorization', bearer).send({}).expect(201);
-    expect(first.body.key).toMatch(/^signal-cluj-napoca-[a-f0-9-]{36}$/);
+    expect(first.body.key).toMatch(new RegExp(`^${starterKey}-[a-f0-9-]{36}$`));
+    expect(first.body.content.starterSource.key).toBe(starterKey);
     expect(second.body.key).not.toBe(first.body.key);
     expect(first.body.content.key).toBe(first.body.key);
     expect(second.body.content.key).toBe(second.body.key);
