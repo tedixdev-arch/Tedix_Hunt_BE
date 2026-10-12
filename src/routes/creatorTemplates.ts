@@ -4,7 +4,7 @@ import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemp
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
-  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplateNotDeletableError, HuntTemplateInUseError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
   InvalidHuntTemplateContentError,
 } from '../models/HuntTemplate.js';
@@ -84,6 +84,39 @@ router.get('/', requireAuth, requireRole('creator'), async (req: AuthRequest, re
     // The model applies creator provenance and ownership before PostgreSQL returns rows.
     return res.json(await HuntTemplates.listCreatorOwnedWithLatestVersion(req.user!.id));
   } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/creator/templates/{key}:
+ *   delete:
+ *     tags: [Creator Templates]
+ *     summary: Permanently delete an unused Creator-owned draft Template
+ *     description: Only draft or changes_requested Templates owned by the authenticated Creator may be deleted. Removes all associated versions transactionally. Any Hunt reference or protected foreign-key dependency prevents deletion. Submitted and approved Templates are immutable. Missing, other-owned and platform keys (including repeated deletion) return the same 404.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     responses:
+ *       204: { description: Template and associated unused versions permanently deleted }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: Template not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: template_not_deletable or template_in_use, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.delete('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const key = req.params.key;
+  if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
+  try {
+    await HuntTemplates.deleteCreatorDraft(key, req.user!.id);
+    return res.status(204).end();
+  } catch (error) {
+    if (error instanceof HuntTemplateNotFoundError) return res.status(404).json({ error: 'not_found' });
+    if (error instanceof HuntTemplateNotDeletableError) {
+      return res.status(409).json({ error: 'template_not_deletable' });
+    }
+    if (error instanceof HuntTemplateInUseError) return res.status(409).json({ error: 'template_in_use' });
     return next(error);
   }
 });
