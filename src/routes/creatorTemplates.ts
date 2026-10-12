@@ -2,6 +2,7 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
+import { createSignalOverloadClujNapocaStarter } from '../domain/templates/signalOverloadClujNapocaStarter.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
   HuntTemplateNotDeletableError, HuntTemplateInUseError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
@@ -45,6 +46,60 @@ router.post('/starters/signal-cluj-napoca', requireAuth, requireRole('creator'),
     ? `signal-cluj-napoca-${randomUUID()}` : normalizeTemplateKey(body.key);
   if (!key) return res.status(400).json({ error: 'invalid_input' });
   const content = createSignalClujNapocaStarter(key);
+  if (!isTemplateContentV1(content, key)) return next(new InvalidHuntTemplateContentError());
+
+  try {
+    const result = await HuntTemplates.createCreatorDraft(key, content, req.user!.id);
+    return res.status(201).json({
+      key: result.template.key,
+      version: result.version.version,
+      status: result.template.status,
+      origin: result.template.origin,
+      content: result.version.content,
+    });
+  } catch (error) {
+    if (error instanceof HuntTemplateKeyConflictError) {
+      return res.status(409).json({ error: 'template_key_conflict' });
+    }
+    return next(error);
+  }
+});
+
+
+/**
+ * @openapi
+ * /api/creator/templates/starters/signal-overload-cluj-napoca:
+ *   post:
+ *     tags: [Creator Templates]
+ *     summary: Create a Creator-owned Signal Overload Cluj Napoca draft starter
+ *     description: Copies the separate Signal Overload v1 definition into an ordinary Creator-owned draft. Six normal entries and one terminal FinishPoint follow the reversed landmark research sequence while preserving puzzle and scoring order. Diagnostic-grid directions are puzzle content only. Geographic positions are empty and finishPoint is omitted pending field verification. No submission, approval, publication or Hunt changes occur. Omit key for a unique generated key; existing keys return 409 without replacement.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             properties:
+ *               key: { type: string, maxLength: 100, description: Normalized with the existing Creator key rules }
+ *     responses:
+ *       201: { description: Ordinary Creator-owned draft and immutable version 1 created }
+ *       400: { description: Invalid starter input, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: Template key already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.post('/starters/signal-overload-cluj-napoca', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const body = req.body;
+  if (body !== undefined && (typeof body !== 'object' || body === null || Array.isArray(body)
+    || Object.keys(body).some((field) => field !== 'key'))) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  const key = body?.key === undefined
+    ? `signal-overload-cluj-napoca-${randomUUID()}` : normalizeTemplateKey(body.key);
+  if (!key) return res.status(400).json({ error: 'invalid_input' });
+  const content = createSignalOverloadClujNapocaStarter(key);
   if (!isTemplateContentV1(content, key)) return next(new InvalidHuntTemplateContentError());
 
   try {
