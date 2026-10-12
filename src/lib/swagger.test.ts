@@ -9,3 +9,10 @@ describe('Swagger reward contract', () => {
     );
   });
 });
+
+
+it('documents Creator draft deletion alongside the existing read', () => {
+  expect(swaggerSpec).toHaveProperty('paths./api/creator/templates/{key}.get');
+  expect(swaggerSpec).toHaveProperty('paths./api/creator/templates/{key}.delete.responses.204');
+  expect(swaggerSpec).toHaveProperty('paths./api/creator/templates/{key}.delete.responses.409');
+});

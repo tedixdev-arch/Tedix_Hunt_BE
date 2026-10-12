@@ -86,6 +86,8 @@ export class HuntTemplateKeyConflictError extends Error {
 }
 
 export class HuntTemplateNotFoundError extends Error {}
+export class HuntTemplateNotDeletableError extends Error {}
+export class HuntTemplateInUseError extends Error {}
 export class HuntTemplateNotEditableError extends Error {}
 export class HuntTemplateNotSubmittableError extends Error {}
 export class HuntTemplateVersionNotLatestError extends Error {}
@@ -114,6 +116,49 @@ const mapVersion = (row: any): PersistedHuntTemplateVersion => ({
 });
 
 export const HuntTemplates = {
+  async deleteCreatorDraft(key: string, creatorUserId: string): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `SELECT * FROM hunt_templates
+         WHERE key = $1 AND origin = 'creator' AND created_by_user_id = $2
+         FOR UPDATE`,
+        [key, creatorUserId],
+      );
+      const template = result.rows[0];
+      if (!template) throw new HuntTemplateNotFoundError();
+      if (template.status !== 'draft' && template.status !== 'changes_requested') {
+        throw new HuntTemplateNotDeletableError();
+      }
+
+      // Hunt references are snapshot fields, not foreign keys. Serialize their writes
+      // until commit so a concurrent INSERT/UPDATE cannot escape the dependency check.
+      // Approved catalog reads cannot select this locked, non-approved Template.
+      await client.query('LOCK TABLE hunts IN SHARE ROW EXCLUSIVE MODE');
+      const dependencies = await client.query(
+        `SELECT 1 FROM hunts
+         WHERE template_key = $1 OR template_snapshot->>'key' = $1 LIMIT 1`,
+        [key],
+      );
+      if (dependencies.rows.length) throw new HuntTemplateInUseError();
+
+      // ON DELETE CASCADE removes all unused draft versions. The deferred review
+      // reference is safe even for changes_requested: both ends disappear together.
+      await client.query('DELETE FROM hunt_templates WHERE id = $1', [template.id]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      // Any restrictive protected-record reference must preserve the whole draft.
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23503') {
+        throw new HuntTemplateInUseError();
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async submitCreatorDraft(
     key: string,
     requestedVersion: number,

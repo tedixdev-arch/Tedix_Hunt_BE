@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findUserById: vi.fn(),
+  deleteCreatorDraft: vi.fn(),
   createCreatorDraft: vi.fn(),
   createCreatorVersion: vi.fn(),
   submitCreatorDraft: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
     ...actual,
     HuntTemplates: {
       ...actual.HuntTemplates,
+      deleteCreatorDraft: mocks.deleteCreatorDraft,
       createCreatorDraft: mocks.createCreatorDraft,
       createCreatorVersion: mocks.createCreatorVersion,
       submitCreatorDraft: mocks.submitCreatorDraft,
@@ -28,7 +30,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
 import {
-  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplateInUseError, HuntTemplateNotDeletableError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplateVersionNotLatestError,
   InvalidHuntTemplateContentError,
 } from '../models/HuntTemplate.js';
@@ -375,4 +377,49 @@ describe('POST /api/creator/templates/starters/signal-cluj-napoca', () => {
       expect(mocks.createCreatorDraft).toHaveBeenCalledTimes(1);
       expect(mocks.createCreatorVersion).not.toHaveBeenCalled();
     });
+});
+
+
+describe('Creator draft deletion API', () => {
+  const app = createApp();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.deleteCreatorDraft.mockReset();
+    mocks.findUserById.mockResolvedValue(user(['creator']));
+  });
+  it('deletes as the authenticated owner and returns an empty 204', async () => {
+    const response = await request(app).delete('/api/creator/templates/algebra-trail')
+      .set('Authorization', bearer).expect(204);
+    expect(response.text).toBe('');
+    expect(mocks.deleteCreatorDraft).toHaveBeenCalledWith('algebra-trail', 'user-1');
+  });
+  it.each(['missing', 'other-owner', 'platform'])('hides %s Templates', async (key) => {
+    mocks.deleteCreatorDraft.mockRejectedValue(new HuntTemplateNotFoundError());
+    await request(app).delete(`/api/creator/templates/${key}`).set('Authorization', bearer)
+      .expect(404, { error: 'not_found' });
+  });
+  it.each([
+    [new HuntTemplateNotDeletableError(), 'template_not_deletable'],
+    [new HuntTemplateInUseError(), 'template_in_use'],
+  ])('returns a stable conflict', async (error, code) => {
+    mocks.deleteCreatorDraft.mockRejectedValue(error);
+    await request(app).delete('/api/creator/templates/algebra-trail').set('Authorization', bearer)
+      .expect(409, { error: code });
+  });
+  it('returns 404 for a repeated deletion', async () => {
+    mocks.deleteCreatorDraft.mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new HuntTemplateNotFoundError());
+    await request(app).delete('/api/creator/templates/algebra-trail').set('Authorization', bearer).expect(204);
+    await request(app).delete('/api/creator/templates/algebra-trail').set('Authorization', bearer)
+      .expect(404, { error: 'not_found' });
+  });
+  it('requires authentication', async () => {
+    await request(app).delete('/api/creator/templates/algebra-trail').expect(401);
+    expect(mocks.deleteCreatorDraft).not.toHaveBeenCalled();
+  });
+  it.each([['participant'], ['organizer'], ['admin']])('requires Creator capability: %s', async (role) => {
+    mocks.findUserById.mockResolvedValue(user([role]));
+    await request(app).delete('/api/creator/templates/algebra-trail').set('Authorization', bearer).expect(403);
+    expect(mocks.deleteCreatorDraft).not.toHaveBeenCalled();
+  });
 });

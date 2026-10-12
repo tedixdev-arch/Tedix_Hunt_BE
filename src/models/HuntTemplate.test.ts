@@ -5,7 +5,7 @@ const connect = vi.hoisted(() => vi.fn());
 vi.mock('../lib/postgres.js', () => ({ pool: { query, connect } }));
 
 import {
-  HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
+  HuntTemplateInUseError, HuntTemplateNotDeletableError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
   InvalidHuntTemplateContentError, HuntTemplateNotReviewableError,
 } from './HuntTemplate.js';
@@ -440,5 +440,62 @@ describe('Admin submitted Creator Template review persistence', () => {
 
     query.mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.findSubmittedCreatorReviewByKey('draft')).resolves.toBeNull();
+  });
+});
+
+
+describe('transactional Creator draft deletion', () => {
+  let client: { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+  beforeEach(() => {
+    client = { query: vi.fn().mockResolvedValue({ rows: [] }), release: vi.fn() };
+    connect.mockResolvedValue(client);
+  });
+  const owned = { id: 'template-1', key: 'draft-key', status: 'draft' };
+  it.each(['draft', 'changes_requested'])('deletes unused %s with cascading versions', async (status) => {
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ ...owned, status }] });
+    await expect(HuntTemplates.deleteCreatorDraft('draft-key', 'creator-1')).resolves.toBeUndefined();
+    expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
+      'BEGIN', 'SELECT', 'LOCK', 'SELECT', 'DELETE', 'COMMIT',
+    ]);
+    expect(client.query.mock.calls[1][0]).toContain("origin = 'creator' AND created_by_user_id = $2");
+    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[1][1]).toEqual(['draft-key', 'creator-1']);
+    expect(client.query.mock.calls[2][0]).toBe('LOCK TABLE hunts IN SHARE ROW EXCLUSIVE MODE');
+    expect(client.query.mock.calls[3][0]).toContain("template_key = $1 OR template_snapshot->>'key' = $1");
+    expect(client.query.mock.calls[4][1]).toEqual(['template-1']);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+  it('rejects absent or non-owned rows without deleting', async () => {
+    await expect(HuntTemplates.deleteCreatorDraft('private', 'creator-1')).rejects.toBeInstanceOf(HuntTemplateNotFoundError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    expect(client.query).toHaveBeenCalledTimes(3);
+  });
+  it.each(['submitted', 'approved'])('preserves %s Templates', async (status) => {
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ ...owned, status }] });
+    await expect(HuntTemplates.deleteCreatorDraft('draft-key', 'creator-1')).rejects.toBeInstanceOf(HuntTemplateNotDeletableError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    expect(client.query).toHaveBeenCalledTimes(3);
+  });
+  it('preserves any Hunt dependency regardless of Hunt status or version', async () => {
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [owned] })
+      .mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
+    await expect(HuntTemplates.deleteCreatorDraft('draft-key', 'creator-1')).rejects.toBeInstanceOf(HuntTemplateInUseError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    expect(client.query.mock.calls.some(([sql]) => String(sql).startsWith('DELETE'))).toBe(false);
+  });
+  it.each(['delete', 'commit'])('rolls back a protected-record failure at %s', async (stage) => {
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [owned] })
+      .mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
+    if (stage === 'commit') client.query.mockResolvedValueOnce({ rows: [] });
+    client.query.mockRejectedValueOnce({ code: '23503' });
+    await expect(HuntTemplates.deleteCreatorDraft('draft-key', 'creator-1')).rejects.toBeInstanceOf(HuntTemplateInUseError);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+  it('propagates unexpected failures after rollback', async () => {
+    const error = new Error('database unavailable');
+    client.query.mockResolvedValueOnce({ rows: [] }).mockRejectedValueOnce(error);
+    await expect(HuntTemplates.deleteCreatorDraft('draft-key', 'creator-1')).rejects.toBe(error);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
 });
