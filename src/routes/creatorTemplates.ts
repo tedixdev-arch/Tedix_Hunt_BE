@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import { createSignalOverloadClujNapocaStarter } from '../domain/templates/signalOverloadClujNapocaStarter.js';
+import { listStarterCatalog } from '../domain/templates/starterCatalog.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import {
   HuntTemplateNotDeletableError, HuntTemplateInUseError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
@@ -11,6 +12,41 @@ import {
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
+
+/**
+ * @openapi
+ * /api/creator/templates/starters:
+ *   get:
+ *     tags: [Creator Templates]
+ *     summary: List available Creator starter Templates
+ *     description: Read-only fixed starter registry. Known creation dates sort newest first, unknown dates last, with ascending stable key as tie-breaker. Both current starter dates are unknown. Dates describe verified starter creation or registration, never platform installation or Creator copying. No private drafts are included.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Available starters in deterministic creation-date order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [items]
+ *               properties:
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [key, displayName, description, createdAt, creationPath]
+ *                     properties:
+ *                       key: { type: string, description: Stable source identity }
+ *                       displayName: { type: string }
+ *                       description: { type: string }
+ *                       createdAt: { type: string, format: date-time, nullable: true, description: Verified starter creation or registration time; null when unknown }
+ *                       creationPath: { type: string, description: Existing POST endpoint for creating an ordinary Creator-owned draft }
+ *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ */
+router.get('/starters', requireAuth, requireRole('creator'), (_req, res) => {
+  return res.json({ items: listStarterCatalog() });
+});
 
 /**
  * @openapi

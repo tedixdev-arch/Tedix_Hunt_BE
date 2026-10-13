@@ -29,6 +29,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
 
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
+import { pool } from '../lib/postgres.js';
 import {
   HuntTemplateInUseError, HuntTemplateNotDeletableError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplateVersionNotLatestError,
@@ -53,6 +54,59 @@ const user = (roles: string[]) => ({
   name: 'Person', isGuest: false, tedixUserId: null, accountStatus: 'active', createdAt: new Date(),
 });
 const bearer = `Bearer ${signJwt({ sub: 'user-1', type: 'access' })}`;
+
+describe('GET /api/creator/templates/starters', () => {
+  const app = createApp();
+  const path = '/api/creator/templates/starters';
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findUserById.mockResolvedValue(user(['creator']));
+  });
+
+  it('lists both fixed starters for a Creator without reading private drafts or changing persistence', async () => {
+    const query = vi.spyOn(pool, 'query');
+    const connect = vi.spyOn(pool, 'connect');
+    try {
+      mocks.findUserById.mockResolvedValue(user(['participant', 'creator']));
+      const first = await request(app).get(path).set('Authorization', bearer).expect(200);
+      expect(first.body.items).toHaveLength(2);
+      expect(first.body.items.map((entry: any) => [entry.key, entry.displayName, entry.createdAt, entry.creationPath]))
+        .toEqual([
+          ['signal-cluj-napoca', 'Signal: Cluj Napoca', null, `${path}/signal-cluj-napoca`],
+          ['signal-overload-cluj-napoca', 'Signal Overload - Cluj Napoca', null, `${path}/signal-overload-cluj-napoca`],
+        ]);
+      const second = await request(app).get(path).set('Authorization', bearer).expect(200);
+      expect(second.body).toEqual(first.body);
+      for (const [name, mock] of Object.entries(mocks)) {
+        if (name !== 'findUserById') expect(mock).not.toHaveBeenCalled();
+      }
+      // Authentication is mocked above; catalog access must issue no SQL at all,
+      // including writes to Templates, immutable versions, Hunts or snapshots.
+      expect(query).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      query.mockRestore();
+      connect.mockRestore();
+    }
+  });
+
+  it('rejects absent or invalid authentication', async () => {
+    await request(app).get(path).expect(401);
+    await request(app).get(path).set('Authorization', 'Bearer invalid').expect(401);
+  });
+  it.each([{ roles: ['participant'] }, { roles: ['organizer'] }, { roles: ['admin'] }, { roles: [] }])('rejects non-Creator roles $roles', async ({ roles }) => {
+    mocks.findUserById.mockResolvedValue(user(roles));
+    await request(app).get(path).set('Authorization', bearer).expect(403);
+  });
+  it('rejects guests with a saved Creator role', async () => {
+    mocks.findUserById.mockResolvedValue({ ...user(['creator']), isGuest: true });
+    await request(app).get(path).set('Authorization', bearer).expect(403);
+  });
+  it.each(['blocked', 'retired'])('rejects %s Creators', async (accountStatus) => {
+    mocks.findUserById.mockResolvedValue({ ...user(['creator']), accountStatus });
+    await request(app).get(path).set('Authorization', bearer).expect(401);
+  });
+});
 
 describe('Creator-owned Template reads', () => {
   const app = createApp();
