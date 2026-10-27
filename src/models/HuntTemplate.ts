@@ -44,6 +44,7 @@ export interface CreatorOwnedHuntTemplateVersion {
   version: number;
   status: HuntTemplateStatus;
   origin: 'creator';
+  category?: HuntTemplateCategory | null;
   submittedVersion: number | null;
   content: unknown;
 }
@@ -53,6 +54,7 @@ export interface AdminTemplateReview {
   version: number;
   status: 'submitted';
   origin: 'creator';
+  category?: HuntTemplateCategory | null;
   creator: { id: string; name: string | null; email: string | null };
   content: unknown;
 }
@@ -193,9 +195,10 @@ export const HuntTemplates = {
       if (!latest || latest.version !== requestedVersion) {
         throw new HuntTemplateVersionNotLatestError();
       }
-      // Only the submission boundary requires a complete 1..N geographic structure. Draft
-      // versions stay progressively authorable, while legacy content without the contract works.
-      if (!isTemplateContentSubmittable(latest.content)) {
+      // Classified submissions also recheck the exact snapshot against the framework contract.
+      // Legacy submission compatibility and immutable version pinning remain unchanged.
+      if ((templateResult.rows[0].category != null && !isTemplateContent(latest.content, key, latest.version))
+        || !isTemplateContentSubmittable(latest.content, templateResult.rows[0].category ?? null)) {
         throw new InvalidHuntTemplateContentError();
       }
 
@@ -248,9 +251,9 @@ export const HuntTemplates = {
       // Versions are complete immutable snapshots; existing rows are never updated.
       const inserted = await client.query(
         `INSERT INTO hunt_template_versions
-           (template_id, version, content, origin, created_by_user_id)
-         VALUES ($1, $2, $3, 'creator', $4) RETURNING *`,
-        [template.id, nextVersion, content, creatorUserId],
+           (template_id, version, content, origin, created_by_user_id, category)
+         VALUES ($1, $2, $3, 'creator', $4, $5) RETURNING *`,
+        [template.id, nextVersion, content, creatorUserId, template.category],
       );
       await client.query('COMMIT');
       return { template, version: mapVersion(inserted.rows[0]) };
@@ -266,22 +269,25 @@ export const HuntTemplates = {
     key: string,
     content: unknown,
     creatorUserId: string,
+    category?: HuntTemplateCategory,
   ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
+    if ((category !== undefined && category !== 'universal' && category !== 'local')
+      || !isTemplateContent(content, key, 1)) throw new InvalidHuntTemplateContentError();
     const client = await pool.connect();
     try {
       // Identity and immutable version 1 are one persistence operation: neither may exist alone.
       await client.query('BEGIN');
       const templateResult = await client.query(
-        `INSERT INTO hunt_templates (key, origin, created_by_user_id, status)
-         VALUES ($1, 'creator', $2, 'draft') RETURNING *`,
-        [key, creatorUserId],
+        `INSERT INTO hunt_templates (key, origin, created_by_user_id, status, category)
+         VALUES ($1, 'creator', $2, 'draft', $3) RETURNING *`,
+        [key, creatorUserId, category ?? null],
       );
       const template = mapTemplate(templateResult.rows[0]);
       const versionResult = await client.query(
         `INSERT INTO hunt_template_versions
-           (template_id, version, content, origin, created_by_user_id)
-         VALUES ($1, 1, $2, 'creator', $3) RETURNING *`,
-        [template.id, content, creatorUserId],
+           (template_id, version, content, origin, created_by_user_id, category)
+         VALUES ($1, 1, $2, 'creator', $3, $4) RETURNING *`,
+        [template.id, content, creatorUserId, template.category],
       );
       const version = mapVersion(versionResult.rows[0]);
       await client.query('COMMIT');
@@ -369,7 +375,7 @@ export const HuntTemplates = {
 
       // submitted_version is the approved artifact; never substitute the latest version.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, v.version, v.content,
+        `SELECT t.key, t.origin, t.category, v.version, v.content,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
@@ -426,7 +432,7 @@ export const HuntTemplates = {
 
       // Resolve only the pinned review artifact; a newer version must never replace it.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, v.version, v.content,
+        `SELECT t.key, t.origin, t.category, v.version, v.content,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
@@ -509,7 +515,7 @@ export const HuntTemplates = {
   ): Promise<CreatorOwnedHuntTemplateVersion[]> {
     // Ownership belongs in SQL so private rows never leave PostgreSQL for route-level filtering.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.submitted_version, latest.version, latest.content
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content
        FROM hunt_templates t
        JOIN LATERAL (
          SELECT version, content
@@ -522,8 +528,8 @@ export const HuntTemplates = {
        ORDER BY t.key ASC`,
       [creatorUserId],
     );
-    return rows.map(({ key, version, status, origin, submitted_version, content }) => ({
-      key, version, status, origin, submittedVersion: submitted_version ?? null, content,
+    return rows.map(({ key, version, status, origin, category, submitted_version, content }) => ({
+      key, version, status, origin, ...(category ? { category } : {}), submittedVersion: submitted_version ?? null, content,
     }));
   },
 
@@ -532,7 +538,7 @@ export const HuntTemplates = {
     creatorUserId: string,
   ): Promise<CreatorOwnedHuntTemplateVersion | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.submitted_version, latest.version, latest.content
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content
        FROM hunt_templates t
        JOIN LATERAL (
          SELECT version, content
@@ -547,7 +553,7 @@ export const HuntTemplates = {
     return rows[0]
       ? {
           key: rows[0].key, version: rows[0].version, status: rows[0].status,
-          origin: rows[0].origin, submittedVersion: rows[0].submitted_version ?? null,
+          origin: rows[0].origin, ...(rows[0].category ? { category: rows[0].category } : {}), submittedVersion: rows[0].submitted_version ?? null,
           content: rows[0].content,
         }
       : null;
@@ -556,7 +562,7 @@ export const HuntTemplates = {
   async listSubmittedCreatorReviews(): Promise<AdminTemplateReview[]> {
     // Review is pinned to submitted_version. It must never drift to a newer version.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, v.version, v.content,
+      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
@@ -573,7 +579,7 @@ export const HuntTemplates = {
 
   async findSubmittedCreatorReviewByKey(key: string): Promise<AdminTemplateReview | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, v.version, v.content,
+      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
@@ -613,6 +619,7 @@ const mapAdminReview = (row: any): AdminTemplateReview => ({
   version: row.version,
   status: row.status,
   origin: row.origin,
+  ...(row.category ? { category: row.category } : {}),
   creator: { id: row.creator_id, name: row.creator_name, email: row.creator_email },
   content: row.content,
 });

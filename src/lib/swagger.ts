@@ -264,7 +264,7 @@ const options: swaggerJsdoc.Options = {
                 },
                 finishPoint: {
                   type: 'object', additionalProperties: false,
-                  description: 'Exactly one FinishPoint, separate from checkpointPositions and normalCheckpointCount, with no checkpointNumber. Optional in drafts; required when submitting geographic normal checkpoints. Supplied objects must be complete. Legacy content without geographic normal checkpoints remains submittable. Values are preserved exactly; the backend never inserts the FE authoring default radius of 5 m.',
+                  description: 'Exactly one FinishPoint, separate from checkpointPositions and normalCheckpointCount, with no checkpointNumber. Optional in drafts and Universal submissions; required for Local and legacy geographic submissions. Supplied objects must be complete. Legacy content without geographic normal checkpoints remains submittable. Values are preserved exactly; the backend never inserts the FE authoring default radius of 5 m.',
                   required: ['name', 'latitude', 'longitude', 'radiusMeters'],
                   properties: {
                     name: { type: 'string', minLength: 1, maxLength: 100, description: 'Must contain a non-whitespace character.' },
@@ -275,7 +275,7 @@ const options: swaggerJsdoc.Options = {
                 },
                 checkpointPositions: {
                   type: 'array',
-                  description: 'Geographic positions for normal checkpoints only; complete at submission.',
+                  description: 'Geographic positions for normal checkpoints only; complete at Local and legacy geographic submission; optional for Universal.',
                   items: {
                     type: 'object', additionalProperties: false,
                     required: ['checkpointNumber', 'name', 'latitude', 'longitude', 'radiusMeters'],
@@ -309,6 +309,7 @@ const options: swaggerJsdoc.Options = {
               },
             },
           },
+          description: 'Complete framework snapshot. Category, ownership and source provenance are authoritative metadata and forbidden as top-level content fields. Existing typed gameplay validation applies when count, positions or explicit gameplay roles are supplied. Universal may omit route geography; counted gameplay still requires complete numbered entries and one terminal at submission. Local submission requires count, all positions, FinishPoint and matching gameplay. Legacy behavior remains unchanged.',
           additionalProperties: true,
         },
         CreatorOwnedTemplate: {
@@ -319,6 +320,7 @@ const options: swaggerJsdoc.Options = {
             version: { type: 'integer', minimum: 1 },
             status: { type: 'string', enum: ['draft', 'submitted', 'changes_requested', 'approved'] },
             origin: { type: 'string', enum: ['creator'] },
+            category: { type: 'string', enum: ['universal', 'local'], description: 'Immutable category; omitted for legacy unclassified Templates.' },
             submittedVersion: {
               type: 'integer', minimum: 1, nullable: true,
               description: 'Exact immutable version currently submitted for review, or null.',
@@ -335,6 +337,7 @@ const options: swaggerJsdoc.Options = {
             version: { type: 'integer', minimum: 1, description: 'Exact immutable submitted_version.' },
             status: { type: 'string', enum: ['submitted', 'approved', 'changes_requested'] },
             origin: { type: 'string', enum: ['creator'] },
+            category: { type: 'string', enum: ['universal', 'local'], description: 'Immutable category; omitted for legacy unclassified Templates.' },
             creator: {
               type: 'object', required: ['id', 'name', 'email'],
               properties: {

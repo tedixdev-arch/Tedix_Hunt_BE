@@ -214,7 +214,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
       'BEGIN', 'INSERT', 'INSERT', 'COMMIT',
     ]);
-    expect(client.query.mock.calls[2][1]).toEqual([templateRow.id, content, creatorId]);
+    expect(client.query.mock.calls[2][1]).toEqual([templateRow.id, content, creatorId, null]);
     expect(client.release).toHaveBeenCalled();
   });
 
@@ -256,7 +256,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
     expect(client.query.mock.calls[1][0]).toContain("origin = 'creator'");
     expect(client.query.mock.calls[1][1]).toEqual([templateRow.key, creatorId]);
-    expect(client.query.mock.calls[3][1]).toEqual([templateRow.id, 2, v2, creatorId]);
+    expect(client.query.mock.calls[3][1]).toEqual([templateRow.id, 2, v2, creatorId, null]);
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
       'BEGIN', 'SELECT', 'SELECT', 'INSERT', 'COMMIT',
     ]);

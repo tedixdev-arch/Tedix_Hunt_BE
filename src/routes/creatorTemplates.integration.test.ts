@@ -1,0 +1,182 @@
+import { randomUUID } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
+import { Pool } from 'pg';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runMigrations } from '../db/migrate.js';
+import type { Migration } from '../db/migrations/types.js';
+
+const testUrl = process.env.TEST_DATABASE_URL;
+const databaseName = `c2_${randomUUID().replaceAll('-', '')}`;
+const suite = testUrl ? describe : describe.skip;
+const root = '/api/creator/templates';
+const snapshot = (key: string, version = 1, geographic = false) => ({
+  key, version, displayName: 'Scratch puzzle', theme: 'Explore',
+  mission: { name: 'Find the code' }, scoring: { startingScore: 100 },
+  configuration: geographic ? {
+    normalCheckpointCount: 1,
+    checkpointPositions: [{ checkpointNumber: 1, name: 'Square', latitude: 46.77, longitude: 23.62, radiusMeters: 30 }],
+    finishPoint: { name: 'Finish', latitude: 46.78, longitude: 23.63, radiusMeters: 5 },
+  } : { durationMinutes: 45 },
+  checkpoints: [{ checkpoint: 1, kind: 'hidden-rule' }, { role: 'terminal', navigationMode: 'none' }],
+});
+
+type Actor = { id: string; auth: string };
+suite('C2 scratch authoring against disposable PostgreSQL', () => {
+  const admin = new Pool({ connectionString: testUrl });
+  let db: Pool;
+  let applicationPool: Pool | undefined;
+  let created = false;
+  let app: ReturnType<typeof import('../app.js').createApp>;
+  let signJwt: typeof import('../lib/jwt.js').signJwt;
+  let model: typeof import('../models/HuntTemplate.js');
+  let owner: Actor;
+  let other: Actor;
+  let reviewer: Actor;
+  const actor = async (roles: string[], options: { guest?: boolean; status?: string } = {}): Promise<Actor> => {
+    const id = (await db.query(`INSERT INTO users (email, role, is_guest, account_status)
+      VALUES ($1, 'participant', $2, $3) RETURNING id`,
+    [`${randomUUID()}@example.invalid`, options.guest ?? false, options.status ?? 'active'])).rows[0].id;
+    for (const role of roles) await db.query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [id, role]);
+    return { id, auth: `Bearer ${signJwt({ sub: id, type: 'access', role: 'creator' })}` };
+  };
+  const post = (path: string, body: object, who = owner) => request(app).post(path).set('Authorization', who.auth).send(body);
+  const create = async (category?: string, geographic = category === 'local', who = owner) => {
+    const key = `c2-${randomUUID()}`;
+    const content = snapshot(key, 1, geographic);
+    const response = await post(root, { key, content, ...(category ? { category } : {}) }, who).expect(201);
+    return { key, content, response };
+  };
+  beforeAll(async () => {
+    await admin.query(`CREATE DATABASE "${databaseName}"`); created = true;
+    const url = new URL(testUrl!); url.pathname = `/${databaseName}`;
+    db = new Pool({ connectionString: url.toString() });
+    const client = await db.connect();
+    try {
+      await client.query(await readFile(new URL('../db/pre_migration_baseline.sql', import.meta.url), 'utf8'));
+      const directory = new URL('../db/migrations/', import.meta.url);
+      const migrations: Migration[] = [];
+      for (const filename of (await readdir(directory)).filter(name => /^\d{3}_.*\.ts$/.test(name)).sort()) {
+        migrations.push((await import(new URL(filename, directory).href)).default);
+      }
+      await runMigrations(client, migrations);
+    } finally { client.release(); }
+    const { environment } = await import('../config/environment.js'); environment.databaseUrl = url.toString();
+    applicationPool = (await import('../lib/postgres.js')).pool;
+    app = (await import('../app.js')).createApp(); signJwt = (await import('../lib/jwt.js')).signJwt;
+    model = await import('../models/HuntTemplate.js');
+    owner = await actor(['creator', 'admin']); other = await actor(['creator']); reviewer = await actor(['admin']);
+  }, 30_000);
+  afterAll(async () => {
+    await applicationPool?.end(); await db?.end();
+    if (created) await admin.query(`DROP DATABASE "${databaseName}"`);
+    await admin.end();
+  });
+
+  it.each(['universal', 'local'])('creates, saves, pins, reviews and isolates %s', async category => {
+    const { key, content, response } = await create(category);
+    expect(response.body.category).toBe(category);
+    const id = (await model.HuntTemplates.findByKey(key))!.id;
+    const v1 = await model.HuntTemplates.getVersion(id, 1);
+    const v2 = { ...content, version: 2, displayName: 'Saved revision' };
+    await post(`${root}/${key}/versions`, { content: v2 }).expect(201);
+    expect(await model.HuntTemplates.getVersion(id, 1)).toEqual(v1);
+    expect((await db.query(`SELECT category, origin, created_by_user_id FROM hunt_template_versions
+      WHERE template_id=$1 ORDER BY version`, [id])).rows).toEqual([1, 2].map(() => ({ category, origin: 'creator', created_by_user_id: owner.id })));
+    expect((await db.query('SELECT source_template_id, source_version, source_creator_user_id, source_review_decision FROM hunt_templates WHERE id=$1', [id])).rows[0])
+      .toEqual({ source_template_id: null, source_version: null, source_creator_user_id: null, source_review_decision: null });
+    await request(app).get(`${root}/${key}`).set('Authorization', other.auth).expect(404);
+    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }, other).expect(404);
+    await post(`${root}/${key}/submit`, { version: 2 }, other).expect(404);
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(409);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    const review = await request(app).get(`/api/admin/templates/review/${key}`).set('Authorization', reviewer.auth).expect(200);
+    expect(review.body).toMatchObject({ category, version: 2, content: v2 });
+    await post(`/api/admin/templates/review/${key}/approve`, {}).expect(403);
+    expect((await db.query('SELECT * FROM hunt_template_reviews WHERE template_id=$1', [id])).rows).toHaveLength(0);
+    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    expect((await db.query('SELECT version, reviewer_user_id, decision FROM hunt_template_reviews WHERE template_id=$1', [id])).rows)
+      .toEqual([{ version: 2, reviewer_user_id: reviewer.id, decision: 'approved' }]);
+    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }).expect(409);
+    expect((await model.HuntTemplates.findByKey(key))?.submittedVersion).toBe(2);
+    expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
+    const catalog = await request(app).get('/api/hunt-templates').set('Authorization', owner.auth).expect(200);
+    expect(catalog.body.some((item: { key: string }) => item.key === key)).toBe(false);
+    await request(app).get(`/api/hunt-templates/${key}/geography`).set('Authorization', owner.auth).expect(404);
+    await db.query("INSERT INTO user_roles VALUES ($1, 'organizer') ON CONFLICT DO NOTHING", [owner.id]);
+    const organization = (await db.query("INSERT INTO organizations (name, owner_id) VALUES ('C2', $1) RETURNING id", [owner.id])).rows[0].id;
+    const hunt = (await db.query("INSERT INTO hunts (organization_id, created_by_user_id, name, status) VALUES ($1, $2, 'C2', 'draft') RETURNING id", [organization, owner.id])).rows[0].id;
+    await db.query("INSERT INTO hunt_roles VALUES ($1, $2, 'organizer')", [hunt, owner.id]);
+    await request(app).patch(`/api/hunts/${hunt}`).set('Authorization', owner.auth).send({ templateKey: key }).expect(400);
+    expect((await db.query('SELECT template_key FROM hunts WHERE id=$1', [hunt])).rows[0].template_key).toBeNull();
+  });
+
+  it('submits Universal counted gameplay without route geography but keeps gameplay completeness', async () => {
+    const { key, content } = await create('universal');
+    await post(`${root}/${key}/versions`, { content: { ...content, version: 2, configuration: { normalCheckpointCount: 1 } } }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    const incomplete = await create('universal');
+    await post(`${root}/${incomplete.key}/versions`, { content: { ...incomplete.content, version: 2, configuration: { normalCheckpointCount: 2 } } }).expect(201);
+    await post(`${root}/${incomplete.key}/submit`, { version: 2 }).expect(400);
+  });
+
+  it.each(['missing-contract', 'missing-positions', 'missing-finish', 'missing-gameplay'])('rejects incomplete Local %s without pinning', async missing => {
+    const key = `c2-${randomUUID()}`;
+    const content: any = snapshot(key, 1, true);
+    if (missing === 'missing-contract') content.configuration = { durationMinutes: 45 };
+    if (missing === 'missing-positions') content.configuration.checkpointPositions = [];
+    if (missing === 'missing-finish') delete content.configuration.finishPoint;
+    if (missing === 'missing-gameplay') content.checkpoints = [{ checkpoint: 1 }];
+    await post(root, { key, category: 'local', content }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(400);
+    expect(await model.HuntTemplates.findByKey(key)).toMatchObject({ status: 'draft', submittedVersion: null });
+  });
+
+  it('rejects metadata injection, invalid category, malformed geography and unsupported gameplay', async () => {
+    const { key, content } = await create('local');
+    for (const metadata of [{ category: 'universal' }, { createdByUserId: other.id }, { sourceTemplateId: key }, { source_version: 1 }, { origin: 'platform' }]) {
+      await post(`${root}/${key}/versions`, { content: { ...content, version: 2 }, ...metadata }).expect(400);
+      await post(`${root}/${key}/versions`, { content: { ...content, version: 2, ...metadata } }).expect(400);
+      const newKey = `c2-${randomUUID()}`;
+      await post(root, { key: newKey, category: 'local', content: { ...content, key: newKey, ...metadata } }).expect(400);
+    }
+    for (const category of [null, 'other', '', 1]) {
+      await post(root, { key, content, category }).expect(400);
+    }
+    const newKey = `c2-${randomUUID()}`;
+    await post(root, { key: newKey, category: 'universal', content: { ...snapshot(newKey), configuration: { normalCheckpointCount: 1 }, checkpoints: [{ kind: 'unsupported' }] } }).expect(400);
+    await post(`${root}/${key}/versions`, { content: { ...content, version: 2, configuration: { normalCheckpointCount: 1, finishPoint: { latitude: 999 } } } }).expect(400);
+    expect((await model.HuntTemplates.getLatestVersion((await model.HuntTemplates.findByKey(key))!.id))?.version).toBe(1);
+  });
+
+  it('uses persisted active Creator capabilities rather than JWT or primary-role claims', async () => {
+    for (const roles of [[], ['participant'], ['admin'], ['organizer']]) {
+      const who = await actor(roles); const key = `c2-${randomUUID()}`;
+      await post(root, { key, category: 'universal', content: snapshot(key) }, who).expect(403);
+    }
+    for (const options of [{ guest: true }, { status: 'blocked' }, { status: 'retired' }]) {
+      const who = await actor(['creator'], options); const key = `c2-${randomUUID()}`;
+      await post(root, { key, category: 'local', content: snapshot(key) }, who).expect(options.guest ? 403 : 401);
+    }
+    const who = await actor(['creator']); await create('universal', false, who);
+    await db.query('DELETE FROM user_roles WHERE user_id=$1', [who.id]);
+    const key = `c2-${randomUUID()}`;
+    await post(root, { key, category: 'universal', content: snapshot(key) }, who).expect(403);
+    await request(app).post(root).send({ key, category: 'local', content: snapshot(key) }).expect(401);
+  });
+
+  it('keeps omitted-category scratch and Signal starters unclassified', async () => {
+    const { key } = await create();
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
+    expect((await model.HuntTemplates.findByKey(key))?.category).toBeNull();
+    for (const starter of ['signal-cluj-napoca', 'signal-overload-cluj-napoca']) {
+      const response = await post(`${root}/starters/${starter}`, {}).expect(201);
+      expect(response.body).not.toHaveProperty('category');
+      const t = (await model.HuntTemplates.findByKey(response.body.key))!;
+      expect(t.category).toBeNull();
+      expect((await model.HuntTemplates.getVersion(t.id, 1))?.category).toBeNull();
+    }
+    expect((await model.HuntTemplates.findByKey('signal-cluj-napoca'))?.category).toBeNull();
+    expect((await model.HuntTemplates.findApprovedByKeyWithLatestVersion('signal-cluj-napoca'))?.version).toBe(1);
+  });
+});

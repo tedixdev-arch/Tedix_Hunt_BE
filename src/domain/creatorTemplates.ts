@@ -1,5 +1,12 @@
 import { checkpointGameplayTypes } from './checkpointGameplay.js';
 
+export type TemplateCategory = 'universal' | 'local';
+
+// Authoritative metadata is never accepted inside extensible content JSON.
+export const hasTemplateMetadata = (value: unknown): boolean =>
+  isObject(value) && Object.keys(value).some((field) =>
+    /^(category|origin|owner.*|createdBy.*|created_by_.*|source.*|submittedVersion|status)$/.test(field));
+
 export type TemplateContent = Record<string, unknown> & { key: string; version: number };
 
 const MIN_NORMAL_CHECKPOINTS = 1;
@@ -91,6 +98,7 @@ export const isTemplateContent = (
   key: string,
   expectedVersion: number,
 ): value is TemplateContent => {
+  if (hasTemplateMetadata(value)) return false;
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return false;
   if (!isObject(value) || value.key !== key || value.version !== expectedVersion) return false;
   if (typeof value.displayName !== 'string' || value.displayName.trim() === '') return false;
@@ -107,16 +115,19 @@ export const isTemplateContentV1 = (value: unknown, key: string): value is Templ
 
 /**
  * Drafts may progressively collect positions, but a submitted geographic contract must describe
- * every normal checkpoint exactly once and one FinishPoint. Feature 6 never contributes to N.
+ * every normal checkpoint exactly once and one FinishPoint, except Universal route geography
+ * is optional. Counted gameplay remains complete for every category. Feature 6 never contributes to N.
  */
-export const isTemplateContentSubmittable = (value: unknown): value is TemplateContent => {
+export const isTemplateContentSubmittable = (value: unknown, category: TemplateCategory | null = null): value is TemplateContent => {
   if (!isObject(value) || !isObject(value.configuration)) return false;
   const { normalCheckpointCount: count, checkpointPositions: positions } = value.configuration;
   if (!hasValidGeographicDraft(value.configuration)
     || !hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value))) return false;
-  if (count === undefined && positions === undefined) return true; // Pre-contract Creator content.
-  if (!hasValidFinishPoint(value.configuration.finishPoint) || !Number.isInteger(count)
-    || !Array.isArray(positions) || positions.length !== count) return false;
+  if (category === 'local' && count === undefined) return false;
+  if (count === undefined && positions === undefined) return true; // Universal or legacy content without a geographic contract.
+  if (!Number.isInteger(count)) return false;
+  if (category !== 'universal' && (!hasValidFinishPoint(value.configuration.finishPoint)
+    || !Array.isArray(positions) || positions.length !== count)) return false;
   // Enforce new authoring only at submission; never infer roles or rewrite old versions/snapshots.
   if (value.checkpoints.filter((checkpoint) => checkpoint.role === 'terminal').length !== 1) return false;
   const normal = value.checkpoints.filter((checkpoint) => checkpoint.role !== 'terminal');
