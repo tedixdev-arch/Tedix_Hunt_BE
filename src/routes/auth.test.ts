@@ -650,23 +650,28 @@ describe('user account API', () => {
       .expect(401, { error: 'invalid_refresh' });
   });
 
-  it('allows a participant with a pre-policy password to log in and supports Tedix-linked login', async () => {
+  it('allows a participant with a pre-policy password to log in', async () => {
     const participant = { ...registeredUser, role: 'participant' as const, roles: ['participant'] };
-    const passwordHash = await bcrypt.hash('participant-password', 4);
-    mocks.findUser
-      .mockResolvedValueOnce({ ...participant, passwordHash })
-      .mockResolvedValueOnce({ ...participant, tedixUserId: 'tedix-123' });
-
-    await request(app)
-      .post('/api/auth/participant/login')
-      .send({ email: participant.email, password: 'participant-password' })
-      .expect(200);
-    await request(app)
-      .post('/api/auth/participant/login')
-      .send({ tedixUserId: 'tedix-123' })
-      .expect(200);
-    expect(mocks.createRefreshToken).toHaveBeenCalledTimes(2);
+    mocks.findUser.mockResolvedValue({ ...participant, passwordHash: await bcrypt.hash('participant-password', 4) });
+    await request(app).post('/api/auth/participant/login')
+      .send({ email: participant.email, password: 'participant-password' }).expect(200);
+    expect(mocks.createRefreshToken).toHaveBeenCalledOnce();
   });
+
+  for (const endpoint of ['login', 'register']) {
+    it.each(['arbitrary', 'existing-linked', 'unknown', '', null, false, 0, {}, []])(
+      `${endpoint}: rejects Tedix identifier %j without lookup or writes`, async (tedixUserId) => {
+        const response = await request(app).post(`/api/auth/participant/${endpoint}`)
+          .send({ tedixUserId, email: registeredUser.email, password: 'Valid123!', assertion: 'forged' })
+          .expect(401);
+        expect(response.body).toEqual({ error: 'unverified_tedix_identity' });
+        expect(response.headers['set-cookie']).toBeUndefined();
+        expect(mocks.findUser).not.toHaveBeenCalled();
+        expect(mocks.createUser).not.toHaveBeenCalled();
+        expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+      },
+    );
+  }
 
   it.each(['blocked', 'retired'] as const)(
     'rejects login and refresh for a %s identity, including an old session', async (status) => {
