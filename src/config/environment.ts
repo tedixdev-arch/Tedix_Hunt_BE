@@ -40,13 +40,36 @@ const parsePort = (value: string | undefined): number => {
   return parsed;
 };
 
+// HS256 (jsonwebtoken's existing default) requires a high-entropy, 256-bit key.
+// These checks reject clear mistakes; only secure random generation establishes entropy.
+const parseJwtSecret = (value: string | undefined): string => {
+  const invalid = () => new Error(
+    'Invalid JWT_SECRET. Configure a securely generated secret of at least 32 bytes; defaults, placeholders and repetitive values are forbidden.',
+  );
+
+  if (!value || value.trim() !== value || Buffer.byteLength(value, 'utf8') < 32) {
+    throw invalid();
+  }
+
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (
+    /changeme|replaceme|replacewith|your.*secret|jwtsecret|placeholder|example|password|disposable|testonly|default|insecure|supersecret|notasecret|abcdefghijklmnopqrstuvwxyz|0123456789|1234567890|qwerty/.test(normalized)
+    || new Set(value).size < 8
+    || /^(.+?)\1+$/.test(value)
+  ) {
+    throw invalid();
+  }
+
+  return value;
+};
+
 export const readEnvironment = (): ApiEnvironment => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
   host: parseHost(process.env.API_HOST),
   port: parsePort(process.env.API_PORT),
   webOrigin: process.env.WEB_ORIGIN,
   databaseUrl: process.env.DATABASE_URL,
-  jwtSecret: process.env.JWT_SECRET ?? 'change-me',
+  jwtSecret: parseJwtSecret(process.env.JWT_SECRET),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
   refreshTokenExpiresIn: process.env.REFRESH_EXPIRES_IN ?? '7d',
   version: process.env.npm_package_version ?? '0.1.0',
