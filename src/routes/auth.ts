@@ -322,11 +322,11 @@ router.post('/admin/login', async (req, res) => {
  * /api/auth/participant/register:
  *   post:
  *     tags: [Auth]
- *     summary: Register a participant (TedixHunt or Tedix-linked)
+ *     summary: Register a participant
  *     description: >
- *       Accepts either a `tedixUserId` (Tedix-linked identity, no local password),
- *       an `email`/`password` pair (TedixHunt-native credentials), or neither
- *       (a bare participant record for a linked-account flow completed elsewhere).
+ *       Accepts native email/password credentials or creates a credentialless participant.
+ *       Tedix-ID authentication and linking are disabled pending verified upstream proof.
+ *       Any request containing tedixUserId is rejected before account lookup or changes.
  *     requestBody:
  *       required: true
  *       content:
@@ -334,7 +334,6 @@ router.post('/admin/login', async (req, res) => {
  *           schema:
  *             type: object
  *             properties:
- *               tedixUserId: { type: string }
  *               email: { type: string, format: email }
  *               password: { type: string, format: password }
  *               name: { type: string }
@@ -348,29 +347,24 @@ router.post('/admin/login', async (req, res) => {
  *               properties:
  *                 user: { $ref: '#/components/schemas/User' }
  *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
+ *       401:
+ *         description: Tedix-ID authentication and linking are unavailable; no account details or tokens are returned.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { error: unverified_tedix_identity }
  *       409:
- *         description: Email or Tedix account already linked
+ *         description: Email already registered
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
 router.post('/participant/register', async (req, res) => {
-  const { email, password, name, tedixUserId } = req.body;
+  const { email, password, name } = req.body;
 
-  if (tedixUserId) {
-    const exists = await User.findOne({ tedixUserId });
-    if (exists) return res.status(409).json({ error: 'tedix_account_linked' });
-
-    try {
-      const user = await User.create({ role: 'participant', name, tedixUserId });
-      const tokens = await createTokens(user.id);
-      return res.status(201).json({ user: publicUser(user), tokens });
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        return res.status(409).json({ error: 'tedix_account_linked' });
-      }
-      throw error;
-    }
+  // An identifier is not proof of ownership. Reject even malformed or empty link attempts.
+  if (Object.prototype.hasOwnProperty.call(req.body, 'tedixUserId')) {
+    return res.status(401).json({ error: 'unverified_tedix_identity' });
   }
 
   // participants may register with or without email/password
@@ -391,7 +385,7 @@ router.post('/participant/register', async (req, res) => {
     }
   }
 
-  // otherwise create a participant without credentials (linked account flow handled elsewhere)
+  // Preserve credentialless participant registration; this establishes no external link.
   const user = await User.create({ role: 'participant', name });
   const tokens = await createTokens(user.id);
   return res.status(201).json({ user: publicUser(user), tokens });
@@ -402,10 +396,11 @@ router.post('/participant/register', async (req, res) => {
  * /api/auth/participant/login:
  *   post:
  *     tags: [Auth]
- *     summary: Login with Tedix or TedixHunt credentials
+ *     summary: Login with native TedixHunt participant credentials
  *     description: >
- *       Pass `tedixUserId` for Tedix-linked accounts (trusted, no password check),
- *       or `email`/`password` for native TedixHunt participant accounts.
+ *       Requires native email/password credentials. Tedix-ID authentication is disabled
+ *       pending verified upstream proof. Any request containing tedixUserId is rejected
+ *       before account lookup, even when native credentials are also supplied.
  *     requestBody:
  *       required: true
  *       content:
@@ -413,7 +408,6 @@ router.post('/participant/register', async (req, res) => {
  *           schema:
  *             type: object
  *             properties:
- *               tedixUserId: { type: string }
  *               email: { type: string, format: email }
  *               password: { type: string, format: password }
  *     responses:
@@ -427,27 +421,22 @@ router.post('/participant/register', async (req, res) => {
  *                 user: { $ref: '#/components/schemas/User' }
  *                 tokens: { $ref: '#/components/schemas/AuthTokens' }
  *       400:
- *         description: Missing email or password (when tedixUserId is absent)
+ *         description: Missing email or password
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  *       401:
- *         description: Invalid credentials
+ *         description: Invalid native credentials, or unverified Tedix identity (unverified_tedix_identity); no account details or tokens are returned.
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
 router.post('/participant/login', async (req, res) => {
-  const { email, password, tedixUserId } = req.body;
+  const { email, password } = req.body;
 
-  // Tedix-linked accounts authenticate upstream in Tedix; TedixHunt trusts the
-  // tedixUserId handed back by that flow rather than holding its own password.
-  if (tedixUserId) {
-    const user = await User.findOne({ tedixUserId, role: 'participant' });
-    if (!user || user.accountStatus === 'blocked' || user.accountStatus === 'retired') return res.status(401).json({ error: 'invalid_credentials' });
-
-    const tokens = await createTokens(user.id);
-    return res.json({ user: publicUser(user), tokens });
+  // No trusted upstream verification contract exists yet. Do not look up this identifier.
+  if (Object.prototype.hasOwnProperty.call(req.body, 'tedixUserId')) {
+    return res.status(401).json({ error: 'unverified_tedix_identity' });
   }
 
   if (!email || !password) return res.status(400).json({ error: 'invalid_input' });

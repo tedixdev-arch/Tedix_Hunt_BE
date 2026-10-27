@@ -31,3 +31,11 @@ it('documents Creator draft deletion alongside the existing read', () => {
   expect(swaggerSpec).toHaveProperty('paths./api/creator/templates/{key}.delete.responses.204');
   expect(swaggerSpec).toHaveProperty('paths./api/creator/templates/{key}.delete.responses.409');
 });
+
+it.each(['login', 'register'])('documents disabled Tedix authentication for participant %s', (endpoint) => {
+  const spec = swaggerSpec as any;
+  const operation = spec.paths[`/api/auth/participant/${endpoint}`].post;
+  expect(operation.description).toContain('disabled');
+  expect(operation.requestBody.content['application/json'].schema.properties).not.toHaveProperty('tedixUserId');
+  expect(operation.responses['401'].description).toContain('no account details or tokens');
+});
