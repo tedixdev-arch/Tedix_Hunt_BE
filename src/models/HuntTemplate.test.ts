@@ -24,6 +24,7 @@ describe('approved Hunt Template catalog persistence', () => {
       content: { displayName: 'Signal from PostgreSQL' },
     }]);
     const sql = query.mock.calls[0][0] as string;
+    expect(sql).toContain("t.category IS NULL");
     expect(sql).toContain("t.status = 'approved'");
     expect(sql).toContain("t.origin = 'platform' OR version = t.submitted_version");
     expect(sql).toContain('ORDER BY version DESC');
@@ -35,7 +36,7 @@ describe('approved Hunt Template catalog persistence', () => {
     await expect(HuntTemplates.findApprovedByKeyWithLatestVersion('approved')).resolves.toEqual({
       key: 'approved', version: 3, content: { ok: true },
     });
-    expect(query.mock.calls[0][0]).toContain("t.status = 'approved' AND t.key = $1");
+    expect(query.mock.calls[0][0]).toContain("t.status = 'approved' AND t.category IS NULL AND t.key = $1");
     expect(query.mock.calls[0][0]).toContain("t.origin = 'platform' OR version = t.submitted_version");
     expect(query.mock.calls[0][1]).toEqual(['approved']);
 

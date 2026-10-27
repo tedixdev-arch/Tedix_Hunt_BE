@@ -240,6 +240,9 @@ suite('independent Template review against PostgreSQL', () => {
     try {
       // Transactional DDL simulates migration from the old schema and rolls back afterwards.
       await client.query('BEGIN');
+      // Remove only C1's incoming reference while simulating the pre-021 schema.
+      // ROLLBACK below restores the reference and all original review history.
+      await client.query('ALTER TABLE hunt_templates DROP CONSTRAINT hunt_templates_source_review_fkey');
       await client.query('DROP TABLE hunt_template_reviews');
       const migration = (await import('../db/migrations/021_template_review_decisions.js')).default;
       await migration.up(client);
