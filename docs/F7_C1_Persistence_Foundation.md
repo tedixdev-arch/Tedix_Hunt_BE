@@ -19,3 +19,27 @@ Disposable PostgreSQL tests will migrate legacy fixtures through 021→022 and f
 ## Reserved decisions / limits
 
 This is the user-authorized C1 candidate, not approval of unrelated D05-T or D09–D16. Publication mapping, category-specific submission validation, routes, safe public provenance projection, concurrency/copy workflow, revisions, withdrawal, Locality/evidence and G4 eligibility remain separate. Existing classified submission/review mechanics are not activated by routes in C1; SQL fixtures are not product activation. No automatic Signal classification. No deviation from approved product rules intended; source-review references implement only historical evidence, not a published product pointer.
+
+## Implemented C1 evidence — 27 October 2026
+
+The candidate above was committed and recorded in Draft PR #76 before any implementation change. The implementation follows that candidate: migration 022, SQL constraints/triggers and restrictive source references; category mappings in persisted model records; legacy-only shared approved resolution. No public creation input or copy operation accepts category/provenance in this slice. Existing helpers continue creating unclassified records; classified authoring/inherited version insertion is reserved for C2. Classified SQL fixture creation in tests is not workflow activation.
+
+Changed files:
+
+- `docs/F7_C1_Persistence_Foundation.md`: pre-implementation schema/compatibility candidate and results.
+- `src/db/migrations/022_template_classification.ts`: additive category, ownership/version binding and source evidence/dependency constraints.
+- `src/db/schema.sql`: matching fresh-schema foundation.
+- `src/db/templateClassification.integration.test.ts`: isolated PostgreSQL migration, history, constraints, independent ownership/content, dependency, retirement, baseline parity and HTTP selection tests.
+- `src/db/migrate.test.ts`: include 022 in migration/history expectations.
+- `src/models/HuntTemplate.ts`: persisted category types/mapping and closed classified resolver gates.
+- `src/models/HuntTemplate.test.ts` and `src/routes/huntTemplates.test.ts`: shared resolver SQL expectations.
+- `src/routes/adminTemplateReviews.integration.test.ts`: transactional pre-021 simulation temporarily removes the new incoming review FK; rollback restores all constraints/history.
+
+Validation against a disposable PostgreSQL 17 Docker container:
+
+- Full Backend regression suite: **52 files / 1,018 tests passed, zero skips** (`TEST_DATABASE_URL=… npm test -- --reporter=dot`). The server was created only for this task; no live database was accessed.
+- Dedicated C1 suite: **7 passed**, including exact before/after legacy identity/version/review/Signal/Hunt comparisons, migration rerun, SQL constraints, independent Local ownership/content and immutable lineage, source dependency rejection, account retirement, fresh-schema C1 constraint/trigger parity and actual catalog/geography/Hunt PATCH rejection for approved Universal and Local fixtures.
+- `npm run typecheck`, `npm run build`, and `git diff --check`: passed.
+- Existing migrations 001–021 unchanged. No historical JSON, approvals, Signal classification or Hunt snapshots rewritten. No FE changes, merge or deployment.
+
+No known C1 implementation blocker or deviation from the recorded candidate/approved product rules. This remains a technical implementation candidate for review in Draft PR #76, not a claim that F7/G4/D10 is complete. In particular, source review evidence does not establish current publication/copy eligibility; unrelated D05-T and D09–D16 decisions remain unresolved. There is no live-data census, deployed E2E or rollback activation claim. Apply the additive migration before running code that queries category; any later rollout/rollback must preserve the recorded bindings and dependency history.

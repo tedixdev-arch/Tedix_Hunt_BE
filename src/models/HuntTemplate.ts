@@ -1,6 +1,7 @@
 import { pool } from '../lib/postgres.js';
 import { isTemplateContent, isTemplateContentSubmittable } from '../domain/creatorTemplates.js';
 
+export type HuntTemplateCategory = 'universal' | 'local';
 export type HuntTemplateOrigin = 'platform' | 'creator';
 export type HuntTemplateStatus = 'draft' | 'submitted' | 'changes_requested' | 'approved';
 
@@ -8,6 +9,7 @@ export interface PersistedHuntTemplate {
   id: string;
   key: string;
   origin: HuntTemplateOrigin;
+  category: HuntTemplateCategory | null;
   createdByUserId: string | null;
   status: HuntTemplateStatus;
   submittedVersion: number | null;
@@ -21,6 +23,7 @@ export interface PersistedHuntTemplateVersion {
   version: number;
   content: unknown;
   origin: HuntTemplateOrigin;
+  category: HuntTemplateCategory | null;
   createdByUserId: string | null;
   createdAt: Date;
 }
@@ -99,6 +102,7 @@ const mapTemplate = (row: any): PersistedHuntTemplate => ({
   id: row.id,
   key: row.key,
   origin: row.origin,
+  category: row.category ?? null,
   createdByUserId: row.created_by_user_id,
   status: row.status,
   submittedVersion: row.submitted_version ?? null,
@@ -112,6 +116,7 @@ const mapVersion = (row: any): PersistedHuntTemplateVersion => ({
   version: row.version,
   content: row.content,
   origin: row.origin,
+  category: row.category ?? null,
   createdByUserId: row.created_by_user_id,
   createdAt: row.created_at,
 });
@@ -457,6 +462,8 @@ export const HuntTemplates = {
     }
   },
 
+  // C1: only unclassified legacy records remain eligible through shared Organizer
+  // resolution. Both classified categories stay closed until reviewed eligibility gates.
   async listApprovedWithLatestVersion(): Promise<ApprovedHuntTemplateVersion[]> {
     const { rows } = await pool.query(
       `SELECT t.key, latest.version, latest.content
@@ -469,7 +476,7 @@ export const HuntTemplates = {
          ORDER BY version DESC
          LIMIT 1
        ) latest ON TRUE
-       WHERE t.status = 'approved'
+       WHERE t.status = 'approved' AND t.category IS NULL
        ORDER BY t.key ASC`,
     );
     return rows.map(({ key, version, content }) => ({ key, version, content }));
@@ -489,7 +496,7 @@ export const HuntTemplates = {
          ORDER BY version DESC
          LIMIT 1
        ) latest ON TRUE
-       WHERE t.status = 'approved' AND t.key = $1`,
+       WHERE t.status = 'approved' AND t.category IS NULL AND t.key = $1`,
       [key],
     );
     return rows[0]

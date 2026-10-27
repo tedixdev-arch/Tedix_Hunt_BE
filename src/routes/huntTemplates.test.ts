@@ -61,7 +61,7 @@ describe('approved Template geography', () => {
     expect(response.body).toEqual({ key: 'trail', version: 3, configuration });
     expect(mocks.query).toHaveBeenCalledTimes(1);
     const [sql, parameters] = mocks.query.mock.calls[0];
-    expect(sql).toContain("t.status = 'approved' AND t.key = $1");
+    expect(sql).toContain("t.status = 'approved' AND t.category IS NULL AND t.key = $1");
     expect(sql).toContain("t.origin = 'platform' OR version = t.submitted_version");
     expect(parameters).toEqual(['trail']);
   });
