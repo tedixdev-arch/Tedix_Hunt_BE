@@ -273,8 +273,11 @@ describe('User persistence', () => {
     const sql = clientQuery.mock.calls[3][0] as string;
     for (const relationship of [
       'organizations', 'organization_members', 'hunts', 'hunt_participants', 'hunt_roles',
-      'organizer_applications',
+      'organizer_applications', 'creator_applications', 'hunt_templates', 'hunt_template_versions',
     ]) expect(sql).toContain(relationship);
+    expect(sql).toContain('FROM creator_applications WHERE user_id = $1 OR reviewed_by = $1');
+    expect(sql).toContain('FROM hunt_templates WHERE created_by_user_id = $1');
+    expect(sql).toContain('FROM hunt_template_versions WHERE created_by_user_id = $1');
     expect(sql).not.toContain('professional_activation_tokens');
     expect(sql).toContain("status = 'pending'");
     expect(sql).toContain('reviewed_at IS NULL');
