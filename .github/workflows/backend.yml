@@ -32,6 +32,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Configure disposable CI signing secret
+        run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_ENV, "JWT_SECRET=" + require("node:crypto").randomBytes(32).toString("hex") + "\n")'
       - run: npm run build
       - name: Prepare disposable database baseline
         env:
