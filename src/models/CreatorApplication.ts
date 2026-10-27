@@ -50,7 +50,8 @@ export const CreatorApplications = {
          ) AS is_creator
          FROM users WHERE email = $1 FOR UPDATE`, [email],
       )).rows[0];
-      if (user && (user.is_guest || user.account_status !== 'active' || user.is_creator)) {
+      // Public input proves no ownership of an existing passwordless identity.
+      if (user && (user.password_hash === null || user.is_guest || user.account_status !== 'active' || user.is_creator)) {
         throw new CreatorApplicationIdentityConflictError();
       }
       if (!user) {
@@ -60,8 +61,6 @@ export const CreatorApplications = {
            VALUES ($1, $2, 'creator', FALSE, $3) RETURNING *`,
           [email, input.name, input.passwordHash],
         )).rows[0];
-      } else if (user.password_hash === null) {
-        await client.query('UPDATE users SET password_hash = $2 WHERE id = $1', [user.id, input.passwordHash]);
       }
       // An established credential is deliberately preserved; applying is never a password reset.
       const { rows } = await client.query(

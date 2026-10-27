@@ -1121,36 +1121,27 @@ describeWithDatabase('PostgreSQL migrations', () => {
     }
   });
 
-  it('establishes a password once for an active passwordless identity and does not replace it on approval', async () => {
-    const email = 'passwordless-creator-applicant@example.com';
+  it('refuses public credential establishment on an active passwordless identity', async () => {
+    const email = 'passwordless-creator-applicant@example.invalid';
     const password = 'EstablishedPass1!';
-    const adminEmail = 'passwordless-review-admin@example.com';
-    const { app, signJwt } = await application();
-    const adminId = await insertAdmin(adminEmail);
+    const { app } = await application();
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO users (email, password_hash, role, name, is_guest)
        VALUES ($1, NULL, 'participant', 'Passwordless Identity', FALSE) RETURNING id`, [email],
     );
     const userId = inserted.rows[0].id;
     try {
-      const submitted = await request(app).post('/api/creator-applications').send({
+      await request(app).post('/api/creator-applications').send({
         name: 'Passwordless Identity', email, password, confirmPassword: password,
-      }).expect(201);
-      const established = await client.query<{ password_hash: string }>(
-        'SELECT password_hash FROM users WHERE id = $1', [userId],
-      );
-      await expect(bcrypt.compare(password, established.rows[0].password_hash)).resolves.toBe(true);
-
-      const bearer = `Bearer ${signJwt({ sub: adminId, type: 'access' })}`;
-      await request(app).post(`/api/creator-applications/${submitted.body.id}/approve`)
-        .set('Authorization', bearer).expect(200);
+      }).expect(409, { error: 'creator_application_conflict' });
       await expect(client.query('SELECT password_hash FROM users WHERE id = $1', [userId]))
-        .resolves.toMatchObject({ rows: [{ password_hash: established.rows[0].password_hash }] });
-      await request(app).post('/api/auth/creator/login').send({ email, password }).expect(200);
+        .resolves.toMatchObject({ rows: [{ password_hash: null }] });
+      await expect(client.query('SELECT id FROM creator_applications WHERE user_id = $1', [userId]))
+        .resolves.toMatchObject({ rows: [] });
+      await expect(client.query('SELECT role FROM user_roles WHERE user_id = $1', [userId]))
+        .resolves.toMatchObject({ rows: [] });
     } finally {
-      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [userId]);
-      await client.query('DELETE FROM creator_applications WHERE user_id = $1', [userId]);
-      await client.query('DELETE FROM users WHERE email IN ($1, $2)', [email, adminEmail]);
+      await client.query('DELETE FROM users WHERE id = $1', [userId]);
     }
   });
 

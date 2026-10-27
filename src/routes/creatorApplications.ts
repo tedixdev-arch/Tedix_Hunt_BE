@@ -35,7 +35,7 @@ const serialize = (application: Awaited<ReturnType<typeof CreatorApplications.fi
  *   post:
  *     tags: [Creator Applications]
  *     summary: Submit a Creator self-registration application
- *     description: Stores credentials on the shared identity. Creator access remains unauthorized until Admin approval; no activation token is created.
+ *     description: Creates credentials only for a new identity; preserves existing credentials. Existing passwordless identities cannot apply publicly. Creator access remains unauthorized until Admin approval; no activation token is created.
  *     requestBody:
  *       required: true
  *       content:
@@ -52,7 +52,12 @@ const serialize = (application: Awaited<ReturnType<typeof CreatorApplications.fi
  *     responses:
  *       201: { description: Pending Creator application created }
  *       400: { description: Invalid input or password }
- *       409: { description: Identity cannot submit this application }
+ *       409:
+ *         description: Application conflicts with the identity; no changes are made and no account details are returned.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { error: creator_application_conflict }
  *   get:
  *     tags: [Creator Applications]
  *     summary: List Creator applications for Admin review

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn(), clientQuery: vi.fn(), release: vi.fn() }));
 vi.mock('../lib/postgres.js', () => ({ pool: { query: mocks.query, connect: mocks.connect } }));
 
-import { OrganizerApplications } from './OrganizerApplication.js';
+import { OrganizerApplications, OrganizerApplicationIdentityConflictError } from './OrganizerApplication.js';
 
 const input = {
   name: 'Ada', email: 'ADA@example.com', organizationName: 'Academy',
@@ -45,24 +45,10 @@ describe('OrganizerApplications', () => {
     expect(result).toMatchObject({ id: 'application-1', status: 'pending', userId: 'user-1' });
   });
 
-  it('establishes credentials for an existing passwordless identity without changing its roles', async () => {
-    mocks.clientQuery
-      .mockResolvedValueOnce({}).mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ rows: [{ id: 'user-1', password_hash: null }] })
-      .mockResolvedValueOnce({ rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [applicationRow] }).mockResolvedValueOnce({});
-
-    await OrganizerApplications.create(input);
-
-    expect(mocks.clientQuery).toHaveBeenNthCalledWith(4,
-      'UPDATE users SET password_hash = $2 WHERE id = $1', ['user-1', input.passwordHash]);
-    expect(mocks.clientQuery.mock.calls.some(([sql]) => String(sql).includes('user_roles'))).toBe(false);
-  });
-
   it('reuses a password-backed identity without resetting its password or duplicating it', async () => {
     mocks.clientQuery
       .mockResolvedValueOnce({}).mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ rows: [{ id: 'user-1', password_hash: 'existing-hash' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1', password_hash: 'existing-hash', is_guest: false, account_status: 'active' }] })
       .mockResolvedValueOnce({ rows: [applicationRow] }).mockResolvedValueOnce({});
 
     await OrganizerApplications.create(input);
@@ -70,6 +56,30 @@ describe('OrganizerApplications', () => {
     const sql = mocks.clientQuery.mock.calls.map(([query]) => String(query)).join('\n');
     expect(sql).not.toContain('UPDATE users SET password_hash');
     expect(sql).not.toContain('INSERT INTO users');
+  });
+
+  it.each([
+    { label: 'invited Admin', password_hash: null },
+    { label: 'Organizer', password_hash: null },
+    { label: 'Creator', password_hash: null },
+    { label: 'mixed roles', password_hash: null },
+    { label: 'expired invitation', password_hash: null },
+    { label: 'guest', password_hash: 'existing', is_guest: true },
+    { label: 'blocked', password_hash: 'existing', account_status: 'blocked' },
+    { label: 'retired', password_hash: 'existing', account_status: 'retired' },
+  ])('refuses $label without any persistent changes', async (identity) => {
+    mocks.clientQuery.mockResolvedValueOnce({}).mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1', is_guest: false,
+        account_status: 'active', is_creator: false, ...identity }] })
+      .mockResolvedValueOnce({});
+    await expect(OrganizerApplications.create(input)).rejects
+      .toBeInstanceOf(OrganizerApplicationIdentityConflictError);
+    const queries = mocks.clientQuery.mock.calls.map(([sql]) => String(sql));
+    expect(queries).toHaveLength(4);
+    expect(queries[2]).toContain('FOR UPDATE');
+    expect(queries[3]).toBe('ROLLBACK');
+    expect(queries.join('\n')).not.toMatch(/INSERT|UPDATE users|DELETE|COMMIT/);
+    expect(mocks.release).toHaveBeenCalledOnce();
   });
 
   it('approves transactionally, grants capability, and creates organization membership without credentials or tokens', async () => {
