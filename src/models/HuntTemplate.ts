@@ -92,6 +92,7 @@ export class HuntTemplateNotEditableError extends Error {}
 export class HuntTemplateNotSubmittableError extends Error {}
 export class HuntTemplateVersionNotLatestError extends Error {}
 export class HuntTemplateNotReviewableError extends Error {}
+export class HuntTemplateSelfApprovalError extends Error {}
 export class InvalidHuntTemplateContentError extends Error {}
 
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
@@ -339,7 +340,7 @@ export const HuntTemplates = {
     return rows[0] ? mapVersion(rows[0]) : null;
   },
 
-  async approveSubmittedCreator(key: string): Promise<ApprovedAdminTemplateReview | null> {
+  async approveSubmittedCreator(key: string, reviewerUserId: string): Promise<ApprovedAdminTemplateReview | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -358,6 +359,8 @@ export const HuntTemplates = {
       if (row.status !== 'submitted' || row.submitted_version === null) {
         throw new HuntTemplateNotReviewableError();
       }
+
+      if (row.created_by_user_id === reviewerUserId) throw new HuntTemplateSelfApprovalError();
 
       // submitted_version is the approved artifact; never substitute the latest version.
       const reviewResult = await client.query(
@@ -378,6 +381,11 @@ export const HuntTemplates = {
          WHERE id = $1 AND status = 'submitted'`,
         [row.id],
       );
+      await client.query(
+        `INSERT INTO hunt_template_reviews (template_id, version, reviewer_user_id, decision)
+         VALUES ($1, $2, $3, 'approved')`,
+        [row.id, row.submitted_version, reviewerUserId],
+      );
       await client.query('COMMIT');
       return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), status: 'approved' };
     } catch (error) {
@@ -390,6 +398,7 @@ export const HuntTemplates = {
 
   async requestChangesForSubmittedCreator(
     key: string,
+    reviewerUserId: string,
   ): Promise<ChangesRequestedAdminTemplateReview | null> {
     const client = await pool.connect();
     try {
@@ -429,6 +438,11 @@ export const HuntTemplates = {
         `UPDATE hunt_templates SET status = 'changes_requested', updated_at = now()
          WHERE id = $1 AND status = 'submitted'`,
         [row.id],
+      );
+      await client.query(
+        `INSERT INTO hunt_template_reviews (template_id, version, reviewer_user_id, decision)
+         VALUES ($1, $2, $3, 'changes_requested')`,
+        [row.id, row.submitted_version, reviewerUserId],
       );
       await client.query('COMMIT');
       return {

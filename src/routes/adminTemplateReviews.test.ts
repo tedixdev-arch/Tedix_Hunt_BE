@@ -18,7 +18,7 @@ vi.mock('../models/HuntTemplate.js', async (importOriginal) => {
 
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
-import { HuntTemplateNotReviewableError } from '../models/HuntTemplate.js';
+import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError } from '../models/HuntTemplate.js';
 
 const identity = (roles: string[]) => ({
   id: 'admin-1', email: 'admin@example.com', role: 'participant', roles,
@@ -41,6 +41,15 @@ describe('Admin Template review reads', () => {
     mocks.find.mockResolvedValue(review());
     mocks.approve.mockResolvedValue({ ...review(), status: 'approved' });
     mocks.requestChanges.mockResolvedValue({ ...review(), status: 'changes_requested' });
+  });
+
+  it('passes the hydrated user ID rather than token or body identity and maps self-approval to 403', async () => {
+    mocks.findUserById.mockResolvedValue({ ...identity(['creator', 'admin']), id: 'hydrated-admin' });
+    mocks.approve.mockRejectedValue(new HuntTemplateSelfApprovalError());
+    await request(app).post('/api/admin/templates/review/algebra-trail/approve')
+      .set('Authorization', bearer).send({ reviewerUserId: 'other-admin', version: 999 })
+      .expect(403, { error: 'template_self_approval_forbidden' });
+    expect(mocks.approve).toHaveBeenCalledWith('algebra-trail', 'hydrated-admin');
   });
 
   it('lists submitted Creator review artifacts deterministically as supplied by persistence', async () => {
@@ -87,7 +96,7 @@ describe('Admin Template review reads', () => {
   it('allows an Admin to approve the exact submitted artifact', async () => {
     await request(app).post('/api/admin/templates/review/algebra-trail/approve')
       .set('Authorization', bearer).expect(200, { ...review(), status: 'approved' });
-    expect(mocks.approve).toHaveBeenCalledWith('algebra-trail');
+    expect(mocks.approve).toHaveBeenCalledWith('algebra-trail', 'admin-1');
   });
 
   it('does not expose missing Creator Templates through approval', async () => {
@@ -121,7 +130,7 @@ describe('Admin Template review reads', () => {
   it('allows an Admin to request changes to the exact submitted artifact', async () => {
     await request(app).post('/api/admin/templates/review/algebra-trail/request-changes')
       .set('Authorization', bearer).expect(200, { ...review(), status: 'changes_requested' });
-    expect(mocks.requestChanges).toHaveBeenCalledWith('algebra-trail');
+    expect(mocks.requestChanges).toHaveBeenCalledWith('algebra-trail', 'admin-1');
   });
 
   it('does not expose missing or platform Templates through request-changes', async () => {

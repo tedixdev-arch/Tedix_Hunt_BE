@@ -1,6 +1,6 @@
 import express from 'express';
-import { requireAuth, requireRole } from '../middleware/auth.js';
-import { HuntTemplateNotReviewableError, HuntTemplates } from '../models/HuntTemplate.js';
+import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
+import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError, HuntTemplates } from '../models/HuntTemplate.js';
 
 const router = express.Router();
 
@@ -33,26 +33,29 @@ router.get('/', requireAuth, requireRole('admin'), async (_request, response, ne
  *   post:
  *     tags: [Admin Template Review]
  *     summary: Approve a submitted Creator Template
- *     description: Admin-only. Approves the exact immutable submitted_version without creating a version, making that artifact available for Organizer catalog selection and Hunt snapshotting.
+ *     description: Admin-only; the reviewing Admin must differ from the Creator. Records reviewer, version, decision and time atomically. Approves the exact immutable submitted_version without creating a version, making that artifact available for Organizer catalog selection and Hunt snapshotting.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
  *     responses:
  *       200: { description: Exact approved immutable artifact, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
  *       401: { description: Authentication required }
- *       403: { description: Authoritative Admin capability required }
+ *       403: { description: Authoritative Admin capability required; self-approval forbidden }
  *       404: { description: Creator Template key not found }
  *       409: { description: Creator Template is not currently reviewable }
  */
-router.post('/:key/approve', requireAuth, requireRole('admin'), async (request, response, next) => {
+router.post('/:key/approve', requireAuth, requireRole('admin'), async (request: AuthRequest, response, next) => {
   try {
     const key = request.params.key;
     if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
-    const approved = await HuntTemplates.approveSubmittedCreator(key);
+    const approved = await HuntTemplates.approveSubmittedCreator(key, request.user!.id);
     return approved
       ? response.json(approved)
       : response.status(404).json({ error: 'not_found' });
   } catch (error) {
+    if (error instanceof HuntTemplateSelfApprovalError) {
+      return response.status(403).json({ error: 'template_self_approval_forbidden' });
+    }
     if (error instanceof HuntTemplateNotReviewableError) {
       return response.status(409).json({ error: 'template_not_reviewable' });
     }
@@ -66,7 +69,7 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request, 
  *   post:
  *     tags: [Admin Template Review]
  *     summary: Request changes to a submitted Creator Template
- *     description: Admin-only. Changes status to changes_requested for the exact immutable submitted_version and preserves that pin. It neither mutates nor creates a Template version, does not publish the Template, and does not implement Creator revision or resubmission.
+ *     description: Admin-only. Records reviewer, version, decision and time atomically. Self-request-changes remains allowed. Changes status to changes_requested for the exact immutable submitted_version and preserves that pin. It neither mutates nor creates a Template version, does not publish the Template, and does not implement Creator revision or resubmission.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
@@ -77,11 +80,11 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request, 
  *       404: { description: Creator Template key not found }
  *       409: { description: Creator Template is not currently reviewable }
  */
-router.post('/:key/request-changes', requireAuth, requireRole('admin'), async (request, response, next) => {
+router.post('/:key/request-changes', requireAuth, requireRole('admin'), async (request: AuthRequest, response, next) => {
   try {
     const key = request.params.key;
     if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
-    const template = await HuntTemplates.requestChangesForSubmittedCreator(key);
+    const template = await HuntTemplates.requestChangesForSubmittedCreator(key, request.user!.id);
     return template
       ? response.json(template)
       : response.status(404).json({ error: 'not_found' });
