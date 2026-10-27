@@ -74,9 +74,9 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     }] }).mockResolvedValueOnce({ rows: [{
       key: templateRow.key, origin: 'creator', version: 2, content: approvedContent,
       creator_id: creatorId, creator_name: 'Ada', creator_email: 'ada@example.com',
-    }] }).mockResolvedValueOnce({ rowCount: 1, rows: [] }).mockResolvedValueOnce({ rows: [] });
+    }] }).mockResolvedValueOnce({ rowCount: 1, rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
 
-    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key)).resolves.toEqual({
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key, 'admin-1')).resolves.toEqual({
       key: templateRow.key, version: 2, status: 'approved', origin: 'creator',
       creator: { id: creatorId, name: 'Ada', email: 'ada@example.com' }, content: approvedContent,
     });
@@ -85,7 +85,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     expect(client.query.mock.calls[2][0]).not.toContain('MAX(');
     expect(client.query.mock.calls[3][0]).not.toContain('submitted_version =');
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
-      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'COMMIT',
+      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
     ]);
   });
 
@@ -98,9 +98,9 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     }] }).mockResolvedValueOnce({ rows: [{
       key: templateRow.key, origin: 'creator', version: 2, content: reviewedContent,
       creator_id: creatorId, creator_name: 'Ada', creator_email: 'ada@example.com',
-    }] }).mockResolvedValueOnce({ rowCount: 1, rows: [] }).mockResolvedValueOnce({ rows: [] });
+    }] }).mockResolvedValueOnce({ rowCount: 1, rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
 
-    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key)).resolves.toEqual({
+    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key, 'admin-1')).resolves.toEqual({
       key: templateRow.key, version: 2, status: 'changes_requested', origin: 'creator',
       creator: { id: creatorId, name: 'Ada', email: 'ada@example.com' }, content: reviewedContent,
     });
@@ -110,7 +110,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     expect(client.query.mock.calls[3][0]).toContain("status = 'changes_requested'");
     expect(client.query.mock.calls[3][0]).not.toContain('submitted_version =');
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
-      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'COMMIT',
+      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
     ]);
   });
 
@@ -120,7 +120,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status, submitted_version: status === 'draft' ? null : 1,
     }] }).mockResolvedValueOnce({ rows: [] });
-    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key))
+    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key, 'admin-1'))
       .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
@@ -131,7 +131,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
-    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key))
+    await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key, 'admin-1'))
       .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
@@ -142,7 +142,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status, submitted_version: status === 'draft' ? null : 1,
     }] }).mockResolvedValueOnce({ rows: [] });
-    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key))
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key, 'admin-1'))
       .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });
@@ -153,7 +153,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
-    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key))
+    await expect(HuntTemplates.approveSubmittedCreator(templateRow.key, 'admin-1'))
       .rejects.toBeInstanceOf(HuntTemplateNotReviewableError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
   });

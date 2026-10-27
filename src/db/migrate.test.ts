@@ -25,6 +25,7 @@ import { signalClujNapocaV1Migration } from './migrations/017_signal_cluj_napoca
 import { templateSubmissionMigration } from './migrations/018_template_submission.js';
 import { templateApprovalMigration } from './migrations/019_template_approval.js';
 import { templateChangesRequestedMigration } from './migrations/020_template_changes_requested.js';
+import { templateReviewDecisionsMigration } from './migrations/021_template_review_decisions.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import type { Migration } from './migrations/index.js';
@@ -43,6 +44,7 @@ const migrations = [
   templateSubmissionMigration,
   templateApprovalMigration,
   templateChangesRequestedMigration,
+  templateReviewDecisionsMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -138,6 +140,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '018_template_submission',
       '019_template_approval',
       '020_template_changes_requested',
+      '021_template_review_decisions',
     ]);
     try {
       await expect(client.query(
@@ -211,6 +214,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '018_template_submission' },
       { id: '019_template_approval' },
       { id: '020_template_changes_requested' },
+      { id: '021_template_review_decisions' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -423,6 +427,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       expect((await client.query('SELECT * FROM hunts ORDER BY id')).rows).toEqual(huntsBefore.rows);
     } finally {
       await client.query('DELETE FROM hunts WHERE id = $1', [snapshot.rows[0].id]);
+      // Disposable-fixture cleanup explicitly removes protected review history first.
+      await client.query('DELETE FROM hunt_template_reviews WHERE template_id IN (SELECT id FROM hunt_templates WHERE key = ANY($1::text[]))', [keys]);
       await client.query('DELETE FROM hunt_templates WHERE key = ANY($1::text[])', [keys]);
       await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [[other.id, adminId]]);
     }
@@ -646,6 +652,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       )).resolves.toMatchObject({ rows: [{ template_version: 1, template_snapshot: historical }] });
     } finally {
       await client.query('DELETE FROM hunts WHERE id = ANY($1::uuid[])', [huntIds]);
+      await client.query('DELETE FROM hunt_template_reviews WHERE template_id IN (SELECT id FROM hunt_templates WHERE key = $1)', [key]);
       await client.query('DELETE FROM hunt_templates WHERE key = $1', [key]);
       await client.query('DELETE FROM users WHERE id = $1', [adminId]);
     }

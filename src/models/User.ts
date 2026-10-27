@@ -300,6 +300,7 @@ export const User = {
            UNION ALL SELECT 1 FROM hunt_participants WHERE user_id = $1
            UNION ALL SELECT 1 FROM hunt_roles WHERE user_id = $1
            UNION ALL SELECT 1 FROM creator_applications WHERE user_id = $1 OR reviewed_by = $1
+           UNION ALL SELECT 1 FROM hunt_template_reviews WHERE reviewer_user_id = $1
            UNION ALL SELECT 1 FROM hunt_templates WHERE created_by_user_id = $1
            UNION ALL SELECT 1 FROM hunt_template_versions WHERE created_by_user_id = $1
            UNION ALL SELECT 1 FROM organizer_applications

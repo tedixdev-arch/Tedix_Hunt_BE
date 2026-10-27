@@ -262,3 +262,16 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id);
+
+-- Minimal independent Admin review history; existing approvals are not backfilled.
+CREATE TABLE IF NOT EXISTS hunt_template_reviews (
+  template_id UUID NOT NULL,
+  version INTEGER NOT NULL,
+  reviewer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  decision TEXT NOT NULL CHECK (decision IN ('approved', 'changes_requested')),
+  decided_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (template_id, version),
+  FOREIGN KEY (template_id, version)
+    REFERENCES hunt_template_versions(template_id, version) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS hunt_template_reviews_reviewer_idx ON hunt_template_reviews(reviewer_user_id);
