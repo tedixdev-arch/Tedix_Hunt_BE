@@ -1,0 +1,21 @@
+# F7/C1 implementation candidate
+
+Based on main 3db374ed75d278cdea868bfbb6807b27b1883942 after merged PR #75. Scope: persistence foundation only; no copy API, classified scratch route, publication/revision workflow, new review rules, eligibility rollout, FE or deployment.
+
+## Schema candidate recorded before code changes
+
+- Add nullable TEXT `category` to `hunt_templates` and `hunt_template_versions`, constrained to `universal` / `local`. NULL is legacy/unclassified, independent of `origin` platform/creator. No defaults, backfill or JSON rewriting. New legacy clients/starters continue inserting NULL.
+- Identity category is insert-only, including NULL (no implicit legacy conversion). Classified identity UUID/key/origin/created_by_user_id are immutable; classified identities require creator origin and durable non-null owner. Existing user FK remains restrictive and retirement anonymizes rather than removes attribution.
+- Every version must match the identity category using NULL-safe comparison. Classified versions must also match identity origin/owner. SQL triggers enforce this across helpers/direct SQL; classified version rows cannot be updated. Legacy content/update behavior remains unchanged except category and version-to-identity binding cannot be rewritten to smuggle classification.
+- Reserve nullable identity columns `source_template_id` UUID, `source_version` INTEGER, `source_creator_user_id` UUID and `source_review_decision` TEXT. All four NULL for scratch/legacy; all non-null only for classified Local, with positive source_version and decision='approved'. These fields are insert-only and inherited through the owning identity by every Local version. No starterSource inference. Local content is independently stored in ordinary version JSONB, never live inherited.
+- Restrictive composite FK source_template_id/source_version references exact source version and another references the exact review `(template_id, version, decision)` (add matching review uniqueness); restrictive user FK retains original source Creator. Insert trigger requires a different Universal source with matching original owner. These constraints preserve exact approved source provenance without choosing publication authority, concurrency tokens or copy transaction semantics. An approved review alone is NOT future copy eligibility. No source reference can be added to an existing identity; future copy must atomically create a new Local identity/version. Deleting a source with a dependent Local is restricted; deleting an otherwise-unused Local removes its own lineage with the identity, preserving existing draft deletion semantics.
+- Add migration 022 only and mirror it in schema baseline. Existing 001–021 remain untouched. Add no publication/withdrawal/consent tables or states. Roll forward preferred; no destructive down migration or deployment in this PR.
+- Add category IS NULL to both shared approved resolvers, covering list/geography/direct-key Hunt selection; classified Local stays closed alongside Universal regardless of approval. Legacy platform latest-version and Creator submitted-version pin behavior remain unchanged. Existing snapshots remain independent and untouched.
+
+## Compatibility and validation
+
+Disposable PostgreSQL tests will migrate legacy fixtures through 021→022 and fingerprint legacy versions, approvals, Signal and Hunt snapshots; test fresh baseline parity, category/owner/version/lineage constraints, dependency deletion and account retirement. Run existing Backend regressions, typecheck and build. No live data census or deployed E2E claim.
+
+## Reserved decisions / limits
+
+This is the user-authorized C1 candidate, not approval of unrelated D05-T or D09–D16. Publication mapping, category-specific submission validation, routes, safe public provenance projection, concurrency/copy workflow, revisions, withdrawal, Locality/evidence and G4 eligibility remain separate. Existing classified submission/review mechanics are not activated by routes in C1; SQL fixtures are not product activation. No automatic Signal classification. No deviation from approved product rules intended; source-review references implement only historical evidence, not a published product pointer.
