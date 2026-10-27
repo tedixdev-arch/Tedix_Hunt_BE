@@ -290,7 +290,8 @@ export const User = {
       }
 
       // These relationships are durable business/history records. An untouched pending
-      // application is onboarding-only; every reviewed application remains protected.
+      // Organizer application is onboarding-only; every reviewed application remains protected.
+      // Creator applications and Template authorship always preserve historical attribution.
       const dependencies = await client.query(
         `SELECT EXISTS (
            SELECT 1 FROM organizations WHERE owner_id = $1
@@ -298,6 +299,9 @@ export const User = {
            UNION ALL SELECT 1 FROM hunts WHERE created_by_user_id = $1
            UNION ALL SELECT 1 FROM hunt_participants WHERE user_id = $1
            UNION ALL SELECT 1 FROM hunt_roles WHERE user_id = $1
+           UNION ALL SELECT 1 FROM creator_applications WHERE user_id = $1 OR reviewed_by = $1
+           UNION ALL SELECT 1 FROM hunt_templates WHERE created_by_user_id = $1
+           UNION ALL SELECT 1 FROM hunt_template_versions WHERE created_by_user_id = $1
            UNION ALL SELECT 1 FROM organizer_applications
              WHERE reviewed_by = $1
                 OR (user_id = $1 AND NOT (
