@@ -32,6 +32,30 @@ beforeEach(() => {
 });
 
 describe('approved Template geography', () => {
+  it.each([
+    { role: 'participant', roles: ['participant'], isGuest: false },
+    { role: 'admin', roles: ['admin', 'creator', 'organizer'], isGuest: true },
+    { role: 'creator', roles: [], isGuest: false },
+  ])('denies unauthorized catalog and inspection before reading content %#', async (identity) => {
+    mocks.findUser.mockResolvedValue({ ...user, ...identity });
+    for (const url of ['/api/hunt-templates', path, '/api/hunt-templates/unknown/geography', '/api/hunt-templates/%20/geography']) {
+      await request(app).get(url).set('Authorization', auth).expect(403, { error: 'forbidden' });
+    }
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it.each(['creator', 'organizer', 'admin'])('allows Participant + %s using authoritative capabilities', async (role) => {
+    mocks.findUser.mockResolvedValue({ ...user, role: 'participant', roles: ['participant', role] });
+    await request(app).get('/api/hunt-templates').set('Authorization', auth).expect(200);
+    await request(app).get(path).set('Authorization', auth).expect(200, { key: 'trail', version: 3, configuration });
+  });
+
+  it('returns no geography or answers in catalog summaries', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ ...approved(), content: { ...approved().content, answer: 'secret', checkpoints: [{ answer: 'secret' }] } }] });
+    await request(app).get('/api/hunt-templates').set('Authorization', auth)
+      .expect(200, [{ key: 'trail', version: 3, displayName: 'Trail', theme: 'Explore' }]);
+  });
+
   it('allows an Organizer and preserves stored values, array order and numbering', async () => {
     const response = await request(app).get(path).set('Authorization', auth).expect(200);
     expect(response.body).toEqual({ key: 'trail', version: 3, configuration });
@@ -57,7 +81,7 @@ describe('approved Template geography', () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
-  it.each(['admin', 'creator', 'participant'])('preserves catalog access for authenticated %s users', async (role) => {
+  it.each(['admin', 'creator', 'organizer'])('preserves catalog access for authenticated %s users', async (role) => {
     mocks.findUser.mockResolvedValue({ ...user, roles: [role] });
     await request(app).get(path).set('Authorization', auth).expect(200);
   });
@@ -142,8 +166,12 @@ describe('approved Template geography', () => {
   });
 
   it('documents the runtime security, errors and optional allowlisted geography', () => {
+    for (const endpoint of ['/api/hunt-templates', '/api/hunt-templates/{key}/geography']) {
+      expect(swaggerSpec).toHaveProperty(`paths.${endpoint}.get.responses.403`);
+      expect(swaggerSpec).toHaveProperty(`paths.${endpoint}.get.description`, expect.stringContaining('Creator, Organizer or Admin capability'));
+    }
     expect(swaggerSpec).toHaveProperty('paths./api/hunt-templates/{key}/geography.get.security', [{ bearerAuth: [] }]);
-    for (const status of ['200', '401', '404', '409']) {
+    for (const status of ['200', '401', '403', '404', '409']) {
       expect(swaggerSpec).toHaveProperty(`paths./api/hunt-templates/{key}/geography.get.responses.${status}`);
     }
     expect(swaggerSpec).toHaveProperty('components.schemas.HuntTemplateGeography.required', ['key', 'version', 'configuration']);
