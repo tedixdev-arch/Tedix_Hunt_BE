@@ -58,6 +58,30 @@ describe('CreatorApplications', () => {
       .not.toMatch(/INSERT INTO users|UPDATE users SET password_hash/);
   });
 
+  it.each([
+    { label: 'invited Admin', password_hash: null },
+    { label: 'Organizer', password_hash: null },
+    { label: 'Creator', password_hash: null },
+    { label: 'mixed roles', password_hash: null },
+    { label: 'expired invitation', password_hash: null },
+    { label: 'guest', password_hash: 'existing', is_guest: true },
+    { label: 'blocked', password_hash: 'existing', account_status: 'blocked' },
+    { label: 'retired', password_hash: 'existing', account_status: 'retired' },
+  ])('refuses $label without any persistent changes', async (identity) => {
+    mocks.clientQuery.mockResolvedValueOnce({}).mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1', is_guest: false,
+        account_status: 'active', is_creator: false, ...identity }] })
+      .mockResolvedValueOnce({});
+    await expect(CreatorApplications.create(input)).rejects
+      .toBeInstanceOf(CreatorApplicationIdentityConflictError);
+    const queries = mocks.clientQuery.mock.calls.map(([sql]) => String(sql));
+    expect(queries).toHaveLength(4);
+    expect(queries[2]).toContain('FOR UPDATE');
+    expect(queries[3]).toBe('ROLLBACK');
+    expect(queries.join('\n')).not.toMatch(/INSERT|UPDATE users|DELETE|COMMIT/);
+    expect(mocks.release).toHaveBeenCalledOnce();
+  });
+
   it('approves atomically with only Creator capability and no credential/token changes', async () => {
     mocks.clientQuery.mockResolvedValueOnce({})
       .mockResolvedValueOnce({ rows: [row] })

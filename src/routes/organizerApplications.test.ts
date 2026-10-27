@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(), list: vi.fn(), approve: vi.fn(), reject: vi.fn(), findUserById: vi.fn(),
 }));
 vi.mock('../models/OrganizerApplication.js', () => ({
+  OrganizerApplicationIdentityConflictError: class OrganizerApplicationIdentityConflictError extends Error {},
   ApplicationNotPendingError: class ApplicationNotPendingError extends Error {},
   OrganizerApplications: {
     create: mocks.create, list: mocks.list, approve: mocks.approve, reject: mocks.reject,
@@ -15,6 +16,7 @@ vi.mock('../models/User.js', () => ({
   User: { findById: mocks.findUserById },
 }));
 
+import { OrganizerApplicationIdentityConflictError } from '../models/OrganizerApplication.js';
 import { createApp } from '../app.js';
 import { signJwt } from '../lib/jwt.js';
 
@@ -50,6 +52,13 @@ describe('POST /api/organizer-applications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.create.mockResolvedValue(created);
+  });
+
+  it('returns only a safe conflict for an unavailable identity', async () => {
+    mocks.create.mockRejectedValueOnce(new OrganizerApplicationIdentityConflictError());
+    const response = await request(app).post('/api/organizer-applications').send(validInput).expect(409);
+    expect(response.body).toEqual({ error: 'organizer_application_conflict' });
+    expect(response.headers['set-cookie']).toBeUndefined();
   });
 
   it('publicly creates a pending application and returns only public fields', async () => {

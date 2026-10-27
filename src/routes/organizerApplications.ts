@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import {
   OrganizerApplications,
+  OrganizerApplicationIdentityConflictError,
   ApplicationNotPendingError,
   type OrganizationType,
   type OrganizerApplicationStatus,
@@ -49,7 +50,7 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
  *   post:
  *     tags: [Organizer Applications]
  *     summary: Submit an Organizer application
- *     description: Establishes credentials, but does not grant Organizer access while pending.
+ *     description: Creates credentials only for a new identity; preserves existing credentials. Existing passwordless, guest or unavailable identities cannot apply publicly. Organizer access requires approval.
  *     requestBody:
  *       required: true
  *       content:
@@ -73,6 +74,12 @@ const serialize = (application: Awaited<ReturnType<typeof OrganizerApplications.
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/OrganizerApplication' }
+ *       409:
+ *         description: Application conflicts with the identity; no changes are made. Response contains only organizer_application_conflict, without account details.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { error: organizer_application_conflict }
  *       400:
  *         description: Invalid input or unsupported request field
  *         content:
@@ -109,27 +116,34 @@ router.post('/', async (request, response) => {
 
   // Hash before crossing into persistence; applications never contain credentials.
   const passwordHash = await bcrypt.hash(input.password, PASSWORD_BCRYPT_ROUNDS);
-  const application = await OrganizerApplications.create({
-    name: (input.name as string).trim(),
-    email: (input.email as string).trim().toLowerCase(),
-    organizationName: (input.organizationName as string).trim(),
-    organizationType: input.organizationType as OrganizationType,
-    reason: (input.reason as string).trim(),
-    phone: typeof input.phone === 'string' ? input.phone.trim() || null : null,
-    passwordHash,
-  });
+  try {
+    const application = await OrganizerApplications.create({
+      name: (input.name as string).trim(),
+      email: (input.email as string).trim().toLowerCase(),
+      organizationName: (input.organizationName as string).trim(),
+      organizationType: input.organizationType as OrganizationType,
+      reason: (input.reason as string).trim(),
+      phone: typeof input.phone === 'string' ? input.phone.trim() || null : null,
+      passwordHash,
+    });
 
-  return response.status(201).json({
-    id: application.id,
-    name: application.name,
-    email: application.email,
-    organizationName: application.organizationName,
-    organizationType: application.organizationType,
-    reason: application.reason,
-    phone: application.phone,
-    status: application.status,
-    createdAt: application.createdAt,
-  });
+    return response.status(201).json({
+      id: application.id,
+      name: application.name,
+      email: application.email,
+      organizationName: application.organizationName,
+      organizationType: application.organizationType,
+      reason: application.reason,
+      phone: application.phone,
+      status: application.status,
+      createdAt: application.createdAt,
+    });
+  } catch (error) {
+    if (error instanceof OrganizerApplicationIdentityConflictError) {
+      return response.status(409).json({ error: 'organizer_application_conflict' });
+    }
+    throw error;
+  }
 });
 
 router.get('/', requireAuth, requireAnyRole(['admin']), async (request, response) => {

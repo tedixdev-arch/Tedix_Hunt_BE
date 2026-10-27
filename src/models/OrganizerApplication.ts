@@ -48,6 +48,8 @@ const mapRow = (row: any): OrganizerApplication => ({
   organizationId: row.organization_id,
 });
 
+export class OrganizerApplicationIdentityConflictError extends Error {}
+
 export class ApplicationNotPendingError extends Error {}
 
 export const OrganizerApplications = {
@@ -59,8 +61,12 @@ export const OrganizerApplications = {
       // Serialize registration for an email so concurrent requests cannot create two identities.
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [email]);
       let user = (await client.query(
-        'SELECT id, password_hash FROM users WHERE email = $1 FOR UPDATE', [email],
+        'SELECT id, password_hash, is_guest, account_status FROM users WHERE email = $1 FOR UPDATE', [email],
       )).rows[0];
+      // Public input proves no ownership of an existing passwordless identity.
+      if (user && (user.password_hash === null || user.is_guest || user.account_status !== 'active')) {
+        throw new OrganizerApplicationIdentityConflictError();
+      }
       if (!user) {
         // Legacy role is compatibility metadata; user_roles remains the access authority.
         user = (await client.query(
@@ -68,8 +74,6 @@ export const OrganizerApplications = {
            VALUES ($1, $2, 'organizer', FALSE, $3) RETURNING id, password_hash`,
           [email, input.name, input.passwordHash],
         )).rows[0];
-      } else if (user.password_hash === null) {
-        await client.query('UPDATE users SET password_hash = $2 WHERE id = $1', [user.id, input.passwordHash]);
       }
       // A password-backed identity keeps its established credential; application input never resets it.
       const { rows } = await client.query(
@@ -83,6 +87,9 @@ export const OrganizerApplications = {
       return mapRow(rows[0]);
     } catch (error) {
       await client.query('ROLLBACK');
+      if ((error as { code?: string }).code === '23505') {
+        throw new OrganizerApplicationIdentityConflictError();
+      }
       throw error;
     } finally {
       client.release();
