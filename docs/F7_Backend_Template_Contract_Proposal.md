@@ -1,10 +1,10 @@
 # F7 Backend Template contract proposal
 
-**Status: D04 PO APPROVED — 2026-10-27; all other unresolved decisions PROPOSED — NOT APPROVED. Documentation only.**
+**Documentation only. Product rules below: PO APPROVED — 2026-10-27. Unresolved technical decisions: PROPOSED — NOT APPROVED.**
 
-Prepared 27 October 2026 for Product Owner review. The Product Owner superseded the earlier implementation request with this contract-definition task. No migration, model, endpoint, authorization, UI or deployed behavior is changed. D04 records an approved product rule; other recommendations and example payloads remain proposals, not available APIs or permission to implement them. Review of this document does not itself approve any unresolved decision; record each decision explicitly in section 10 before implementation.
+This revision records the Product Owner's instruction to simplify existing Draft PR #75 around the agreed product model. Source of approval: the Product Owner's explicit eleven-rule instruction in this conversation on **2026-10-27**, reproduced in section 3. It extends the earlier D04 approval from the same date. Approval of those product rules does not approve storage, API names, migrations, publication/withdrawal state transitions or revision mechanics.
 
-The approved sequence is **F7 → G4 → D10 before Participant runtime**, with no controlled-pilot sequencing exception. This document completes none of those workstreams. Merge and deployment are not authorized by this task.
+No code, migration, model, authorization, UI or deployed behavior changes. Do not implement or merge this proposal without the required technical review and authorization. The approved sequence remains **F7 → G4 → D10 before Participant runtime**, with no pilot exception; none is complete on the strength of this document.
 
 ## 1. Evidence and architectural authority
 
@@ -41,297 +41,204 @@ PR #74 is merged. Its documented release gate requires authorized operator verif
 
 This is a source/consumer inventory, not a live database census. Actual numbers of legacy identities, versions, approvals and Hunt references must be collected read-only before rollout with appropriate access; no live data was read here.
 
-## 3. Established requirements versus decisions
+## 3. Agreed product model — PO APPROVED — 2026-10-27
 
-The following are established by the FE target architecture and the PO's current direction, although new category behavior is not implemented:
+Source: Product Owner instruction to update existing Draft PR #75, 27 October 2026. These are approved product rules, not alternative recommendations:
 
-1. A Template is content/configuration assembled with the Creator Framework; Mechanics Library is neither a Template nor a second gameplay engine.
-2. Universal content is reusable without a required city or fixed coordinates; Universal approval does not certify a physical route. Local adds locality, geography, adaptations and independently reviewed operational evidence.
-3. Active approved Creator capability may author/submit both categories. Under the PO-approved D04 rule, an independently Admin-approved and published Universal Template version is automatically reusable by all active authorized Creators, including other Creators. No separate Creator consent or Admin community-release permission is required. Local may start from scratch or copy that exact authoritative source version; the Local belongs to the copying Creator and requires independent Local approval before Organizer selection. Source ownership never grants destination editing rights.
-4. Copy on creation creates a new destination identity/history and content snapshot, retaining exact source provenance. No live inheritance, automatic source updates or inherited Local approval.
-5. Submission and independent Admin approval bind exact immutable versions. Universal approval cannot authorize Organizer selection. Future ordinary location-based selection requires approved eligible Local versions after explicit legacy transition.
-6. Historical Signal versions, review decisions and Hunt snapshots survive unchanged. No automatic classification from name, city, coordinates, fixture or old approval. No invented geographic verification.
-7. Protected coordinates/content must respect authorized audiences. G4 category/evidence gates and D10 setup remain later work; all new classified artifacts stay out of Organizer selection until those gates exist.
-
-**D04 is PO APPROVED — 2026-10-27. All other unresolved representation, rollout and behavior decisions in sections 4–10 remain PROPOSED — NOT APPROVED.** The register records alternatives, recommendations and gates; it does not turn an established product principle into an approved technical design.
-
-## 4. Proposed classification and ownership contract
-
-### 4.1 Category storage and version binding (D01)
-
-Alternatives:
-
-- A: mutable identity category only. Simple, but relabeling an identity can reinterpret already approved versions; unsuitable without version binding.
-- B: category only in immutable content/version. Each version is explicit, but one identity could switch between Universal and Local and complicate approval/catalog authority.
-- C (recommended): immutable category on new identity, repeated/bound on every version with database-enforced consistency; absent classification means historical/unclassified only. Expose it in an API envelope rather than rewriting old JSONB.
-
-Under C, a classified identity's category is `universal` or `local` for its lifetime. Every version carries that same category and category-validation contract revision. Category changes require a new identity, not a version that changes meaning. Existing rows remain NULL/unclassified; no historical JSONB, approval or snapshot changes. Use `legacy_unclassified` only as a read representation, not a third authorable category. Exact-version review must resolve the version-bound value and reject inconsistencies.
-
-Use the same content/mechanic framework for both categories. Recommended Universal v1 validation: reusable normal/terminal structure may exist without checkpoint positions, FinishPoint coordinates or canonical locality; reject authoritative physical-route fields in the classified Universal contract. Local drafts may be incomplete; Local submission must eventually satisfy separate identity/geography/evidence gates. Free-text stories can mention places; field validation cannot certify narrative reusability. Unknown extension fields must not become an alternative geographic authority. Exact allowed fields and supported mechanic constraints need a reviewed validation matrix before implementation (D02).
-
-The old validation compatibility branch remains a legacy behavior; it must not let a classified Local bypass required geography or force Universal submission to include GPS. No historical scoring/role/content normalization follows from category validation.
-
-### 4.2 Ownership and cross-Creator authorization (D03)
-
-Alternatives: original-author-owned derivatives; platform-owned community derivatives; independent destination ownership. Recommend independent ownership: destination `origin='creator'` and `created_by_user_id=authenticated Creator`, source attribution recorded separately. Ownership transfer is outside V1. Admin capability alone cannot create a Creator-owned artifact; Admin/Creator combined identities obey Creator ownership and independent approval.
-
-Reuse authorization requires active non-guest persisted Creator capability at commit plus a source-specific eligibility check. Knowing a source key/version/Creator ID conveys no permission. Authorization must run before private-source lookup/disclosure; absent/private/other-owned authoring reads retain indistinguishable errors. Owner authoring read of one's own Universal is distinct from community-copy access.
-
-Recommend locking/rechecking destination actor account and Creator capability within the copy transaction, following compatible lock order with role removal/account retirement. Source approval/availability must also serialize with copy. The implementation design must demonstrate this ordering rather than assume route middleware alone closes revocation races.
-
-## 5. Proposed source eligibility, copy and provenance
-
-### 5.1 Exact source eligibility (D04–D05)
-
-**D04 — PO APPROVED — 2026-10-27.** Source: the Product Owner's explicit instruction in this conversation to update Draft PR #75 on 27 October 2026:
-
-> An independently Admin-approved and published Universal Template version is automatically reusable by all active authorized Creators.
-
-This approved rule replaces the earlier consent/release recommendation. Community reuse derives from the authoritative approved/published Universal version itself; there is no separate Creator opt-in, Admin community-release mechanism, per-Creator allowlist or reuse-grant record/API. A copied Local belongs to the copying Creator and requires its own independent Local approval before Organizer selection. Exact-version provenance, historical versions and existing Hunt snapshots remain preserved; no retroactive restrictions or automatic source updates are introduced.
-
-Recommended transaction predicate implementing that approved product rule (representation and locking details remain proposed):
-
-```text
-active authorized destination Creator
-AND exact source version is authoritatively classified Universal
-AND exact source version is independently Admin-approved and published
-AND approval/publication and source artifact refer to the same immutable version
-```
-
-A draft, submitted, changes-requested, unapproved, unpublished, wrong-category or unclassified artifact fails. Resolve approval/publication server-side; a client-supplied version is a precondition, never proof of eligibility. A newer saved version must not substitute for the exact approved/published artifact, and a stale expected version is rejected rather than silently copying a different artifact. Missing authoritative evidence fails closed for new classified copying; never manufacture evidence or impose new review requirements on historical versions or existing Hunt snapshots.
-
-**Still unresolved under D05/D09:** current main has no separate Template `published` state; generic approval currently makes the pinned version catalog-selectable. The representation of authoritative publication for classified Universal versions must be reviewed, without inventing a separate community-release permission. The publication model must specify whether one or multiple versions may remain authoritatively published. Recommend exact authoritative version resolution with no latest-version inference. Every version that remains independently approved and published must be reusable under D04; a current-pin-only resolver cannot exclude another still-published version. Publication transitions need PO review, and cannot add consent or release gates.
-
-Account blocking/retirement/role loss of the original Creator must not become an automatic extra copy restriction while that source version remains authoritatively approved/published. Whether and how a future explicit withdrawal/unpublication changes authoritative publication, and its effective-time policy, remain PROPOSED — NOT APPROVED under D05; this document does not adopt such changes. Any future policy must preserve prior copies, provenance, historical versions and Hunt snapshots, with no retroactive restrictions or content mutation. Source edits and new approvals never automatically update an existing Local. Broader legal/takedown and legacy rollout policies remain separate unresolved decisions (D05/D12).
-
-### 5.2 Local creation paths (D06)
-
-**Scratch:** Creator supplies explicit Local category and ordinary draft content. Allocate a fresh identity/key and version 1 atomically. Source provenance is null; no Universal source is required. Local draft may omit unresearched geography; it is not approved, selectable or certified.
-
-**Copy:** Creator selects an offered exact approved Universal version. Backend independently resolves the exact immutable version and its authoritative approval/publication evidence, then snapshots its content into a fresh Local identity, version 1 and immutable lineage. Rewrite only destination `key`/`version`; preserve reusable source content and do not invent locality, coordinates, safety evidence or approval. Local-specific adaptation is authored in subsequent versions. If target schema requires a mapping, define and version that mapping explicitly; no silent stripping of gameplay or claim of a byte-identical copy after adaptation.
-
-Recommend a server-generated destination UUID-based key when omitted, or existing normalized caller key rules when supplied. No caller-supplied destination UUID/owner/status/provenance/source content. Every completed request with a different key creates an independent copy. For a same-key retry/concurrent request, one creation succeeds and others receive 409 without overwrite; owner GET resolves uncertain responses. Alternative: durable actor-scoped idempotency tokens, separately designed if PO requires replay to return the same result. This proposal recommends existing key-based behavior, not an unimplemented idempotency promise.
-
-### 5.3 Version-bound lineage and transaction (D07)
-
-Alternatives: content JSON only; normalized exact source FK with Creator join; normalized FK plus immutable attribution identifiers and source evidence. Recommend the last, with no copied personal profile values:
-
-| Proposed lineage field | Meaning |
+| Rule | Approved behavior |
 | --- | --- |
-| Destination Template / first version identity | The newly owned Local identity and its version 1; later versions inherit unchanged lineage. |
-| Source Template UUID and key at copy | Stable source identity plus historical human-readable key; not a mutable live-content reference. |
-| Source version row UUID and integer | Exact immutable artifact, bound together by FK/unique constraints; never a latest-version shortcut. |
-| Original Creator user UUID | Source ownership/attribution identifier, validated against authoritative source records; not the copying actor. |
-| Approval / publication evidence reference | Exact authoritative independent approval/publication used at copy time, bound to the source version; later state changes never rewrite this historical fact or prior copies. |
-| Copied time and mapping revision | Server timestamp and documented copy transformation contract revision. |
+| P01 | A Creator can create a Universal Template from scratch. |
+| P02 | An independently Admin-approved and published Universal becomes available to all authorized Creators. |
+| P03 | Any authorized Creator can use a published Universal as the foundation for an independent Local Template, freely adapting their Local copy. |
+| P04 | A Creator cannot modify another Creator's Universal or publish a derivative Universal from it. |
+| P05 | Only the original Creator can revise and republish their Universal. |
+| P06 | Local Templates can also be created from scratch. |
+| P07 | Local Templates require independent Admin approval before Organizer selection. |
+| P08 | No separate community-reuse consent, Admin reuse-release workflow, notifications, subscriptions or Creator-to-Creator communication. |
+| P09 | The Creator-facing library presents finished published Templates, not historical versions. |
+| P10 | Revisions and publication must not change existing Local copies or Hunt snapshots. |
+| P11 | Published Templates with dependencies must not be destructively deleted; withdrawing them from future selection is distinct from deleting historical records. |
 
-Recommend no immutable source name/email snapshot: keep durable UUID attribution and resolve an audience-safe display label which can become `Deleted user` on retirement. Alternative: frozen public alias with approved retention/redaction rules. Original authorship survives anonymization; public disclosure of internal user UUIDs is a separate D08 decision. Owner/Admin may receive audit identifiers; community listings should use an approved public attribution projection without email.
+Universal is reusable content/mechanics without an approved physical route; Local supplies locality, geography and adaptations. Both remain Templates assembled with the existing Creator Framework, not new engines. Universal approval does not approve Local geography.
 
-Proposed transaction: check/lock actor authority → lock source identity/effective eligibility records → resolve and verify exact immutable artifact/category/independent approval/publication → allocate destination identity → insert copied version 1 → insert lineage → validate deferred constraints → commit. Any error rolls back all destination rows. All state-changing eligibility paths must use a compatible locking protocol. Do not hold an open transaction during provider calls. Concurrent requests using distinct destination keys can both succeed; same-key conflict must not leave an orphan identity/version/lineage.
+The product flow is:
 
-Lineage is write-once and version-bound, not an editable content property. Later Local versions retain it, even if all narrative is adapted. Recommend a restrictive source-version FK so a surviving derivative protects source identity/version deletion; deleting an unused destination draft removes its own lineage without deleting the source. Mutating source content, category, owner or lineage must be denied in persistence, including internal helper paths. Newer source edits, approvals, retirement or later publication changes never mutate copies or retroactively restrict them. Update-from-source is outside V1.
+1. Creator authors their own Universal from scratch → independent Admin review → published Universal appears as a finished product in the Creator library.
+2. An authorized Creator selects that product → Backend creates an independent, Creator-owned Local → Creator freely adapts it → independent Local review → Organizer selection only after the applicable Local eligibility gates.
+3. Alternatively, Creator authors Local from scratch → the same independent Local review and eligibility gates.
+4. The original Creator may revise/republish their Universal. Previously created Local copies and saved Hunt snapshots remain unchanged. Internal version/review history supports this guarantee without becoming a historical-version chooser for other Creators.
 
-## 6. Proposed lifecycle, approval and visibility boundaries
+No Universal → Universal, Local → Universal or Local → Local reuse workflow is proposed. Publishing another Creator's Universal as a derivative Universal is forbidden. Independent Local ownership does not confer source editing rights. Free adaptation of Local content remains subject to supported framework and Local validation/review; it is not constrained to a small approved diff against the Universal.
 
-### 6.1 Category review and staged gates (D09)
+## 4. Creator-visible Templates and internal records
 
-Extend the existing review workflow; do not build a second approval engine. Universal review checks reusable structure/content/supported mechanics; it grants no route approval. Local review independently checks Country/Locality, exact ordered route, all normal stops and FinishPoint, adaptations, access and operational evidence. Advisories, evidence-required exceptions and unresolved blockers follow F7/G4; warnings or provider estimates are not certification.
+**Approved distinction (P09):** the library is a product library. It presents finished published Templates, not version histories. Universal entries can be used as Local foundations. This does not authorize copying Local entries or make Universal entries Organizer-selectable. Category projections and exact library layout remain technical/UI decisions; no new Local browsing or communication workflow is introduced.
 
-Recommend classified drafts/versioning may ship in an approved F7 foundation slice, while classified submission/approval fails closed until its category validation/review contract exists. Alternative: permit category submission into a clearly identified held queue with approval disabled; this adds a new queue state/UX contract. Do not let the existing generic approve endpoint accidentally release classified artifacts before category gates. This staged choice needs explicit PO approval, even though keeping new categories out of Organizer selection is already required.
+**PROPOSED — NOT APPROVED technical mapping:** one product identity is represented by its currently authoritative published artifact; immutable authoring versions and exact approval records remain internal. An owner authoring workspace may need draft/revision status, and Admin review must identify the exact submission. Those internal needs do not turn the shared library into a version catalog.
 
-After category governance exists, an independently Admin-approved and published Universal version is automatically reusable by all active authorized Creators under D04. Local Organizer eligibility remains a separate decision requiring independent Local approval and the applicable G4 gates. No source approval is copied to the Local destination. Independent reviewer must differ from destination Creator even for combined Admin/Creator accounts. Universal source authorship does not confer Local editing/review authority.
+A library item should identify the Template product and provide a concurrency reference to its current published artifact. A technical version number or opaque publication reference may be carried by API payloads without offering historical versions as user-selectable products. The representation is unresolved (D05-T/D13).
 
-### 6.2 Revision and repeated review (D10)
+On copy, the Backend resolves that product's authoritative approved/published immutable artifact. It never trusts client-supplied content, owner, category, approval or source attribution. If publication changes between display and copy, the proposed API rejects a stale reference and requests a refreshed product selection; it does not silently copy a different artifact or offer a historical-version fallback.
 
-Current main cannot revise/resubmit changes-requested content or edit approved identities. Alternatives: keep V1 restrictions; add a transactionally versioned revision loop; create a replacement identity per revision. Recommend retain restrictions in the first foundation slice, then implement changes-requested revision in a separate approved slice before a complete Creator workflow is claimed.
+Historical source versions remain retained for provenance, approval evidence and existing copies. They are not separate reusable products in the Creator library. Whether a current internal version is old or new is irrelevant to existing copies: their content is already independent.
 
-That slice must specify how the old reviewed pin remains auditable while a new draft exists (current `draft` requires a null pin), and preserve one exact review per new version. Post-approval editing needs separate authoring-versus-effective-approval state if previous approval remains usable. Do not reinterpret current `status` or overwrite review PKs to support it. Same-version re-review/reversal requires append-only decision history and an effective-approval pointer, separately designed with G4. Tests simulating later source versions must use that approved workflow or controlled fixtures, not invent an API that edits approved content.
+## 5. Authorization, lifecycle and copying
 
-### 6.3 Organizer and geography boundaries (D11)
+### 5.1 Ownership and approved publication
 
-Recommend a single authoritative selection predicate shared by metadata listing, geography inspection and exact-key Hunt selection. In the first classified foundation it permits only the approved legacy compatibility population chosen in section 7; no Universal or new Local is selectable. Later it additionally permits exact approved Local versions satisfying G4 identity/evidence/validity and rollout gates. Client-side filtering is insufficient.
+P01–P07 are **PO APPROVED — 2026-10-27**. Technical enforcement is **PROPOSED — NOT APPROVED**:
 
-Community Universal discovery is a separate Creator-only purpose, not an expansion of the professional Organizer catalog. Creator owner reads/Admin reviews can expose their authorized content; community browse should initially expose metadata and approved attribution only. Full source reuse is performed server-side; any later full-content community preview needs its own disclosure decision (D08).
+- Use current persisted active non-guest Creator capability, including multi-role accounts. Admin-only or Organizer-only is not Creator authority.
+- Owner-only source writes/revision/publication: the original Creator retains their Universal. Another Creator can read the published product as authorized and create a Local, but cannot edit the source, revise/republish it or create a derived Universal.
+- Local ownership is the copying Creator, or the author for scratch Local. Source author attribution is provenance, not ownership of the Local.
+- Universal publication must refer to an independently Admin-approved exact artifact. An owner's right to revise/republish does not permit bypassing independent approval for changed content. An Admin/Creator combined identity cannot approve its own submission.
+- Publication makes the Universal automatically reusable by all authorized Creators. There is no second reuse permission, consent flag, release record, per-Creator allowlist, subscription or notification requirement.
+- Local approval is independent of source approval. Universal remains outside Organizer selection; newly classified Local remains outside selection until the G4 eligibility gates exist.
 
-Future Local eligibility must be checked atomically with Hunt selection/persistence and with applicable publish readiness. Expected key/version should reject stale selection instead of switching to a newer version between preview and save. These are future G4/D10 contract changes, not a claim that current key-only selection already protects that race. Existing authorized geography projections remain allowlisted; new category/provenance fields cannot leak private drafts, clues, answers, evidence or hidden coordinates to unapproved audiences.
+The agreed product lifecycle is authoring → independent review → publication/availability, with owner revision and republication. It is not a proposed database enum or a new manual approval/publication choreography. Whether approval atomically establishes publication, and how a draft revision coexists with the existing published artifact, remain technical decisions D05-T/D09/D10. No extra release workflow is authorized.
 
-## 7. Proposed legacy compatibility and rollout (D12)
+### 5.2 Universal → Local only
 
-Alternatives:
+**Proposed atomic copy contract:**
 
-- A: retain every unclassified identity's present and future legacy behavior indefinitely. Easiest compatibility, but ongoing unclassified creation/approval could bypass category gates.
-- B (recommended): explicit frozen legacy compatibility cohort at an approved cutover, preserving historical readable data and approved selection behavior, while new classified artifacts use gated paths. Handle other legacy authoring/review records through a reviewed transition inventory.
-- C: hide all unclassified entries immediately. Violates section 14's requirement not to silently remove the catalog or strand Hunts; do not adopt without a separately approved transition.
+1. Check actor capability and resolve the selected published Universal product.
+2. Resolve its exact authoritative independently approved/published immutable artifact. A draft, submitted, changes-requested, unapproved, unpublished, Local or unclassified artifact is not a community-copy source.
+3. Allocate an independent destination identity and first Local version, owned by the copying Creator.
+4. Snapshot source content and write exact source provenance in the same transaction. Only documented destination identity/version mapping occurs; do not invent GPS, locality, route evidence or inherited approval.
+5. Commit all destination records together or roll back all of them. Later Local versions preserve lineage while the Creator freely adapts their content.
 
-Recommended phased policy, **not approved**:
+Scratch Local follows the normal owned-draft path with no Universal-source provenance. Scratch Universal does not accept another Template as a source. The copy operation has a fixed Local destination category; callers cannot select Universal. Subsequent Local version saves cannot change it to Universal or replace source lineage.
 
-1. Before cutover, inventory identities, exact versions, origin, status/pins/reviews, starter consumers, approved catalog/geography behavior and all Hunt key/version/snapshot references. Store baseline fingerprints and consumer expectations; do not print hidden content into public PR logs.
-2. Add nullable classification and separate new metadata without backfilling or rewriting old rows. Until a cohort policy and client transition are approved, do not enable classified production writes or legacy catalog filtering. Schema expansion alone must preserve existing reads.
-3. At a PO-approved cutover, explicitly record the legacy selection cohort of currently approved identities and exact effective versions. Preserve today's selected artifacts; platform latest-resolution is recorded explicitly rather than inferred forever. This freezes future legacy selection, so it is a behavior change requiring approval, not an existing guarantee.
-4. Existing unclassified drafts/submissions/changes-requested records remain owner/Admin readable and deletable only under current protection rules. Recommend no new legacy submission/approval at cutover; continue authoring only under a reviewed transition or create a separately classified adapted identity. Alternative: explicitly grandfather named in-flight records through their existing workflow. PO must select and record that exception set; never silently strand submitted work.
-5. Generic creation should require explicit category after reviewed client readiness. Existing starter routes need a separate decision: retain a bounded legacy authoring exception, disable creation with a documented transition, or release separately reviewed classified starter adaptations. Recommend reviewed Local adaptations when ready, and no silent category assignment. If that work is not ready, defer the cutover rather than silently change starter semantics.
-6. Historical identity/version/content/approval/review remains unchanged. A classified adaptation is a new identity/version with explicit adaptation lineage distinct from community Universal provenance; an unclassified source is never eligible for the Universal copy endpoint. Its prior approval does not transfer. Design that adaptation route only after approval, not by overloading category PATCH.
-7. Existing Hunts continue reading their saved snapshots even if a Template leaves future selection. Unrelated Hunt edits/reopening do not refresh or reclassify it. D10 must separately decide reselection and publication eligibility for legacy draft Hunts; do not introduce a new gate that strands them by accident. Runtime incident/takedown policy is separate from snapshot rewriting.
+The Backend must enforce these restrictions on all supported authoring/publication paths, including internal helpers. A category or provenance field hidden in extensible JSON cannot override authoritative metadata. Ownership and declared lineage can be enforced; arbitrary semantic copying from manually supplied narrative cannot be inferred reliably from JSON. No plagiarism detection or cross-Creator moderation workflow is invented here.
 
-Section 14 establishes preservation, not a final cohort or exemption policy. Steps 3–5 and legacy draft-Hunt publication rules are PO decisions. No deployment switch should infer approval from this recommendation.
+**Unresolved implementation details:** lock order with account/role/review/publication mutation, key allocation, retries/idempotency, exact validation matrix and stable error responses. Source account retirement must not silently mutate an existing published artifact or its dependencies. Any future effect on publication/availability requires separately reviewed mechanics; no extra source-account copy gate is adopted here.
 
-## 8. Proposed API, constraints and migration strategy
+### 5.3 Immutable provenance and history
 
-### 8.1 Contract surface (D13) — names and payloads are proposals
+Required integrity is established; representation remains **PROPOSED — NOT APPROVED (D07/D14)**. Retain:
 
-Extend existing authoring envelopes/routes and shared OpenAPI conventions. Do not expose a parallel authoring service. A proposed classified read envelope adds `category`, `categoryContractVersion` and server-owned `sourceProvenance` to existing key/version/status/origin/submittedVersion/content. Historical reads return an explicit unclassified representation with null new metadata without modifying content. Copy lineage is null for scratch creation; field names and public attribution shape depend on D07/D08.
+- Exact source Template identity and immutable version identity/number.
+- Original Creator attribution, separate from destination ownership.
+- Destination identity/initial version and the authoritative exact approval/publication reference used at copy time.
+- Server copy time and any explicitly reviewed copy mapping revision.
 
-| Proposed operation | Request / response | Authorization and failures |
-| --- | --- | --- |
-| Extend `POST /api/creator/templates` | Required explicit `category: universal/local`, existing `key` and v1 `content`. Returns owned draft/version 1 plus authoritative category and null source provenance. | Active Creator only; 400 invalid/category-content conflict, 409 existing key. Reject client owner/approval/provenance fields, not silently trust or persist them. Legacy client transition requires D12. |
-| Existing owner GET/list/version POST | Return version-bound category/lineage. New-version body remains complete `content`; owner/category/source lineage cannot be changed. | Existing indistinguishable 404 for absent/other-owned; 409 lifecycle conflict; 400 invalid content. Category mismatch fails rather than reclassification. |
-| New `GET /api/creator/templates/community/universal` | Eligible exact-source metadata: source key/version, displayName/theme and approved public Creator attribution; no private content/geography. | Active Creator only; filtered by the same effective source predicate as copy. Empty list is valid. Existing `/:key` routes must not swallow reserved paths. Pagination/limits must be documented before enabling a growing catalog. |
-| New `POST /api/creator/templates/{sourceKey}/copy-local` | Body `{expectedSourceVersion: 3, key: "my-local-copy"}`; key optional if using generation. Returns independent Local draft/version 1 and source provenance, never source approval. | Active Creator. Resolve source server-side; client version is an optimistic precondition, never eligibility proof. 404 for inaccessible/missing/noneligible source without private-state disclosure; 409 `source_version_conflict` only for otherwise visible eligible stale source, or `template_key_conflict`; 400 malformed/extra fields. |
-| Existing `POST /{key}/submit` | Still pins explicitly supplied latest version; category-specific rules apply only when that category gate is available. | Owner only; 409 proposed `template_category_gate_unavailable` while staged closed; existing validation/lifecycle failures preserved. |
-| Existing Admin review/approve/request-changes | Add category/exact provenance to authorized review projections; category-specific validation, same workflow. Resolve authoritative independent approval/publication for the exact Universal version; reuse is automatic under approved D04. No separate consent/release API. | Independent Admin approval. Recommended staged classified approval 409 until category review is supported. Publication representation and later state transitions remain D05/D09 proposals; the old generic response is not proof of a classified publication contract. |
-| Existing professional catalog/geography/Hunt PATCH | Preserve current safe response fields and explicit legacy behavior in initial rollout; block classified selection at shared resolver. Later Local eligibility and expected-version selection need reviewed G4/D10 additions. | No new access from category metadata. All selection entry points must reject direct-key bypass. No new API implemented here. |
+Recommend normalized source references and immutable lineage, rather than client-editable content fields. Alternatives are version metadata versus a normalized lineage record with restrictive exact-version references; SQL constraints/triggers and deletion interactions require review. Do not store an independent reuse grant.
 
-Illustrative copy request and abbreviated response, **PROPOSED — NOT APPROVED** (content is the ordinary complete snapshot, omitted here):
+Later Local edits retain the same lineage even after extensive adaptation. No source update, new publication, withdrawal or retirement silently rewrites an existing Local or Hunt snapshot. Update-from-source, derivative Universal publication and subscriptions are outside the product model.
 
-```json
-{
-  "expectedSourceVersion": 3,
-  "key": "creator-b-local-journey"
-}
-```
+### 5.4 Dependency protection versus withdrawal
 
-```json
-{
-  "key": "creator-b-local-journey",
-  "version": 1,
-  "status": "draft",
-  "origin": "creator",
-  "category": "local",
-  "categoryContractVersion": 1,
-  "submittedVersion": null,
-  "sourceProvenance": {
-    "sourceTemplateId": "11111111-1111-4111-8111-111111111111",
-    "sourceKey": "creator-a-universal-journey",
-    "sourceVersionId": "22222222-2222-4222-8222-222222222222",
-    "sourceVersion": 3,
-    "originalCreatorId": "33333333-3333-4333-8333-333333333333",
-    "copyContractVersion": 1
-  }
-}
-```
+P11 is **PO APPROVED — 2026-10-27**. A published Template with dependent Local copies, protected review/provenance records or Hunt history must not be destructively deleted. Removing future availability is distinct from deleting identity, historical versions or references. Existing snapshot fields are not Template FKs, so FK protection alone is insufficient.
 
-Actual full response must include complete `content` and the approved server-owned evidence/time fields. Invalid source Creator/version fields in a request never override stored lineage. Exact error codes/additive fields need contract tests and OpenAPI examples before client integration; no error should reveal private source status or profile data.
+Withdrawal mechanics remain **PROPOSED — NOT APPROVED**: actor authority, state representation, effective time, concurrent selection behavior, future selection/reselection and Hunt publish-readiness consequences. No withdrawal endpoint, new permission or automatic account-retirement transition is approved by this document. Preserve previous copies and snapshots; do not use withdrawal to erase or retroactively rewrite them. Do not infer deletion rules for dependency-free published records beyond existing Backend protection.
 
-### 8.2 Persistence constraints (D14)
+## 6. Compatibility and current Backend contradictions
 
-Recommended additive design, subject to reviewed SQL/schema specifics:
+The product model is clear; these implementation gaps must be resolved rather than hidden:
 
-- Nullable category/contract binding for legacy rows; new classified identity/version metadata must agree through composite constraints or validated triggers. Positive contract revision, Creator origin/owner consistency and a source-only-Universal / destination-only-Local invariant are checked in persistence as well as API validation.
-- Normalized one-per-destination lineage with exact composite source-version references, original Creator consistency and restrictive source/user FKs; destination versions must bind unchanged lineage. Cross-table assertions require triggers or a normalized key structure, not a PostgreSQL CHECK subquery.
-- Bind authoritative independent approval/publication evidence to the exact immutable Universal version. Derive community-copy eligibility directly from that authority; do not add consent/release tables, reuse-grant flags or per-Creator permission records. Publication representation remains proposed under D05/D09. Preserve immutable copy-time evidence if authoritative publication later changes; no retroactive restrictions on prior copies.
-- Unique keys and `(template_id, version)` remain authoritative. Add immutable-column protection for new classified identities, version content/category/ownership and lineage; review insertion remains atomic. Audit whether legacy direct-write paths exist before applying triggers globally; protection must not rewrite old data or break controlled migrations/deletion.
-- Existing protected draft deletion, review references and account retirement must account for new lineage/approval/publication references. A source cannot be deleted while a surviving derivative needs it. Locking must avoid deadlocks with identity/version creation, review, account/role mutation and Hunt updates.
-- Preserve old enum meanings and submitted-version FK. Do not add rejected/retired/re-review meanings without separately approved lifecycle design. No global NOT NULL category constraint on historical rows.
-
-### 8.3 Migration / activation / rollback strategy (D15)
-
-Use new numbered additive migrations after the current 001–021 history; never edit migration 017 or backfill 021 reviewer evidence. Keep baseline schema consistent. First inventory and dry-run against a disposable baseline plus representative legacy fixtures. Migrations run through existing advisory-lock/per-migration transactions and must roll back without half-created metadata.
-
-Deploy expand-first only after PO approval: compatible reads → nullable schema/constraints → reviewed model/API with classified activation disabled → category approval/publication governance → approved legacy cutover → later G4 eligibility and D10 selection. Avoid enabling a new writer before every resolver and old client path is safe. Any flag/configuration must be explicit, default closed for new classified selection and covered by tests; it is not a policy approval mechanism.
-
-Migration checks compare historical content JSONB values, version/identity IDs, review records, approved pins and Hunt snapshots/selection results before and after. Do not backfill source attribution for starter copies from unverified guesses. Do not promote Signal to Local because coordinates or a city name exist.
-
-Rollback recommendation: disable new classified writes/community exposure and keep selection closed; retain stored classification/provenance and readable derived drafts. Once real copies exist, do not drop lineage tables/columns or deploy a resolver that would expose their approved identities generically. A schema down-migration that deletes provenance is not an acceptable production rollback; use forward correction. Operator-reviewed deployment remains separate from review/merge and requires existing security gates.
-
-## 9. Compatibility risks and acceptance criteria
-
-### 9.1 Risks to prove, not assume away
-
-| Risk | Required evidence / mitigation |
+| Current Backend | Difference from the approved target / required response |
 | --- | --- |
-| Signal platform approval has no Creator review pin and resolves latest | Preserve exact current legacy selection under approved transition; never apply Creator-review requirements retroactively or invent approval evidence. Record platform version policy at cutover. |
-| Signal/Overload starter metadata mistaken for Universal lineage | Preserve fixtures, checksum, existing created versions and `starterSource`; a separately reviewed adaptation records its actual source type. No automatic classification or pretend Universal approval. |
-| Current generic Admin approval exposes all approved identities | Classified submission/approval and all catalog/geography/selection resolvers must be staged closed consistently, including direct-key Hunt PATCH and combined-role callers. |
-| Legacy JSONB contains fictional navigation, partial/absent geography or old scoring | Do not reinterpret or normalize old content. New Local validation must not certify old story coordinates; newly adapted versions need independent evidence/review. |
-| Account anonymization versus immutable attribution | Preserve UUID lineage and existing retirement semantics without retaining profile PII by accident; explicitly approve any public attribution/retention change. |
-| New source FKs conflict with draft deletion or retirement | Test protected deletion and all dependent references; no orphan provenance, accidental source cascade or loss of historical review evidence. |
-| New version/review functionality silently changes current lifecycle | Separate revision design and tests; no arbitrary approved-content editing, stale pin substitution or overwriting review history. |
-| Locality/catalog cutover strands legacy consumers | Inventory clients/in-flight authoring/Hunts; explicit cohort/client transition and separate publication policy. No name-based locality mapping or global legacy filter. |
-| Source withdrawal/expiry or stale preview races selection | Serialize eligibility with copy/save; define effective-time/validity policy before G4 selection. Snapshots remain data; operational availability is separate authority. |
+| Creator version creation and submission accept only draft identities; approved identities are frozen. Changes-requested revision/resubmission is absent. | P05 requires original-owner Universal revision/republishing. Current API cannot deliver it. D10 must design draft-versus-published authority and exact reapproval without mutating previous artifacts. |
+| Identity has one status and one submitted-version pin; there is no Template publication or withdrawal state. | D05-T/D09 must map a published product to the exact approved artifact, including behavior during revision. Do not rename an existing enum or invent a second reuse-release step. |
+| One review row per Template/version; current history is a minimal record, not a repeated-review event log. | Revisions need new immutable artifacts and preserved review evidence. Whether more approval-history structure is required remains D10/D14; do not overwrite existing decisions. |
+| Generic approved catalog includes every approved identity; Creator pin and platform latest-version resolution differ. | Universal must not become Organizer-selectable. Shared listing, geography and direct-key Hunt selection must enforce the approved audience/category boundary without breaking legacy platform behavior. |
+| No category or exact copy-lineage schema; extensible content and helper writes are less strict than new category authority would need. | D01/D07/D14 must enforce Universal → Local only and owner-only Universal revision at persistence/API boundaries. Existing starterSource is not authoritative Universal provenance. |
+| Authoring reads expose latest versions; professional catalog returns metadata/geographic projections, not a Creator product library. | Library must expose finished published products, while owner authoring and Admin exact review remain distinct projections. Do not expose historical versions as reusable library choices. |
+| Legacy approval, geographic compatibility and Signal fixtures predate categories; old review rows were not fabricated. | Do not classify Signal by name/coordinates, backfill approval evidence or make new classification requirements apply retroactively. |
+| Hunt selection snapshots complete content, but references are not Template FKs. | Preserve independent snapshots and protected deletion checks; new lineage references must complement, not replace, existing Hunt-reference protection. |
 
-### 9.2 Testable acceptance plan — not executed tests
+**Legacy strategy is unresolved (D12/D15).** Preserve unclassified reads, historical Signal and Overload definitions/starters, approved versions/reviews, existing catalog consumers and saved Hunts. Before any cutover, inventory actual records/consumers and compare before/after fingerprints on disposable fixtures. No live data census was performed here.
 
-Each implementation slice needs real disposable PostgreSQL integration coverage for transactions, FK/check/trigger behavior and concurrency; mock-only tests are insufficient. Run migrations, existing regression suites, typecheck and build for code slices; report actual execution and skipped suites. Do not target a persistent database with destructive tests.
+Technical options include nullable additive metadata with explicit legacy compatibility versus a separately reviewed adaptation/transition. Recommend additive metadata and no historical JSONB rewriting. Do not automatically classify old Templates, impose a new frozen cohort, disable starters, hide the existing catalog or strand in-flight authoring/Hunts without an explicit reviewed transition. A classified adaptation cannot pretend that an unclassified source was a published Universal.
 
-| ID | Test / expected assertion | Dependency |
+New classified selection stays closed until its required review/Local eligibility gates are implemented. Category-specific validation and geography/evidence must preserve current configuration.normalCheckpointCount, checkpointPositions and separate finishPoint. Universal needs reusable content without fixed geography; Local drafts can be progressive while their submission/approval rules need a separate reviewed matrix. No route safety certification or locality/provider mechanics are inferred.
+
+## 7. Proposed API and persistence boundaries
+
+**All API names, payload additions, errors and schema designs in this section: PROPOSED — NOT APPROVED.** Extend existing authoring/review conventions; do not create a parallel engine.
+
+| Surface | Proposed contract / approved product boundary |
+| --- | --- |
+| Existing Creator create | Explicit Universal or Local scratch creation with ordinary content; authenticated owner; no source/provenance/status override. Legacy client compatibility needs D12. |
+| Existing owner list/read/version | Owner workspace for drafts and revision context, not the shared product library. Source Universal writes restricted to its original Creator; Local writes restricted to its owner. Category/lineage immutable through version saves. |
+| Creator published-product library | Entries represent finished published Templates, without historical-version choices. Universal product selection enables Local creation only. Category projection, preview detail and pagination are unresolved. No new Local reuse workflow. |
+| Universal-to-Local copy | Dedicated operation with source product key and expected current publication reference (opaque token or internal version binding TBD), optional destination key. Backend resolves exact source artifact; destination always Local and owned by actor. Reject stale selection rather than substitute another artifact. |
+| Existing submit/Admin review | Review exact immutable submission with category context; independent approval. Universal publication automatically implies reuse; Local approval does not inherit from Universal. No consent/reuse-release endpoints. |
+| Original-owner revision/republish | Reuse existing authoring conventions where safe, but current frozen approved lifecycle needs D10 design. No endpoint/state-transition mechanics are approved in this document. Nonowners and derivative Universal publication are denied. |
+| Professional catalog/geography/Hunt selection | Universal excluded; Local independently approved and otherwise eligible before Organizer selection. Apply consistent authority to list, inspection and direct-key selection. Preserve approved legacy behavior until reviewed transition. |
+| Deletion/availability | Preserve protected records/dependencies. Withdrawal is not DELETE. Authority, payload, state transitions and effects remain unresolved; no new operation is specified here. |
+
+Responses may expose internal exact version/provenance identifiers where authorized without presenting history as selectable products. Keep existing professional geographic allowlists; no answers, private drafts or review evidence leak through library/catalog fields. Public attribution and full preview detail remain D08 decisions. Authorization precedes private lookup; retain indistinguishable other-owner/absent errors. Invalid metadata fails validation; lifecycle/stale-reference conflicts must not leave partial copies.
+
+Recommended persistence direction: nullable category metadata for old identities; exact version/approval binding for classified artifacts; immutable source lineage; owner/category consistency; uniqueness; transactional source resolution/copy; restrictive dependency preservation. Storage on identity versus version and normalized constraints versus triggers remain D01/D07/D14. No consent/release tables, notification records or subscriptions.
+
+Recommended migration direction: new additive numbered migrations, unchanged 001–021 history and schema baseline consistency; no historical content/approval/snapshot updates. Activation order and rollback require review. Rollback must preserve created lineage/history and prevent generic Organizer exposure; it cannot simply drop dependent records. This paragraph is a proposal, not an approved migration or deployment plan.
+
+## 8. Acceptance criteria — future implementation tests, not executed here
+
+Use real disposable PostgreSQL for persistence, transactions, migrations and races; run existing regressions, typecheck/build for implementation slices and report actual execution/skips. No runtime tests are claimed by this documentation revision.
+
+| ID | Testable requirement |
+| --- | --- |
+| A01 | Active authorized Creator can author Universal and Local from scratch; guest, blocked/retired, Participant-only, Organizer-only and Admin-only cannot exercise Creator authoring. Persisted multi-role authority and ownership prevail. |
+| A02 | Another Creator cannot modify, revise or republish the source Universal. Only its original Creator can revise/republish; changed content needs its own exact independent approval. Prior immutable artifacts/reviews remain unchanged. |
+| A03 | Independently approved/published Universal product is available to every authorized Creator without consent, separate release or inter-Creator interaction. Shared library exposes finished products, not historical reusable versions; no subscription/notification dependency. |
+| A04 | Copy is Universal → Local only. Reject derivative Universal destination, Local source, arbitrary historical-version selection, unpublished/draft/submitted/changes-requested/unapproved/unclassified source and forged owner/approval/provenance. Client key/version cannot bypass server authority. |
+| A05 | Copy allocates independent Local identity/history owned by actor, with exact source version and original Creator provenance. Creator can freely adapt Local content within normal framework/validation; neither editing rights nor approval transfers back to source or into destination. |
+| A06 | Local scratch has no Universal provenance and uses the same Local approval gates. Universal source approval never makes a Local Organizer-selectable. |
+| A07 | Publication/revision races copy: copy either uses the exact authoritative displayed artifact or returns a stale-selection conflict. Same-key concurrent requests cannot create duplicate/orphan identities; injected failures roll back complete copies. Retry semantics await D06. |
+| A08 | Universal revisions/new publication and Local adaptation never change previous Local versions/lineage or Hunt snapshots. No automatic update-from-source or retroactive restriction. Test permitted revision mechanics after D10 design rather than inventing an approved-source editing shortcut. |
+| A09 | Reject destructive deletion of published Templates with Local/provenance/review/Hunt dependencies, including existing snapshot references without FKs. Any later withdrawal affects only the explicitly approved future-selection behavior, preserving historical records and copies. Withdrawal race/authority tests await approved mechanics. |
+| A10 | Database and API enforce owner/category/source consistency and immutable version/provenance fields. Exact submitted approval, independent self-approval rejection, current self-request-changes behavior and account anonymization/protected history remain intact. |
+| A11 | Universal/new ineligible Local cannot leak into Organizer catalog, geography or direct-key Hunt selection. Local only selectable after independent approval and required G4 eligibility; unauthorized requests do not disclose hidden content or source existence. |
+| A12 | Migration fixtures preserve Signal IDs/checksum/content, historical approved versions/reviews/pins, starter behavior and complete Hunt snapshots. No automatic classification, retrospective evidence or geography normalization; legacy reads/selections follow explicitly reviewed compatibility. |
+| A13 | New category validation differentiates reusable Universal from progressive Local drafts and complete Local review. Invalid locality/evidence/blockers fail under later approved G4 contracts; no provider/AI/GPS safety certification. |
+
+## 9. Decision register
+
+Product approval and technical approval are separate. P01–P11 above are **PO APPROVED — 2026-10-27**, citing the Product Owner instruction in this conversation. D04/D05 below summarize the approved product rules. Every unresolved technical row remains **PROPOSED — NOT APPROVED**; approved product behavior is a constraint on those choices, not an alternative they may overturn.
+
+| ID | Status | Decision / remaining scope |
 | --- | --- | --- |
-| A01 | Creator-only authoring/copy with active persisted role; Admin-only, Organizer-only, guest, Participant, blocked, retired and revoked Creator denied; mixed-role ownership still enforced. Test revocation racing commit. | D03 |
-| A02 | Universal scratch/versioning without GPS succeeds under approved contract; authoritative route/locality fields fail; category changes/metadata forgery fail at API and SQL/internal-helper boundaries. Prior versions unchanged. | D01–D02, D14 |
-| A03 | Local scratch has new identity/v1 and null source; incomplete draft allowed; Local submit blocked until category gate, then incomplete geography/locality/evidence rejected as defined. | D02, D06, D09 |
-| A04 | Cross-Creator eligible Universal copy uses exact authoritative independently approved/published version and actor as new owner, automatically available to every active authorized Creator without a separate permission, preserves reusable content with only documented mapping, new identity/v1 and full lineage. | D03–D08 |
-| A05 | Draft/submitted/changes-requested/unapproved/unpublished/missing-authoritative-evidence/unclassified/Local/platform sources rejected. An independently approved/published Universal succeeds for every active authorized Creator without consent/release records. Stale expected version cannot silently substitute latest; arbitrary Creator/version/body content cannot bypass lookup. Future explicit publication withdrawal/rejection cases added only with approved state semantics; source account retirement alone is not an extra copy gate while the version remains approved/published. | D04–D05 |
-| A06 | Independent Local edit produces v2; source edits/new versions/approval, publication changes or account retirement never change or retroactively restrict destination v1/v2 or lineage. No inherited approval or editing rights. Use permitted lifecycle or explicit isolated fixtures for source changes. | D05, D07, D10 |
-| A07 | Same destination-key concurrent copies: one complete success, one 409, zero orphans; distinct keys: independent successes. Inject failure after each destination write: full rollback. Race authoritative approval/publication transitions and source deletion with copy using documented locks; do not require or test a separate consent/release mechanism. | D06–D07, D14 |
-| A08 | SQL updates to protected category, source identity/version/Creator, lineage and immutable content fail. Mismatched composite source evidence and destination category cannot persist. Source deletion restricted, destination draft deletion cleans only its lineage. | D01, D07, D14 |
-| A09 | Exact submission pin and independent Admin review remain intact; self-approval denied, current self-request-changes behavior preserved unless separately approved. No fabricated legacy review rows; review/retirement regressions pass. | D09–D10 |
-| A10 | Migration preserves canonical Signal digest/content/identity, every preexisting version/review/pin and representative Hunt snapshots. Both starter contracts and six-normal-plus-terminal content remain unchanged. Account anonymization preserves durable attribution without credential/profile leakage. | D07–D08, D12, D15 |
-| A11 | Universal and new Local absent from Organizer/professional list, geography and direct-key selection until gates; Creator community visibility cannot authorize Organizer selection. Approved legacy cohort remains available exactly as decided. Unauthorized requests reveal neither source existence nor hidden geography. | D08–D09, D11–D12 |
-| A12 | After G4: independently approved Local with valid canonical locality/evidence is eligible; missing evidence/blockers/expiry/withdrawal/stale selection rejected. Selection race either snapshots one authorized exact version or fails atomically; old Hunt snapshots never refresh automatically. | D09, D11, D16 |
-| A13 | Legacy drafts/submissions/Hunt reopening/reselection/publish and client/starter transition match explicit cohort decisions. Unrelated draft edits preserve snapshot; categorized metadata cannot trigger geographic/classification backfills. | D12 |
+| D01 | **PROPOSED — NOT APPROVED** | Category storage: identity-only versus version-only versus immutable identity plus exact version binding (recommended). Preserve historical null/unclassified; no mutable relabeling of approved content. |
+| D02 | **PROPOSED — NOT APPROVED** | Category-specific draft/submit validation matrix, supported mechanic fields and contract revision binding. Universal without fixed geography; Local requirements must not use the legacy bypass. |
+| D03 | **PROPOSED — NOT APPROVED** | Technical enforcement of the approved ownership rules: capability/owner rechecks, locks, metadata protections and nonowner source-write denial. Independent Local ownership/original-owner Universal authority are approved and no longer alternative ownership policies. |
+| D04 | **PO APPROVED — 2026-10-27** | Published independently Admin-approved Universal is automatically reusable by all authorized Creators, strictly as an independent Local foundation. No derivative Universal publishing; no separate consent/reuse-release/communication/notification/subscription workflow. Source: P02–P04/P08 and the earlier D04 PO decision in this conversation. |
+| D05 | **PO APPROVED — 2026-10-27** | Library presents finished published Templates, not historical-version choices. Only original Creator revises/republishes Universal; publication/revisions preserve existing Local copies/Hunt snapshots; dependent published records are not destructively deleted. Withdrawal from future selection differs from history deletion. Source: P05/P09–P11. Technical mechanics are explicitly reserved to D05-T/D10/D11/D14. |
+| D05-T | **PROPOSED — NOT APPROVED** | Internal published-artifact reference and exact approval mapping, stale-selection token and publication/withdrawal state representation. Whether approval establishes publication atomically and how draft revision coexists with publication remain open. No historical library version picker or extra reuse gate. |
+| D06 | **PROPOSED — NOT APPROVED** | Key allocation/retry behavior and copy mapping: existing unique optional key with one-winner conflict versus actor-scoped idempotency; recommend existing key convention if sufficient. Destination always Local; no workflow alternatives. |
+| D07 | **PROPOSED — NOT APPROVED** | Provenance storage: immutable version metadata versus normalized exact source/approval/publication references (recommended); lineage inheritance and dependency retention. No reuse-grant records. |
+| D08 | **PROPOSED — NOT APPROVED** | Safe attribution/preview projection: durable internal Creator UUID plus current audience-safe label recommended over frozen personal profile values; public identifiers/full preview require review. |
+| D09 | **PROPOSED — NOT APPROVED** | Integration of independent category validation/review with publication, same approval conventions; classified activation remains closed until supported. No separate community release stage. |
+| D10 | **PROPOSED — NOT APPROVED** | Original-owner revision/republish mechanics: authoring state versus published pointer, new immutable submission/approval, changes-requested loop and review-history constraints. Revision is approved product behavior; permanently frozen Universal is not the target model. |
+| D11 | **PROPOSED — NOT APPROVED** | Shared selection authority/atomicity across library, geography and Hunt save; withdrawal authority/timing, future selection/reselection and publish-readiness effects. No destructive deletion or snapshot rewriting. |
+| D12 | **PROPOSED — NOT APPROVED** | Explicit legacy/client/starter/in-flight/Hunt compatibility transition; inventory and reviewed adaptations. No automatic classification, silently frozen cohort or catalog removal. |
+| D13 | **PROPOSED — NOT APPROVED** | Concrete route names/envelopes/projections, stale-reference/errors/pagination. Extend existing conventions with fixed Universal → Local operation, no alternate copy directions. |
+| D14 | **PROPOSED — NOT APPROVED** | SQL constraints/triggers/FKs/locks and dependency checks, including existing non-FK Hunt snapshots, internal-helper enforcement and account retirement compatibility. |
+| D15 | **PROPOSED — NOT APPROVED** | Additive migration, activation/cutover and rollback design. Preserve history; no consent/release schema or destructive provenance rollback. |
+| D16 | **PROPOSED — NOT APPROVED** | Separate Locality/provider/manual-resolution and Local evidence/validity/G4 eligibility contracts. Provider, licensing, deduplication and operating conditions are not invented here. |
 
-Documentation review acceptance: all baseline claims trace to source; every choice has alternatives/recommendation/status; no proposed endpoint is described as shipped; PO decisions and implementation gates are explicit; changed-file list is Markdown only. This PR performs documentation checks only, not PostgreSQL execution or runtime verification.
+Technical approval record for each unresolved row must identify chosen representation, conditions/compatibility, PO/technical reviewer, date and review link. Blank records do not imply approval. Product approvals in this revision do not authorize implementation or merge; no new state machine, migration, withdrawal authority or manual publishing action is inferred.
 
-## 10. Product Owner decision register
+## 10. Smallest future implementation slices
 
-**D04 is PO APPROVED — 2026-10-27, citing the Product Owner instruction quoted in section 5.1. All other unresolved rows remain PROPOSED — NOT APPROVED.** No additional PO decision is inferred from D04, the approved F7 → G4 → D10 sequence or authorization to write this proposal. Record chosen option, scope/conditions, approver, date and review/issue link per row. A changed recommendation remains a proposal until that record exists. Blank approval fields mean blocked, not implicit consent.
+Each slice requires its unresolved technical decisions to be reviewed before implementation. These are proposed boundaries, not authorization to start.
 
-| ID | Status | Decision / explicit alternatives | Recommended choice | Implementation gate |
-| --- | --- | --- | --- | --- |
-| D01 | **PROPOSED — NOT APPROVED** | Mutable identity-only category / version-only category / immutable identity plus exact version binding | Immutable identity + version binding; historical null; reclassification via new identity | Before schema/model |
-| D02 | **PROPOSED — NOT APPROVED** | Universal allows physical-route fields / forbids authoritative geography; Local geographic rules and draft-versus-submit matrix | Universal has no authoritative route/locality; progressive Local drafts, strict separately defined Local submission; preserve legacy branch only for legacy | Before validator or submit changes |
-| D03 | **PROPOSED — NOT APPROVED** | Derivative remains source-owned / platform-owned / independent Creator-owned; capability check timing | Independent destination owner; persisted active Creator, transactional recheck; no V1 ownership transfer | Before creation/copy |
-| D04 | **PO APPROVED — 2026-10-27** | Community-copy authorization — Product Owner decision quoted in section 5.1; source: PO instruction to update PR #75 in this conversation, 2026-10-27 | An independently Admin-approved and published Universal Template version is automatically reusable by all active authorized Creators. No separate Creator consent or Admin community release. Exact source-version provenance; Local owned by copying Creator, independently approved before Organizer selection; preserve historical versions/snapshots, no retroactive restrictions or automatic updates | Product rule approved; technical representation and other dependent decisions remain proposed. Documentation only; no implementation/merge authorization |
-| D05 | **PROPOSED — NOT APPROVED** | Authoritative publication representation, single versus multiple published versions; possible explicit future withdrawal/unpublication and timing | Resolve exact approved/published version; no latest-version inference, extra copy permission or source-account restriction while publication remains effective. Version availability and publication transitions require review; no retroactive restrictions | Before source resolver/publication-state design; cannot narrow approved D04 with a consent/release gate |
-| D06 | **PROPOSED — NOT APPROVED** | Key-based retries / durable idempotency; copy transformation and scratch behavior | Independent scratch; copy maps only identity/version; unique optional key with one-winner 409 semantics | Before creation API |
-| D07 | **PROPOSED — NOT APPROVED** | JSON-only provenance / exact FK / exact FK plus immutable source/approval/publication attribution; deletion/lineage inheritance | Normalized write-once lineage with restrictive exact source/evidence FKs, inherited unchanged; source cannot cascade-delete copies | Before schema/copy/deletion |
-| D08 | **PROPOSED — NOT APPROVED** | Immutable personal display snapshot / durable UUID + current safe label; metadata-only / full community preview | UUID attribution internally, no frozen name/email; safe approved public label, metadata browse only; approve public identifier exposure separately | Before payload/retention changes |
-| D09 | **PROPOSED — NOT APPROVED** | Generic classified review immediately / held submissions / staged closed until category governance | Classified authoring first; submission/approval closed until category rules; authoritative Universal approval/publication with automatic reuse under D04, independent Local approval | Before any classified review |
-| D10 | **PROPOSED — NOT APPROVED** | Existing frozen lifecycle / revision loop / replacement identity; later same-version re-review design | Freeze first slice; separately design changes-requested revisions and authoring/effective-approval separation, append-only re-review if required | Before revision/new approval behavior |
-| D11 | **PROPOSED — NOT APPROVED** | Separate list-only filters / one predicate across catalog, geography and selection; current key-only / expected-version selection | Shared authority; classified selection closed until G4; later atomic Local eligibility + stale-version precondition | Before classified activation / later D10 |
-| D12 | **PROPOSED — NOT APPROVED** | Perpetual legacy exception / frozen approved cohort with reviewed transition / immediate hide; in-flight authoring, starter and legacy Hunt publication exceptions | Approved cutover cohort; no automatic reclassification; defer cutover until explicit client/starter/in-flight/Hunt policies are agreed | Before legacy behavior changes |
-| D13 | **PROPOSED — NOT APPROVED** | Parallel authoring APIs / extend current routes with dedicated community-copy operation; error/disclosure contract | Extend existing routes and version envelopes; proposed names in section 8; fail closed without private-state disclosure | Before OpenAPI/API implementation |
-| D14 | **PROPOSED — NOT APPROVED** | App-only / normalized constraints plus database immutability; exact table/lock design | Constraints + protected classified metadata/version/lineage, review-compatible locks and retirement/deletion coverage | Before SQL/model implementation |
-| D15 | **PROPOSED — NOT APPROVED** | Automatic classify/backfill / nullable expand-first plus explicit cutover; destructive rollback / retained lineage | Nullable expansion, no old JSON/review/snapshot updates; closed activation; forward correction after copies | Before migration/deployment planning |
-| D16 | **PROPOSED — NOT APPROVED** | Locality/provider, dedup/manual reconciliation, evidence validity/withdrawal/publish rules | Separate small contract reviews before G4 eligibility: stable internal Locality UUID; provider/manual ambiguity closed; evidence proportional; no provider certification. Provider, license, thresholds, validity/re-review and legacy Hunt operation policy remain undecided | Blocks Local submit/approval/selection readiness, not this documentation |
+| Slice | Scope and dependency / exit evidence |
+| --- | --- |
+| C0 — this Draft PR | Documentation and approved product/technical decision separation. No runtime change; F7/G4/D10 not complete. |
+| C1 — classification/provenance foundation | D01/D02/D07/D14/D15 approved: additive metadata and exact binding/dependency protection, disposable migration/history-preservation tests. No enabled new selection. |
+| C2 — owned scratch authoring | D03/D06/D09/D12/D13 approved: Universal and Local scratch paths through existing conventions, category/owner integrity and initial closed category gates. A01/A06/A10/A12. |
+| C3 — published product authority | D05-T/D08/D09/D11/D13 approved: exact independent Universal approval/publication and product-library projection. Automatic reuse under D04; no release subsystem or historical version chooser. A02–A04/A11. |
+| C4 — Universal → Local copy | C1–C3 plus approved copy/locking contracts: independent Local snapshot/lineage, free owned adaptation, source-write/derivative-Universal denial, concurrency/rollback and deletion protection. A04–A10. |
+| C5 — original-owner revisions | D05-T/D10/D14 approved: immutable owner revision/reapproval/republish and changes-requested handling, coherent published-product reference during authoring. A02/A07/A08; no subscriptions or source-update propagation. Separate slice does not defer this required product capability indefinitely. |
+| C6 — Local governance | D16 and related category review contracts approved: locality/evidence persistence and independent G4 Local review/eligibility in narrow slices. A06/A11/A13; no claimed safety certification. |
+| C7 — reviewed compatibility/selection rollout | D11/D12/D15 approved and G4 supported: explicit legacy transition and shared eligible Local selection/Hunt snapshot protection, then scoped D10 Organizer integration. A09/A11/A12 and deployed evidence. |
 
-Approval record template (repeat per decision; no values filled by this proposal):
+Creator/Admin/Organizer UI work follows separately reviewed available contracts. Full F7 → G4 → D10 supply-chain verification precedes Participant runtime. No AI generation, provider search implementation, Participant gameplay, personal Hunt authoring or unrelated auth changes are included.
 
-```text
-Decision ID:
-Status: PROPOSED — NOT APPROVED
-Chosen option / amended contract:
-Scope and compatibility conditions:
-Product Owner approver:
-Decision date:
-Review / issue link:
-Technical reviewer and dependent slices:
-```
+## 11. Documentation validation and limits
 
-The full contract is not approved by choosing only its storage design. If a decision remains open, only independent approved slices may proceed; any dependent behavior stays closed. Reconcile Master Plan references and security/deployment prerequisites without treating this register as deployment authorization.
+Check product-rule coverage, approved-versus-proposed statuses, removal of obsolete workflows, fixed copy direction, all dependent API/test/slice references, Markdown tables/fences, repository links and changed-file scope. No application tests, PostgreSQL migrations, build or deployed verification are performed for this documentation-only revision. Existing D07 deployment configuration gates remain separate.
 
-## 11. Smallest safe implementation slices — future, individually reviewed
-
-| Slice | Contents / explicit boundary | Prerequisites and exit evidence |
-| --- | --- | --- |
-| C0 — this PR | Backend inventory, alternatives/recommendations, decision register and acceptance plan only | PO reviews decisions; no schema/runtime changes; no completion claim |
-| C1 — classification persistence | Additive nullable metadata, exact version binding and classified immutability/ownership constraints; schema baseline; migration tests | D01/D02/D07/D14/D15 approved; historical fingerprints unchanged, rollback/constraint cases; no enabled classified API |
-| C2 — owned authoring contracts | Extend current create/read/version OpenAPI/model for Universal and scratch Local; category validation; submission/review/Organizer gates remain closed for classified artifacts | D03/D06/D08/D09/D11/D13 and approved client/legacy transition; A01–A03/A08/A10–A11; no category UI |
-| C3 — exact Universal approval/publication | Existing workflow extension for Universal validation and authoritative independent approval/publication; automatic reuse by all active authorized Creators under PO-approved D04; no separate consent/release mechanism or Local certification | D04 approved; D05/D09 and needed D10 lifecycle decisions still require approval; A05/A09/A11; exact source authority cannot be bypassed |
-| C4 — community read and copy | Creator metadata discovery + atomic Local copy/lineage using eligible exact Universal; no provider lookup or Organizer exposure | C1–C3; D06/D07/D08/D13/D14; A04–A08/A10–A11 with real concurrent transactions |
-| C5 — revision loop | Changes-requested authoring/resubmission, then only separately approved post-approval/re-review behavior | D10 full state/history contract; pin/review/version regressions; not bundled into C4 |
-| C6 — location/evidence contracts then implementation | Separate provider/identity/manual-resolution and evidence/validity/publish contracts, followed by narrow Local persistence/validation and G4 review slices | D16 approved in parts; no guessed provider, thresholds or safety certification; A12; requires representative Local submissions |
-| C7 — explicit legacy transition and eligible Local selection | Read-only inventory/reviewed cutover; all resolver/publish gates and approved adaptation/client/starter policies | D11/D12/D15 plus G4; A10–A13; preserve old Hunts; then reviewed D10 contracts and FE integration |
-
-Separate Creator FE integrations follow available reviewed contracts. G4 category-specific Admin UI/workflow and D10 Organizer map-first UX remain their own workstreams. Deployed supply-chain verification must record revisions and actual cases before Participant runtime; passing unit tests or merging C1–C4 does not satisfy that gate.
-
-Excluded here and from an initial foundation slice: Participant enrollment/gameplay, personal Hunt authoring, geographic provider search implementation, AI generation, GPS/route safety certification, full community discovery UI, unrelated auth/JWT work and automatic rollout. No merge or deployment occurs as part of this task.
+The current Backend inventory is source evidence, not deployed behavior or a live-data census. Historical records, existing Hunt snapshots and legacy APIs are unchanged by this PR. Do not implement or merge as part of this task.
