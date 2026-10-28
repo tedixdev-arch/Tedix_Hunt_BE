@@ -167,6 +167,12 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
     const local = await identity('local', destinationOwner, { id: source.id, version: 1, owner: sourceOwner });
     await version(local.id, 'local', destinationOwner);
     const saved = await historical();
+    const upgrade = await db.connect();
+    try {
+      const directory = new URL('./migrations/', import.meta.url);
+      for (const file of (await readdir(directory)).filter(name => /^\d{3}_.*\.ts$/.test(name) && name.slice(0,3) > '022').sort()) migrations.push((await import(new URL(file, directory).href)).default);
+      await runMigrations(upgrade, migrations);
+    } finally { upgrade.release(); }
     const { User } = await import('../models/User.js');
     expect(await User.deleteControlled(sourceOwner)).toBe('retired');
     expect(await User.deleteControlled(destinationOwner)).toBe('retired');
@@ -180,7 +186,7 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
     const constraints = `SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
       FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace
       WHERE n.nspname=current_schema() AND
-        ((c.conname LIKE '%category%' AND c.conname NOT LIKE '%published%') OR c.conname LIKE 'hunt_templates_source%' OR
+        ((c.conname LIKE '%category%' AND c.conname NOT LIKE '%published%' AND c.conname NOT LIKE '%local_category%') OR c.conname LIKE 'hunt_templates_source%' OR
          c.conname IN ('hunt_templates_classified_owner_check', 'hunt_template_reviews_exact_decision_key'))
       ORDER BY c.conname`;
     const migratedConstraints = (await client.query(constraints)).rows;

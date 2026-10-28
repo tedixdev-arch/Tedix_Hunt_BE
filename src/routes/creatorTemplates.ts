@@ -9,7 +9,7 @@ import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.j
 import {
   HuntTemplateNotDeletableError, HuntTemplateInUseError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
-  InvalidHuntTemplateContentError, TemplateLocalityError,
+  InvalidHuntTemplateContentError, TemplateLocalityError, TemplateApprovalEvidenceError,
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
@@ -355,6 +355,10 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
       status: result.template.status,
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
+      ...(result.template.category === 'local' ? {
+        localApprovedVersion: result.template.localApprovedVersion,
+        localApproval: result.template.localApproval, localSuspension: result.template.localSuspension,
+      } : {}),
       content: result.version.content,
       localityId: result.version.localityId,
       localitySnapshot: result.version.localitySnapshot,
@@ -374,7 +378,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
  *   post:
  *     tags: [Creator Templates]
  *     summary: Save a new immutable version of a Creator-owned draft Template
- *     description: The complete Template snapshot must be supplied. The backend calculates the next version; only the authenticated Creator's own Templates are editable. Approved Universals or classified changes_requested Templates may be revised by saving a new immutable candidate, returning status to draft and preserving any published Universal. Submitted candidates remain locked.
+ *     description: The complete Template snapshot must be supplied. The backend calculates the next version; only the authenticated Creator's own Templates are editable. Approved classified Templates or classified changes_requested Templates may be revised by saving a new immutable candidate, returning status to draft and preserving any published Universal. Submitted candidates remain locked.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
@@ -409,11 +413,16 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
       status: result.template.status,
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
+      ...(result.template.category === 'local' ? {
+        localApprovedVersion: result.template.localApprovedVersion,
+        localApproval: result.template.localApproval, localSuspension: result.template.localSuspension,
+      } : {}),
       content: result.version.content,
       localityId: result.version.localityId,
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof TemplateApprovalEvidenceError) return res.status(409).json({ error: 'template_approval_evidence_required' });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     // Missing and other-owned identities deliberately share one response.
     if (error instanceof HuntTemplateNotFoundError) {
@@ -473,11 +482,16 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
       status: result.template.status,
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
+      ...(result.template.category === 'local' ? {
+        localApprovedVersion: result.template.localApprovedVersion,
+        localApproval: result.template.localApproval, localSuspension: result.template.localSuspension,
+      } : {}),
       content: result.version.content,
       localityId: result.version.localityId,
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     // Unknown, other-owned, and platform keys are deliberately indistinguishable.
     if (error instanceof HuntTemplateNotFoundError) {
       return res.status(404).json({ error: 'not_found' });

@@ -33,6 +33,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
   let owner: Actor;
   let other: Actor;
   let reviewer: Actor;
+  let localityId: string;
   const actor = async (roles: string[], options: { guest?: boolean; status?: string } = {}): Promise<Actor> => {
     const id = (await db.query(`INSERT INTO users (email, role, is_guest, account_status)
       VALUES ($1, 'participant', $2, $3) RETURNING id`,
@@ -44,7 +45,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
   const create = async (category?: string, geographic = category === 'local', who = owner) => {
     const key = `c2-${randomUUID()}`;
     const content = snapshot(key, 1, geographic);
-    const response = await post(root, { key, content, ...(category ? { category } : {}) }, who).expect(201);
+    const response = await post(root, { key, content, ...(category ? { category } : {}), ...(category === 'local' ? { localityId } : {}) }, who).expect(201);
     return { key, content, response };
   };
   beforeAll(async () => {
@@ -65,6 +66,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     applicationPool = (await import('../lib/postgres.js')).pool;
     app = (await import('../app.js')).createApp(); signJwt = (await import('../lib/jwt.js')).signJwt;
     model = await import('../models/HuntTemplate.js');
+    localityId = (await db.query("INSERT INTO localities (country_code,name,administrative_context,latitude,longitude,provenance) VALUES ('RO','Fixture','County',46,23,'Reviewed registry fixture') RETURNING id")).rows[0].id;
     owner = await actor(['creator', 'admin']); other = await actor(['creator']); reviewer = await actor(['admin']);
   }, 30_000);
   afterAll(async () => {
@@ -254,7 +256,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await copy(`c4-${randomUUID()}`, owner).expect(201);
     await post(`${root}/${key}/submit`, { version: 1 }, other).expect(400);
     const adapted = { ...snapshot(key, 2, true), displayName: 'Independent Local' };
-    await post(`${root}/${key}/versions`, { content: adapted }, other).expect(201);
+    await post(`${root}/${key}/versions`, { content: adapted, localityId }, other).expect(201);
     expect(await model.HuntTemplates.getVersion(sourceId, 1)).toEqual(sourceVersion);
     expect((await db.query('SELECT * FROM hunt_templates WHERE id=$1', [sourceId])).rows[0]).toEqual(before);
     // Simulate a future source version only through SQL: C5 authoring is out of scope.
@@ -298,8 +300,10 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     expect(results.map(result => result.status).sort()).toEqual([201, 409]);
     expect(results.find(result => result.status === 201)!.body.content.configuration).toEqual(source.content.configuration);
     const local = (await model.HuntTemplates.findByKey(key))!;
-    await post(`${root}/${key}/submit`, { version: 1 }, other).expect(200);
-    await post(`/api/admin/templates/review/${key}/approve`, { version: 1 }, reviewer).expect(200);
+    await post(`${root}/${key}/submit`, { version: 1 }, other).expect(400, { error: 'locality_required' });
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 2, true), localityId }, other).expect(201);
+    await post(`${root}/${key}/submit`, { version: 2 }, other).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, reviewer).expect(200);
     await post(`${root}/from-universal/${key}`, { key: `c4-${randomUUID()}`, publishedReference: { templateId: local.id, version: 1 } }, other).expect(404);
     const failedKey = `c4-${randomUUID()}`;
     await db.query(`CREATE FUNCTION c4_fail_version() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -337,8 +341,8 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, reviewer).expect(200);
     expect((await db.query('SELECT version, reviewer_user_id, decision FROM hunt_template_reviews WHERE template_id=$1', [id])).rows)
       .toEqual([{ version: 2, reviewer_user_id: reviewer.id, decision: 'approved' }]);
-    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }).expect(category === 'universal' ? 201 : 409);
-    expect((await model.HuntTemplates.findByKey(key))?.submittedVersion).toBe(category === 'universal' ? null : 2);
+    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }).expect(201);
+    expect((await model.HuntTemplates.findByKey(key))?.submittedVersion).toBeNull();
     expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
     const catalog = await request(app).get('/api/hunt-templates').set('Authorization', owner.auth).expect(200);
     expect(catalog.body.some((item: { key: string }) => item.key === key)).toBe(false);

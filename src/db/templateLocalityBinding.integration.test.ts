@@ -4,6 +4,7 @@ import { Pool, type PoolClient } from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from './migrate.js';
+import approvalMigration from './migrations/027_local_template_approval.js';
 import bindingMigration from './migrations/026_template_locality_binding.js';
 import type { Migration } from './migrations/types.js';
 
@@ -89,6 +90,7 @@ suite('C6b-4 version locality binding against disposable PostgreSQL', () => {
       expect(await runMigrations(client, migrations)).toEqual([]);
       expect(await history()).toEqual(before);
       expect((await db.query('SELECT DISTINCT locality_id,locality_snapshot FROM hunt_template_versions')).rows).toEqual([{ locality_id: null, locality_snapshot: null }]);
+      migrations.push(approvalMigration); await runMigrations(client, migrations);
     } finally { client.release(); }
     const { environment } = await import('../config/environment.js'); environment.databaseUrl = url.toString();
     appPool = (await import('../lib/postgres.js')).pool;
@@ -212,16 +214,18 @@ suite('C6b-4 version locality binding against disposable PostgreSQL', () => {
     const identity = await model.findByKey(key);
     expect(await model.getVersion(identity!.id, 1)).toMatchObject(expected);
     expect(await model.getLatestVersion(identity!.id)).toMatchObject({ localityId: null, localitySnapshot: null });
-    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(400, { error: 'locality_required' });
+    // Historical pending unbound rows remain inspectable, but cannot receive new approval.
+    await db.query("UPDATE hunt_templates SET status='submitted',submitted_version=2 WHERE id=$1", [identity!.id]);
     // A newer stored row must never supply metadata for the pinned review artifact.
     await db.query(`INSERT INTO hunt_template_versions (template_id,version,content,origin,category,created_by_user_id,locality_id,locality_snapshot) VALUES ($1,3,$2,'creator','local',$3,$4,$5)`, [identity!.id,content(key,3),actors.creator,otherPlace,expected.localitySnapshot]);
     expect(await model.findSubmittedCreatorReviewByKey(key)).toMatchObject({ version: 2, localityId: null, localitySnapshot: null });
-    expect((await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, 'admin').expect(200)).body).toMatchObject({ version: 2, localityId: null, localitySnapshot: null });
+    expect((await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, 'admin').expect(400)).body).toEqual({ error: 'locality_required' });
     expect(await model.getVersion(identity!.id, 1)).toMatchObject(expected);
-    // Pre-migration submitted/approved NULLs remain readable and approvable, no new gate.
+    // Pre-migration NULLs remain readable; new transitions require binding.
     expect(await model.findSubmittedCreatorReviewByKey('historical-submitted')).toMatchObject({ localityId: null, localitySnapshot: null });
-    expect(await model.approveSubmittedCreator('historical-submitted', actors.admin, 1)).toMatchObject({ localityId: null, localitySnapshot: null });
-    await post(`${root}/historical-draft/submit`, { version: 1 }).expect(200);
+    await expect(model.approveSubmittedCreator('historical-submitted', actors.admin, 1)).rejects.toMatchObject({ code: 'locality_required' });
+    await post(`${root}/historical-draft/submit`, { version: 1 }).expect(400, { error: 'locality_required' });
   });
 
   it('preserves persisted capability checks, nondisclosure, category and lifecycle restrictions', async () => {
@@ -245,11 +249,11 @@ suite('C6b-4 version locality binding against disposable PostgreSQL', () => {
       }
       expect(pair((await stored(draft.key))[0])).toEqual({ localityId: null, localitySnapshot: null });
     }
-    const submitted = await create();
+    const submitted = await create({ localityId: place });
     await post(`${root}/${submitted.key}/submit`, { version: 1 }).expect(200);
-    for (const target of [submitted.key,'historical-approved']) {
-      await save(target,2,{ localityId: randomUUID() }).expect(409, { error: 'template_not_editable' });
-    }
+    await save(submitted.key,2,{ localityId: randomUUID() }).expect(409, { error: 'template_not_editable' });
+    await save('historical-approved',2,{ localityId: place }).expect(201);
+    expect((await state('historical-approved')).identity[0].local_approved_version).toBe(1);
   });
 
   it('enforces SQL pair, shape/type/bounds, FK, category, immutability and deletion protections', async () => {

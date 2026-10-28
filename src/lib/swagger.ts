@@ -326,10 +326,28 @@ const options: swaggerJsdoc.Options = {
             longitude: { type: 'number', minimum: -180, maximum: 180 },
           },
         },
+        LocalApproval: {
+          type: 'object', description: 'Local only. Exact retained authority, independent of candidate lifecycle.',
+          properties: {
+            version: { type: 'integer', nullable: true },
+            authority: { type: 'string', enum: ['approved', 'historical', 'integrity_exception', 'none'] },
+            independentEvidence: { type: 'boolean' }, localityBound: { type: 'boolean' },
+          },
+        },
+        LocalSuspension: {
+          type: 'object', nullable: true, description: 'Immutable one-time withdrawal; later approvals retain this tuple.',
+          properties: {
+            at: { type: 'string', format: 'date-time' }, byUserId: { type: 'string', format: 'uuid' },
+            reason: { type: 'string', minLength: 1, maxLength: 1000 }, version: { type: 'integer', minimum: 1 },
+          },
+        },
         CreatorOwnedTemplate: {
           type: 'object',
           required: ['key', 'version', 'status', 'origin', 'submittedVersion', 'content', 'localityId', 'localitySnapshot'],
           properties: {
+            localApprovedVersion: { type: 'integer', nullable: true, description: 'Local only. Never inferred from latest.' },
+            localApproval: { $ref: '#/components/schemas/LocalApproval' },
+            localSuspension: { $ref: '#/components/schemas/LocalSuspension' },
             key: { type: 'string' },
             version: { type: 'integer', minimum: 1 },
             status: { type: 'string', enum: ['draft', 'submitted', 'changes_requested', 'approved'] },
@@ -347,11 +365,17 @@ const options: swaggerJsdoc.Options = {
         AdminTemplateReview: {
           type: 'object',
           required: ['key', 'version', 'status', 'origin', 'creator', 'content', 'localityId', 'localitySnapshot'],
-          description: 'Admin review artifact pinned to hunt_templates.submitted_version.',
+          description: 'Default: exact submitted artifact. view=approved: exact retained Local authority, with candidateVersion/candidateStatus separate. Integrity exceptions return null version/content; no latest fallback.',
           properties: {
+            localApprovedVersion: { type: 'integer', nullable: true, description: 'Local only. Never inferred from latest.' },
+            localApproval: { $ref: '#/components/schemas/LocalApproval' },
+            localSuspension: { $ref: '#/components/schemas/LocalSuspension' },
             key: { type: 'string' },
-            version: { type: 'integer', minimum: 1, description: 'Exact immutable submitted_version.' },
-            status: { type: 'string', enum: ['submitted', 'approved', 'changes_requested'] },
+            version: { type: 'integer', nullable: true, minimum: 1, description: 'Exact submitted or retained approved version according to view.' },
+            candidateVersion: { type: 'integer', nullable: true, description: 'Present in view=approved.' },
+            candidateStatus: { type: 'string', enum: ['draft', 'submitted', 'changes_requested', 'approved'] },
+            currentLocality: { type: 'object', nullable: true, description: 'Current registry facts including active; separate from the saved immutable snapshot.' },
+            status: { type: 'string', enum: ['draft', 'submitted', 'approved', 'changes_requested'] },
             origin: { type: 'string', enum: ['creator'] },
             category: { type: 'string', enum: ['universal', 'local'], description: 'Immutable category; omitted for legacy unclassified Templates.' },
             creator: {
@@ -364,7 +388,7 @@ const options: swaggerJsdoc.Options = {
             },
             localityId: { type: 'string', format: 'uuid', nullable: true },
             localitySnapshot: { $ref: '#/components/schemas/TemplateLocalitySnapshot' },
-            content: { $ref: '#/components/schemas/CreatorTemplateContent' },
+            content: { nullable: true, allOf: [{ $ref: '#/components/schemas/CreatorTemplateContent' }] },
           },
         },
         HuntOptions: {

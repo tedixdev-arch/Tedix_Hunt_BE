@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
-import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError, HuntTemplates } from '../models/HuntTemplate.js';
+import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError, HuntTemplates, TemplateLocalityError, InvalidHuntTemplateContentError, TemplateEligibilityConflictError } from '../models/HuntTemplate.js';
 
 const router = express.Router();
 
@@ -63,6 +63,8 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request: 
       ? response.json(approved)
       : response.status(404).json({ error: 'not_found' });
   } catch (error) {
+    if (error instanceof TemplateLocalityError) return response.status(error.status).json({ error: error.code });
+    if (error instanceof InvalidHuntTemplateContentError) return response.status(400).json({ error: 'invalid_input' });
     if (error instanceof HuntTemplateSelfApprovalError) {
       return response.status(403).json({ error: 'template_self_approval_forbidden' });
     }
@@ -121,11 +123,12 @@ router.post('/:key/request-changes', requireAuth, requireRole('admin'), async (r
  * /api/admin/templates/review/{key}:
  *   get:
  *     tags: [Admin Template Review]
- *     summary: Inspect one submitted Creator Template
- *     description: Admin-only, read-only inspection of the exact immutable version referenced by submitted_version, never an implicit latest version.
+ *     summary: Inspect an exact submitted or retained Local approval artifact
+ *     description: Default view resolves submitted_version. view=approved resolves retained exact Local authority, returning candidateVersion/candidateStatus and current registry context separately; an unresolved historical pin is an explicit integrity_exception with null version/content.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
+ *       - { in: query, name: view, required: false, schema: { type: string, enum: [approved] }, description: Inspect retained exact Local authority even during drafting or suspension. Omit for submitted view. }
  *     responses:
  *       200: { description: Exact submitted review artifact, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
  *       401: { description: Authentication required }
@@ -136,11 +139,15 @@ router.get('/:key', requireAuth, requireRole('admin'), async (request, response,
   try {
     const key = request.params.key;
     if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
-    const template = await HuntTemplates.findSubmittedCreatorReviewByKey(key);
+    if (request.query.view !== undefined && request.query.view !== 'approved') return response.status(400).json({ error: 'invalid_input' });
+    const template = request.query.view === 'approved'
+      ? await HuntTemplates.findApprovedLocalReviewByKey(key)
+      : await HuntTemplates.findSubmittedCreatorReviewByKey(key);
     return template
       ? response.json(template)
       : response.status(404).json({ error: 'not_found' });
   } catch (error) {
+    if (error instanceof TemplateEligibilityConflictError) return response.status(409).json({ error: 'template_eligibility_conflict' });
     return next(error);
   }
 });
