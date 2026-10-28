@@ -3,7 +3,9 @@
 **Proposed for ChatGPT review, 28 October 2026. Documentation only.**
 No implementation, route activation, migration, frontend change, merge or deployment
 is authorized. This defines discovery and selection into a draft Hunt; it does not
-certify route safety or authorize Participant runtime rollout.
+certify real-world route safety, replace future G4 readiness checks or authorize
+Participant runtime rollout. C7 eligibility establishes selection integrity only;
+independent route-safety and readiness requirements remain separate review gates.
 
 ## 1. Reviewed implementation and boundaries
 
@@ -84,6 +86,11 @@ It returns exactly (templateId, key, version, content, localityId, localitySnaps
 or no eligible artifact. No client snapshot, latest row, MAX(version), candidate
 status, candidate locality, Universal publication or arbitrary approved-review search
 may replace the exact authority.
+
+Exact Template versioning is an internal backend integrity requirement. The client
+carries the exact selection reference for server validation; Organizers see a
+Template name, location and preview, with no technical version numbers to interpret
+or choose. API version fields below support integrity and are not presentation labels.
 
 Resolve authority in this order:
 
@@ -203,7 +210,17 @@ Retain organization authorization on initial creation. Template eligibility is s
 across Organizers, not scoped to the source Creator; authoring remains owner-scoped.
 
 Server resolves exact authority and revalidates every predicate at write time.
-Never silently substitute a newer approval. Persist the approved row's complete
+Never silently substitute a newer approval. If the selection becomes stale before
+confirmation, provide a simple refresh/reselect experience: explain that the Template
+has changed, refresh the eligible choices within the selected Country → Locality,
+and let the Organizer review the name, location and preview and explicitly confirm
+a fresh selection. If it is no longer available, ask them to choose another eligible
+Template. Do not show technical version numbers or raw conflict codes, automatically
+confirm refreshed content, or silently substitute any other version. Keep the draft
+and its existing settings unchanged on the failed confirmation. These presentation
+rules define the intended experience; no frontend implementation is included here.
+
+Persist the approved row's complete
 content into existing template_snapshot without merging user input into it, plus
 the exact key/version and a durable templateId reference. Persist its exact saved
 localityId/localitySnapshot as sibling Hunt source metadata; do not add locality
@@ -226,7 +243,7 @@ new idempotency store. Published/active/paused/finished Hunts cannot be reselect
 | Change after discovery, before selection commits | Required result |
 | --- | --- |
 | Candidate saved/submitted/requested changes | Same approved version can succeed |
-| Replacement approval wins first | 409 template_selection_stale; reload and explicitly choose new approval |
+| Replacement approval wins first | 409 template_selection_stale internally; refresh eligible choices and require explicit Organizer reselection/confirmation |
 | Suspension wins first | 409 template_not_eligible; no Hunt write |
 | Locality deactivation wins first | 409 locality_unavailable; no Hunt write |
 | Material geography correction wins first | 409 locality_geography_changed; no Hunt write |
