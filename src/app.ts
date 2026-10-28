@@ -1,3 +1,4 @@
+import { geographyRouter } from './routes/geography.js';
 import { creatorUniversalLibraryRouter } from './routes/creatorUniversalLibrary.js';
 import cors from 'cors';
 import express, { type ErrorRequestHandler } from 'express';
@@ -47,6 +48,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
     response.status(200).json({ pong: true, timestamp: new Date().toISOString() });
   });
 
+  app.use('/api/geography', geographyRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
   app.use('/api/admin/users', adminUsersRouter);
