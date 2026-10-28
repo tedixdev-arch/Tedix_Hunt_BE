@@ -7,7 +7,18 @@ export type HuntTemplateCategory = 'universal' | 'local';
 export type HuntTemplateOrigin = 'platform' | 'creator';
 export type HuntTemplateStatus = 'draft' | 'submitted' | 'changes_requested' | 'approved';
 
-export interface PersistedHuntTemplate {
+export interface LocalApprovalState {
+  localApprovedVersion: number | null;
+  localApproval: {
+    version: number | null;
+    authority: 'approved' | 'historical' | 'integrity_exception' | 'none';
+    independentEvidence: boolean;
+    localityBound: boolean;
+  };
+  localSuspension: { at: Date; byUserId: string; reason: string; version: number } | null;
+}
+
+export interface PersistedHuntTemplate extends Partial<LocalApprovalState> {
   id: string;
   key: string;
   origin: HuntTemplateOrigin;
@@ -47,7 +58,7 @@ export interface ApprovedHuntTemplateVersion {
   content: unknown;
 }
 
-export interface CreatorOwnedHuntTemplateVersion extends LocalityBinding {
+export interface CreatorOwnedHuntTemplateVersion extends LocalityBinding, Partial<LocalApprovalState> {
   key: string;
   version: number;
   status: HuntTemplateStatus;
@@ -57,12 +68,13 @@ export interface CreatorOwnedHuntTemplateVersion extends LocalityBinding {
   content: unknown;
 }
 
-export interface AdminTemplateReview extends LocalityBinding {
+export interface AdminTemplateReview extends LocalityBinding, Partial<LocalApprovalState> {
   key: string;
   version: number;
   status: 'submitted';
   origin: 'creator';
   category?: HuntTemplateCategory | null;
+  currentLocality?: Locality | null;
   creator: { id: string; name: string | null; email: string | null };
   content: unknown;
 }
@@ -106,6 +118,8 @@ export class HuntTemplateNotSubmittableError extends Error {}
 export class HuntTemplateVersionNotLatestError extends Error {}
 export class HuntTemplateNotReviewableError extends Error {}
 export class HuntTemplateSelfApprovalError extends Error {}
+export class TemplateApprovalEvidenceError extends Error {}
+export class TemplateEligibilityConflictError extends Error {}
 export class InvalidHuntTemplateContentError extends Error {}
 
 export class TemplateLocalityError extends Error {
@@ -116,6 +130,7 @@ export class TemplateLocalityError extends Error {
 async function resolveLocalityBinding(
   client: PoolClient, category: HuntTemplateCategory | null, selection: unknown,
   previous?: { locality_id: string | null; locality_snapshot: LocalitySnapshot | null },
+  transition = false,
 ): Promise<LocalityBinding> {
   if (selection !== undefined && (category !== 'local'
     || (selection !== null && (typeof selection !== 'string'
@@ -133,8 +148,9 @@ async function resolveLocalityBinding(
     l.administrative_context, l.latitude, l.longitude, l.active
     FROM localities l JOIN countries c ON c.code=l.country_code
     WHERE l.id=$1 FOR SHARE OF l`, [selection])).rows[0];
-  if (!row || !row.active || row.country_code !== initial.country_code) {
-    throw new TemplateLocalityError('locality_unavailable', 409);
+  if (!row || !row.active) throw new TemplateLocalityError('locality_unavailable', 409);
+  if (row.country_code !== initial.country_code) {
+    throw new TemplateLocalityError(transition ? 'locality_geography_changed' : 'locality_unavailable', 409);
   }
   return { localityId: row.id, localitySnapshot: {
     id: row.id, countryCode: row.country_code, countryDisplayName: row.display_name,
@@ -143,7 +159,59 @@ async function resolveLocalityBinding(
   } };
 }
 
+// The saved artifact is compared numerically while catalog text remains separate context.
+async function validateLocality(client: PoolClient, row: any): Promise<void> {
+  if (!row.locality_id || !row.locality_snapshot) throw new TemplateLocalityError('locality_required', 400);
+  const current = await resolveLocalityBinding(client, 'local', row.locality_id, undefined, true).catch(error => {
+    if (error instanceof TemplateLocalityError && error.code === 'locality_not_found') {
+      throw new TemplateLocalityError('locality_unavailable', 409);
+    }
+    throw error;
+  });
+  const saved = row.locality_snapshot;
+  const live = current.localitySnapshot!;
+  if (saved.id !== row.locality_id || live.id !== saved.id || saved.countryCode !== live.countryCode
+    || !Number.isFinite(saved.latitude) || Math.abs(saved.latitude) > 90
+    || !Number.isFinite(saved.longitude) || Math.abs(saved.longitude) > 180
+    || Number(saved.latitude) !== Number(live.latitude) || Number(saved.longitude) !== Number(live.longitude)) {
+    throw new TemplateLocalityError('locality_geography_changed', 409);
+  }
+}
+
+// Same statement joins the exact authority and its evidence, avoiding mixed reader snapshots.
+const localAuthorityColumns = `t.local_approved_version, t.local_suspended_at,
+  t.local_suspended_by_user_id, t.local_suspension_reason, t.local_suspended_version,
+  authority.version AS authority_version, authority.locality_id AS authority_locality_id,
+  authority.locality_snapshot AS authority_locality_snapshot,
+  COALESCE(evidence.decision='approved' AND evidence.reviewer_user_id<>t.created_by_user_id, false) AS independent_evidence`;
+const localAuthorityJoins = `LEFT JOIN hunt_template_versions authority
+  ON authority.template_id=t.id AND authority.version=COALESCE(t.local_approved_version,
+    CASE WHEN t.category='local' AND t.status='approved' THEN t.submitted_version END)
+  LEFT JOIN hunt_template_reviews evidence ON evidence.template_id=t.id AND evidence.version=authority.version`;
+async function readLocalState(client: PoolClient, id: string) {
+  const row = (await client.query(`SELECT t.*, ${localAuthorityColumns}
+    FROM hunt_templates t ${localAuthorityJoins} WHERE t.id=$1`, [id])).rows[0];
+  return mapLocalApproval(row);
+}
+
+export const mapLocalApproval = (row: any): LocalApprovalState => ({
+  localApprovedVersion: row.local_approved_version ?? null,
+  localApproval: {
+    version: row.authority_version ?? row.local_approved_version ?? (row.category === 'local' && row.status === 'approved' ? row.submitted_version : null),
+    authority: row.category !== 'local' ? 'none' : row.local_approved_version != null
+      ? 'approved' : row.status === 'approved'
+        ? (row.authority_version != null ? 'historical' : 'integrity_exception') : 'none',
+    independentEvidence: row.independent_evidence ?? false,
+    localityBound: row.authority_locality_id != null && row.authority_locality_snapshot != null,
+  },
+  localSuspension: row.local_suspended_at == null ? null : {
+    at: row.local_suspended_at, byUserId: row.local_suspended_by_user_id,
+    reason: row.local_suspension_reason, version: row.local_suspended_version,
+  },
+});
+
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
+  ...(row.category === 'local' ? mapLocalApproval(row) : {}),
   id: row.id,
   key: row.key,
   origin: row.origin,
@@ -181,7 +249,8 @@ export const HuntTemplates = {
       );
       const template = result.rows[0];
       if (!template) throw new HuntTemplateNotFoundError();
-      if (template.published_version != null
+      if (template.local_approved_version != null || template.local_suspended_at != null
+        || template.published_version != null
         || (template.status !== 'draft' && template.status !== 'changes_requested')) {
         throw new HuntTemplateNotDeletableError();
       }
@@ -256,6 +325,8 @@ export const HuntTemplates = {
         throw new InvalidHuntTemplateContentError();
       }
 
+      if (templateResult.rows[0].category === 'local') await validateLocality(client, latest);
+
       // Status and its exact immutable review artifact change in one transaction.
       const updated = await client.query(
         `UPDATE hunt_templates
@@ -263,8 +334,9 @@ export const HuntTemplates = {
          WHERE id = $1 RETURNING *`,
         [templateResult.rows[0].id, requestedVersion],
       );
+      const state = templateResult.rows[0].category === 'local' ? await readLocalState(client, templateResult.rows[0].id) : {};
       await client.query('COMMIT');
-      return { template: mapTemplate(updated.rows[0]), version: mapVersion(latest) };
+      return { template: { ...mapTemplate(updated.rows[0]), ...state }, version: mapVersion(latest) };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -294,7 +366,7 @@ export const HuntTemplates = {
       // Classified owners may correct a reviewed candidate or revise an approved product.
       if (template.status !== 'draft'
         && !(template.category != null && template.status === 'changes_requested')
-        && !(template.category === 'universal' && template.status === 'approved')) {
+        && !(template.category != null && template.status === 'approved')) {
         throw new HuntTemplateNotEditableError();
       }
 
@@ -305,6 +377,16 @@ export const HuntTemplates = {
       const nextVersion = (versionResult.rows[0]?.version ?? 0) + 1;
       if (!isTemplateContent(content, key, nextVersion)) {
         throw new InvalidHuntTemplateContentError();
+      }
+      if (template.category === 'local' && template.status === 'approved' && template.localApprovedVersion == null) {
+        const evidence = await client.query(`SELECT v.version FROM hunt_template_versions v
+          JOIN hunt_template_reviews r ON r.template_id=v.template_id AND r.version=v.version
+          WHERE v.template_id=$1 AND v.version=$2 AND r.decision='approved'
+            AND r.reviewer_user_id<>$3`, [template.id, template.submittedVersion, creatorUserId]);
+        if (!evidence.rows[0]) throw new TemplateApprovalEvidenceError();
+        // Capture before any candidate mutation. The SQL guard verifies committed evidence.
+        await client.query('UPDATE hunt_templates SET local_approved_version=submitted_version WHERE id=$1', [template.id]);
+        template.localApprovedVersion = template.submittedVersion;
       }
       const binding = await resolveLocalityBinding(client, template.category, localityId, versionResult.rows[0]);
       // Versions are complete immutable snapshots; existing rows are never updated.
@@ -320,6 +402,7 @@ export const HuntTemplates = {
         template.status = 'draft';
         template.submittedVersion = null;
       }
+      if (template.category === 'local') Object.assign(template, await readLocalState(client, template.id));
       await client.query('COMMIT');
       return { template, version: mapVersion(inserted.rows[0]) };
     } catch (error) {
@@ -397,7 +480,7 @@ export const HuntTemplates = {
   },
 
   async findByKey(key: string): Promise<PersistedHuntTemplate | null> {
-    const { rows } = await pool.query('SELECT * FROM hunt_templates WHERE key = $1', [key]);
+    const { rows } = await pool.query(`SELECT t.*, ${localAuthorityColumns} FROM hunt_templates t ${localAuthorityJoins} WHERE t.key = $1`, [key]);
     return rows[0] ? mapTemplate(rows[0]) : null;
   },
 
@@ -443,10 +526,16 @@ export const HuntTemplates = {
 
       // submitted_version is the approved artifact; never substitute the latest version.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
+        `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns},
+              (SELECT jsonb_build_object('id',l.id,'countryCode',l.country_code,
+                'countryDisplayName',c.display_name,'name',l.name,'administrativeContext',l.administrative_context,
+                'latitude',l.latitude,'longitude',l.longitude,'active',l.active)
+               FROM localities l JOIN countries c ON c.code=l.country_code WHERE l.id=v.locality_id) AS current_locality,
+              v.version, v.content, v.locality_id, v.locality_snapshot,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
+       ${localAuthorityJoins}
          JOIN hunt_template_versions v
            ON v.template_id = t.id AND v.version = t.submitted_version
          JOIN users creator ON creator.id = t.created_by_user_id
@@ -455,9 +544,16 @@ export const HuntTemplates = {
       );
       if (!reviewResult.rows[0]) throw new HuntTemplateNotReviewableError();
 
+      if (row.category === 'local') {
+        const artifact = reviewResult.rows[0];
+        if (!isTemplateContent(artifact.content, key, artifact.version)
+          || !isTemplateContentSubmittable(artifact.content, 'local')) throw new InvalidHuntTemplateContentError();
+        await validateLocality(client, artifact);
+      }
       await client.query(
         `UPDATE hunt_templates SET status = 'approved', updated_at = now(),
-           published_version = CASE WHEN category = 'universal' THEN submitted_version ELSE published_version END
+           published_version = CASE WHEN category = 'universal' THEN submitted_version ELSE published_version END,
+           local_approved_version = CASE WHEN category = 'local' THEN submitted_version ELSE local_approved_version END
          WHERE id = $1 AND status = 'submitted'`,
         [row.id],
       );
@@ -466,8 +562,9 @@ export const HuntTemplates = {
          VALUES ($1, $2, $3, 'approved')`,
         [row.id, row.submitted_version, reviewerUserId],
       );
+      const state = row.category === 'local' ? await readLocalState(client, row.id) : {};
       await client.query('COMMIT');
-      return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), status: 'approved' };
+      return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), ...state, status: 'approved' };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -503,10 +600,16 @@ export const HuntTemplates = {
 
       // Resolve only the pinned review artifact; a newer version must never replace it.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
+        `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns},
+              (SELECT jsonb_build_object('id',l.id,'countryCode',l.country_code,
+                'countryDisplayName',c.display_name,'name',l.name,'administrativeContext',l.administrative_context,
+                'latitude',l.latitude,'longitude',l.longitude,'active',l.active)
+               FROM localities l JOIN countries c ON c.code=l.country_code WHERE l.id=v.locality_id) AS current_locality,
+              v.version, v.content, v.locality_id, v.locality_snapshot,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
+       ${localAuthorityJoins}
          JOIN hunt_template_versions v
            ON v.template_id = t.id AND v.version = t.submitted_version
          JOIN users creator ON creator.id = t.created_by_user_id
@@ -526,9 +629,10 @@ export const HuntTemplates = {
          VALUES ($1, $2, $3, 'changes_requested')`,
         [row.id, row.submitted_version, reviewerUserId],
       );
+      const state = row.category === 'local' ? await readLocalState(client, row.id) : {};
       await client.query('COMMIT');
       return {
-        ...mapAdminReview({ ...reviewResult.rows[0], status: 'changes_requested' }),
+        ...mapAdminReview({ ...reviewResult.rows[0], status: 'changes_requested' }), ...state,
         status: 'changes_requested',
       };
     } catch (error) {
@@ -586,8 +690,9 @@ export const HuntTemplates = {
   ): Promise<CreatorOwnedHuntTemplateVersion[]> {
     // Ownership belongs in SQL so private rows never leave PostgreSQL for route-level filtering.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
+       ${localAuthorityJoins}
        JOIN LATERAL (
          SELECT version, content, locality_id, locality_snapshot
          FROM hunt_template_versions
@@ -599,11 +704,14 @@ export const HuntTemplates = {
        ORDER BY t.key ASC`,
       [creatorUserId],
     );
-    return rows.map(({ key, version, status, origin, category, submitted_version, content, locality_id, locality_snapshot }) => ({
+    return rows.map((row) => {
+      const { key, version, status, origin, category, submitted_version, content, locality_id, locality_snapshot } = row;
+      return ({
+      ...(category === 'local' ? mapLocalApproval(row) : {}),
       key, version, status, origin, ...(category ? { category } : {}),
       submittedVersion: submitted_version ?? null, content,
       localityId: locality_id ?? null, localitySnapshot: locality_snapshot ?? null,
-    }));
+    }); });
   },
 
   async findCreatorOwnedByKeyWithLatestVersion(
@@ -611,8 +719,9 @@ export const HuntTemplates = {
     creatorUserId: string,
   ): Promise<CreatorOwnedHuntTemplateVersion | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
+       ${localAuthorityJoins}
        JOIN LATERAL (
          SELECT version, content, locality_id, locality_snapshot
          FROM hunt_template_versions
@@ -625,6 +734,7 @@ export const HuntTemplates = {
     );
     return rows[0]
       ? {
+          ...(rows[0].category === 'local' ? mapLocalApproval(rows[0]) : {}),
           key: rows[0].key, version: rows[0].version, status: rows[0].status,
           origin: rows[0].origin, ...(rows[0].category ? { category: rows[0].category } : {}), submittedVersion: rows[0].submitted_version ?? null,
           content: rows[0].content,
@@ -637,10 +747,16 @@ export const HuntTemplates = {
   async listSubmittedCreatorReviews(): Promise<AdminTemplateReview[]> {
     // Review is pinned to submitted_version. It must never drift to a newer version.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns},
+              (SELECT jsonb_build_object('id',l.id,'countryCode',l.country_code,
+                'countryDisplayName',c.display_name,'name',l.name,'administrativeContext',l.administrative_context,
+                'latitude',l.latitude,'longitude',l.longitude,'active',l.active)
+               FROM localities l JOIN countries c ON c.code=l.country_code WHERE l.id=v.locality_id) AS current_locality,
+              v.version, v.content, v.locality_id, v.locality_snapshot,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
+       ${localAuthorityJoins}
        JOIN hunt_template_versions v
          ON v.template_id = t.id AND v.version = t.submitted_version
        JOIN users creator ON creator.id = t.created_by_user_id
@@ -654,10 +770,16 @@ export const HuntTemplates = {
 
   async findSubmittedCreatorReviewByKey(key: string): Promise<AdminTemplateReview | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns},
+              (SELECT jsonb_build_object('id',l.id,'countryCode',l.country_code,
+                'countryDisplayName',c.display_name,'name',l.name,'administrativeContext',l.administrative_context,
+                'latitude',l.latitude,'longitude',l.longitude,'active',l.active)
+               FROM localities l JOIN countries c ON c.code=l.country_code WHERE l.id=v.locality_id) AS current_locality,
+              v.version, v.content, v.locality_id, v.locality_snapshot,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
+       ${localAuthorityJoins}
        JOIN hunt_template_versions v
          ON v.template_id = t.id AND v.version = t.submitted_version
        JOIN users creator ON creator.id = t.created_by_user_id
@@ -670,11 +792,67 @@ export const HuntTemplates = {
     return rows[0] ? mapAdminReview(rows[0]) : null;
   },
 
+  async findApprovedLocalReviewByKey(key: string) {
+    const { rows } = await pool.query(`SELECT t.*, ${localAuthorityColumns},
+      (SELECT max(version) FROM hunt_template_versions WHERE template_id=t.id) AS candidate_version,
+      authority.content, authority.locality_id, authority.locality_snapshot,
+      creator.id AS creator_id, creator.name AS creator_name, creator.email AS creator_email,
+      current_locality.id AS current_locality_id, current_locality.country_code,
+      current_locality.name AS current_name, current_locality.administrative_context,
+      current_locality.latitude, current_locality.longitude, current_locality.active,
+      country.display_name AS country_display_name
+      FROM hunt_templates t ${localAuthorityJoins}
+      JOIN users creator ON creator.id=t.created_by_user_id
+      LEFT JOIN localities current_locality ON current_locality.id=authority.locality_id
+      LEFT JOIN countries country ON country.code=current_locality.country_code
+      WHERE t.key=$1 AND t.origin='creator' AND t.category='local'`, [key]);
+    const row = rows[0];
+    if (!row) return null;
+    const state = mapLocalApproval(row);
+    if (state.localApproval.authority === 'none') throw new TemplateEligibilityConflictError();
+    return { ...mapAdminReview({ ...row, version: row.authority_version ?? null }), ...state,
+      candidateStatus: row.status, candidateVersion: row.candidate_version, submittedVersion: row.submitted_version,
+      currentLocality: row.current_locality_id == null ? null : {
+        id: row.current_locality_id, countryCode: row.country_code, countryDisplayName: row.country_display_name,
+        name: row.current_name, administrativeContext: row.administrative_context,
+        latitude: row.latitude, longitude: row.longitude, active: row.active,
+      },
+    };
+  },
+
+  async suspendLocal(key: string, expectedVersion: number, actor: string, reason: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const row = (await client.query(`SELECT * FROM hunt_templates
+        WHERE key=$1 AND origin='creator' FOR UPDATE`, [key])).rows[0];
+      if (!row) throw new HuntTemplateNotFoundError();
+      const authority = row.local_approved_version ?? (row.status === 'approved' ? row.submitted_version : null);
+      if (row.category !== 'local' || row.local_suspended_at != null || authority == null || authority !== expectedVersion
+        || !(await client.query('SELECT 1 FROM hunt_template_versions WHERE template_id=$1 AND version=$2', [row.id, authority])).rowCount) {
+        throw new TemplateEligibilityConflictError();
+      }
+      if (typeof reason !== 'string' || !reason.trim() || reason.length > 1000) throw new TemplateLocalityError('invalid_input', 400);
+      const admin = await client.query(`SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id
+        WHERE u.id=$1 AND ur.role='admin' AND u.account_status='active' AND NOT u.is_guest FOR SHARE OF u,ur`, [actor]);
+      if (!admin.rowCount) throw new TemplateLocalityError('forbidden', 403);
+      const result = await client.query(`UPDATE hunt_templates SET local_suspended_at=now(),
+        local_suspended_by_user_id=$2, local_suspension_reason=$3, local_suspended_version=$4,
+        updated_at=now() WHERE id=$1 RETURNING *`, [row.id, actor, reason.trim(), authority]);
+      await client.query('COMMIT');
+      return { key, localApprovedVersion: result.rows[0].local_approved_version,
+        localSuspension: mapLocalApproval(result.rows[0]).localSuspension };
+    } catch (error) {
+      await client.query('ROLLBACK'); throw error;
+    } finally { client.release(); }
+  },
+
   async list(): Promise<HuntTemplateWithLatestVersion[]> {
     const { rows } = await pool.query(
-      `SELECT t.*, latest.version AS latest_version,
+      `SELECT t.*, ${localAuthorityColumns}, latest.version AS latest_version,
               latest.created_at AS latest_version_created_at
        FROM hunt_templates t
+       ${localAuthorityJoins}
        LEFT JOIN LATERAL (
          SELECT version, created_at FROM hunt_template_versions
          WHERE template_id = t.id ORDER BY version DESC LIMIT 1
@@ -690,6 +868,7 @@ export const HuntTemplates = {
 };
 
 const mapAdminReview = (row: any): AdminTemplateReview => ({
+  ...(row.category === 'local' ? { ...mapLocalApproval(row), currentLocality: row.current_locality ?? null } : {}),
   key: row.key,
   version: row.version,
   status: row.status,
