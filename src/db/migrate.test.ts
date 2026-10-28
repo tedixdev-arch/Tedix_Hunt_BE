@@ -27,6 +27,7 @@ import { templateApprovalMigration } from './migrations/019_template_approval.js
 import { templateChangesRequestedMigration } from './migrations/020_template_changes_requested.js';
 import { templateReviewDecisionsMigration } from './migrations/021_template_review_decisions.js';
 import { templateClassificationMigration } from './migrations/022_template_classification.js';
+import countryLocalityMigration from './migrations/024_country_locality.js';
 import templatePublicationMigration from './migrations/023_template_publication.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
@@ -49,6 +50,7 @@ const migrations = [
   templateReviewDecisionsMigration,
   templateClassificationMigration,
   templatePublicationMigration,
+  countryLocalityMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -147,6 +149,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '021_template_review_decisions',
       '022_template_classification',
       '023_template_publication',
+      '024_country_locality',
     ]);
     try {
       await expect(client.query(
@@ -223,6 +226,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '021_template_review_decisions' },
       { id: '022_template_classification' },
       { id: '023_template_publication' },
+      { id: '024_country_locality' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
