@@ -1,0 +1,40 @@
+# F7/C6b-3 — Manual Locality proposal and Admin approval
+
+Base: main `dd0f12b4abc67c917bb548bdb1a3b05faa402b2b` (merged C6b-1 / PR #82). This implements the explicitly authorized manual fallback only. The task's API paths, `approved` status and conflict behavior supersede the corresponding proposed C6a examples; there is no accept-against-existing operation.
+
+Migration **025_locality_proposals** adds one table, ownership/decision foreign keys, two queue indexes and a history-protection trigger/function. Fresh schema mirrors it. Forward-only migration; no backfill, imported Localities, changes to existing tables or history. A pending proposal has no Locality ID. Approved requires one; rejected has none. Reviewer, reason and decision timestamp are required together. Submitted facts cannot change; terminal decisions cannot change or be deleted, including through ordinary SQL. User retirement remains available; referenced identities and approved Localities cannot be deleted. Corrections require a new proposal.
+
+## API
+
+All routes authorize before input validation. Existing authentication loads persisted active users and `user_roles`; JWT role claims do not confer permissions. Guests, blocked/retired accounts and revoked roles follow existing authorization rules. Creator and Admin capabilities are separate; Organizer geography read access grants no proposal permission. A dual Creator/Admin cannot review their own proposal.
+
+- `POST /api/geography/locality-proposals` — Creator only; 201 returns the full pending proposal. Required JSON fields are `countryCode` (uppercase existing country), `name` and `administrativeContext` (1–200 characters), finite numeric `latitude` (−90..90) and `longitude` (−180..180), `explanation` and `evidenceReference` (20–1,000 characters each). Text is trimmed; name must include a letter/number. Unknown fields are rejected. Server assigns ownership and identity.
+- `GET /api/geography/locality-proposals/mine` — Creator only; 200 `{ "proposals": [...] }`, all own statuses, newest first, UUID tie-breaker. No user ID selector.
+- `GET /api/admin/locality-proposals` — persisted Admin only; 200 `{ "proposals": [...] }`, pending only, oldest first, UUID tie-breaker. Contains full evidence and proposed facts needed for review.
+- `POST /api/admin/locality-proposals/:id/decision` — persisted Admin only; body `{ "decision": "approved", "reason": "Confirmed against independent gazetteer and catalog." }` or `rejected`. Reason: 10–1,000 characters, nonblank. Extra fields, including an existing Locality ID or edited facts, are rejected. 200 returns the final proposal.
+
+Proposal response fields: `id`, `creatorUserId`, `countryCode`, `name`, `administrativeContext`, `latitude`, `longitude`, `explanation`, `evidenceReference`, `status`, `reviewerUserId`, `decisionReason`, `createdAt`, `decidedAt`, `localityId`. Decision fields are null until decided; `localityId` is populated only on approval. Timestamps serialize as ISO timestamps. Private evidence and decision metadata remain outside existing catalog responses.
+
+Errors use `{ "error": "code" }`: 400 `invalid_input` (including unsupported country), 401 `unauthorized`, 403 `forbidden` (including self-review), 404 `not_found`, 409 `proposal_not_reviewable` or `locality_duplicate_conflict`. Repeated terminal decisions return 409, preserving the first decision. No editing/deletion/reopening endpoints, pagination protocol, detail endpoint, notifications or lifecycle extensions.
+
+## Evidence and review policy
+
+Supply an independently sourced URL **or retrievable citation**, such as a named official gazetteer, edition and entry/page, supporting the settlement, administrative context and representative coordinates. Explain why the settlement is missing and how the source supports the point. A bare short URL or unsupported assertion is insufficient. A longer URL can identify the source; Admin must still inspect its substantive evidence. No mandatory URL/link count or evidence subsystem.
+
+The API checks presence, bounds and basic reference text and rejects explanations or references containing `Mapbox` (case-insensitive); this conservatively rejects all explicitly identified Mapbox evidence in this slice. It does not fetch URLs or establish factual accuracy, independence, licensing or coordinate provenance automatically. Admin must independently confirm those facts and storage rights, reject temporary Mapbox-derived coordinates even when disguised or accompanied by another link, and record a substantive reason. If the evidence is inadequate, reject or leave pending. Manual proposals are not a route to store restricted provider results. No Mapbox calls, provider metadata or temporary results are persisted.
+
+## Duplicate and concurrency policy
+
+On approval, lock the proposal row, require pending status and independent reviewer, then lock the referenced Country row. Recheck **all** existing Localities in that country, including inactive records. Names match after PostgreSQL `lower` and removal of all non-alphanumeric characters (`regexp_replace(..., '[^[:alnum:]]', '', 'g')`). Thus case, whitespace and punctuation differences cannot bypass the check. Administrative context and coordinates do not override a name conflict.
+
+A match returns 409 `locality_duplicate_conflict`, leaves the proposal pending and creates nothing. Admin inspects the catalog, may reject with the existing identity in the reason, or resolves catalog ambiguity through a separately reviewed maintenance action. This API offers no force-create, silent reuse, merge or catalog correction. Same-name settlements in different regions conservatively require resolution; different spellings/diacritics/aliases and nearby coordinates are not detected. This is a bounded, documented name rule, not a guarantee of semantic deduplication or a fuzzy/geographic engine.
+
+Within the same transaction, insert one active manual Locality from submitted facts, record provenance identifying the proposal, confirming Admin and decision reason, then record the proposal's final decision. The original evidence stays in immutable proposal history. An error rolls back both writes. Proposal locking prevents conflicting decisions and duplicate creation from retries. Country locking serializes approvals of different proposals with equivalent names. Future catalog insertion paths must follow the same country-lock-before-recheck convention established in C6a; direct SQL maintenance must honor it as well. No global name uniqueness constraint prevents legitimate distinct same-name settlements.
+
+## Verification and scope
+
+Dedicated local PostgreSQL 17 container, port 5547; no live database or deployment. New suite covers ownership, input/coordinate/evidence/country validation, role denial and spoofed JWT role claims, independent Admin review, atomic create/reject, normalized/inactive duplicates and country separation, concurrent same/different-proposal approvals, conflicting decisions, injected failure rollback, immutable submitted/decided history, FK/coordinate/status constraints, migration upgrade/rerun, fresh-schema parity, existing geography reads and unchanged Signal Template/Hunt history.
+
+Full regression: **56 files / 1,055 tests passed, zero skips** with `TEST_DATABASE_URL` enabled. Typecheck, build and `git diff --check` passed. Existing regression suites cover classified Template versions/reviews/publication and historical Hunt compatibility. OpenAPI documents all four operations.
+
+No unresolved implementation decision blocks this slice. Evidence quality and factual duplicate ambiguity remain human Admin review duties; self-review is prohibited conservatively. Mapbox entitlement (C6b-2), Template-to-Locality bindings, approved Local revisions, Organizer classified selection, UI, notifications and historical backfills remain outside scope. No existing Signal content or Hunt snapshots are altered. Draft PR only; stop for ChatGPT review, do not merge or deploy.
