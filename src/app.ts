@@ -1,3 +1,4 @@
+import { creatorUniversalLibraryRouter } from './routes/creatorUniversalLibrary.js';
 import cors from 'cors';
 import express, { type ErrorRequestHandler } from 'express';
 import swaggerUi from 'swagger-ui-express';
@@ -53,6 +54,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/organizer-applications', organizerApplicationsRouter);
   app.use('/api/creator-applications', creatorApplicationsRouter);
   app.use('/api/creator/templates', creatorTemplatesRouter);
+  app.use('/api/creator/universal-library', creatorUniversalLibraryRouter);
   app.use('/api/organizations', organizationsRouter);
   app.use('/api/hunt-templates', huntTemplatesRouter);
   app.use('/api/hunt-options', huntOptionsRouter);

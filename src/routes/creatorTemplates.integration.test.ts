@@ -179,4 +179,70 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     expect((await model.HuntTemplates.findByKey('signal-cluj-napoca'))?.category).toBeNull();
     expect((await model.HuntTemplates.findApprovedByKeyWithLatestVersion('signal-cluj-napoca'))?.version).toBe(1);
   });
+  it('publishes only independently approved Universals, once, at the exact pin', async () => {
+    const library = '/api/creator/universal-library';
+    const get = (path: string, who = other) => request(app).get(path).set('Authorization', who.auth);
+    const universal = await create('universal');
+    const key = universal.key;
+    await db.query('UPDATE users SET name=$1 WHERE id=$2', ['Original Creator', owner.id]);
+    await get(`${library}/${key}`).expect(404);
+    const approved = { ...universal.content, version: 2, displayName: 'Published puzzle' };
+    await post(`${root}/${key}/versions`, { content: approved }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    await get(`${library}/${key}`).expect(404);
+    await post(`/api/admin/templates/review/${key}/approve`, {}).expect(403);
+    await get(`${library}/${key}`).expect(404);
+    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    const identity = (await model.HuntTemplates.findByKey(key))!;
+    // Internal extra version proves the library never substitutes MAX(version).
+    await db.query(`INSERT INTO hunt_template_versions
+      (template_id, version, content, origin, category, created_by_user_id)
+      VALUES ($1, 3, $2, 'creator', 'universal', $3)`,
+    [identity.id, { ...approved, version: 3, displayName: 'Unapproved extra' }, owner.id]);
+    const expected = {
+      id: identity.id, key, displayName: 'Published puzzle', theme: approved.theme,
+      creator: { id: owner.id, name: 'Original Creator' },
+      publishedReference: { templateId: identity.id, version: 2 },
+    };
+    for (const who of [owner, other, await actor(['creator', 'organizer'])]) {
+      const list = await get(library, who).expect(200);
+      expect(list.body.items.filter((item: { key: string }) => item.key === key)).toEqual([expected]);
+      expect((await get(`${library}/${key}`, who).expect(200)).body).toEqual({ ...expected, content: approved });
+    }
+    // A query parameter cannot turn discovery into a historical-version chooser.
+    expect((await get(`${library}/${key}?version=1`).expect(200)).body.content).toEqual(approved);
+    await get(`${root}/${key}`).expect(404);
+    const changes = await create('universal');
+    await post(`${root}/${changes.key}/submit`, { version: 1 }).expect(200);
+    await post(`/api/admin/templates/review/${changes.key}/request-changes`, {}, reviewer).expect(200);
+    await get(`${library}/${changes.key}`).expect(404);
+    for (const category of ['local', undefined]) {
+      const excluded = await create(category);
+      await post(`${root}/${excluded.key}/submit`, { version: 1 }).expect(200);
+      await post(`/api/admin/templates/review/${excluded.key}/approve`, {}, reviewer).expect(200);
+      await get(`${library}/${excluded.key}`).expect(404);
+    }
+    // Status without an exact independent review record is insufficient authority.
+    const historical = await create('universal');
+    await db.query("UPDATE hunt_templates SET status='approved', submitted_version=1 WHERE key=$1", [historical.key]);
+    await get(`${library}/${historical.key}`).expect(404);
+    const list = (await get(library).expect(200)).body.items;
+    expect(list.some((item: { key: string }) => [changes.key, historical.key, 'signal-cluj-napoca'].includes(item.key))).toBe(false);
+    for (const who of [reviewer, await actor([]), await actor(['participant']), await actor(['organizer']),
+      await actor(['creator'], { guest: true }), await actor(['creator'], { status: 'blocked' }),
+      await actor(['creator'], { status: 'retired' })]) {
+      const status = [reviewer.id].includes(who.id) ? 403 : undefined;
+      for (const path of [library, `${library}/${key}`]) {
+        const response = await get(path, who);
+        expect(status ? response.status === status : [401, 403].includes(response.status)).toBe(true);
+      }
+    }
+    const revoked = await actor(['creator']);
+    await db.query('DELETE FROM user_roles WHERE user_id=$1', [revoked.id]);
+    for (const path of [library, `${library}/${key}`]) {
+      await get(path, revoked).expect(403);
+      await request(app).get(path).expect(401);
+    }
+  });
+
 });
