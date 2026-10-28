@@ -1,6 +1,6 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
-import { isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
+import { isTemplateContent, isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
 import { createSignalClujNapocaStarter } from '../domain/templates/signalClujNapocaStarter.js';
 import { createSignalOverloadClujNapocaStarter } from '../domain/templates/signalOverloadClujNapocaStarter.js';
 import { listStarterCatalog } from '../domain/templates/starterCatalog.js';
@@ -12,6 +12,9 @@ import {
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
+const hasOnlyFields = (body: unknown, fields: string[]): boolean =>
+  typeof body === 'object' && body !== null && !Array.isArray(body)
+  && Object.keys(body).every(field => fields.includes(field));
 
 /**
  * @openapi
@@ -91,6 +94,7 @@ router.post('/starters/signal-cluj-napoca', requireAuth, requireRole('creator'),
       version: result.version.version,
       status: result.template.status,
       origin: result.template.origin,
+      ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
     });
   } catch (error) {
@@ -145,6 +149,7 @@ router.post('/starters/signal-overload-cluj-napoca', requireAuth, requireRole('c
       version: result.version.version,
       status: result.template.status,
       origin: result.template.origin,
+      ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
     });
   } catch (error) {
@@ -248,7 +253,8 @@ router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest
  * /api/creator/templates:
  *   post:
  *     tags: [Creator Templates]
- *     summary: Create a draft Competition Template with immutable version 1
+ *     summary: Create a Creator-owned legacy, Universal or Local draft with immutable version 1
+ *     description: Category is optional and immutable. Ownership comes from authentication; source provenance is not accepted. Classified Templates remain outside Organizer selection even after approval.
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -256,8 +262,10 @@ router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest
  *         application/json:
  *           schema:
  *             type: object
+ *             additionalProperties: false
  *             required: [key, content]
  *             properties:
+ *               category: { type: string, enum: [universal, local], description: Omit for legacy unclassified creation. Immutable after creation. }
  *               key: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
  *               content: { $ref: '#/components/schemas/CreatorTemplateContent' }
  *     responses:
@@ -269,18 +277,24 @@ router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest
  */
 router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
   const key = normalizeTemplateKey(req.body?.key);
-  if (!key || !isTemplateContentV1(req.body?.content, key)) {
+  const category = req.body?.category;
+  if (!hasOnlyFields(req.body, ['key', 'content', 'category'])
+    || (category !== undefined && category !== 'universal' && category !== 'local')
+    || !key || !isTemplateContent(req.body?.content, key, 1)) {
     return res.status(400).json({ error: 'invalid_input' });
   }
 
   try {
     // Authorization uses authoritative user_roles materialized on the authenticated identity.
-    const result = await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id);
+    const result = category === undefined
+      ? await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id)
+      : await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id, category);
     return res.status(201).json({
       key: result.template.key,
       version: result.version.version,
       status: result.template.status,
       origin: result.template.origin,
+      ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
     });
   } catch (error) {
@@ -307,6 +321,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
  *         application/json:
  *           schema:
  *             type: object
+ *             additionalProperties: false
  *             required: [content]
  *             properties:
  *               content: { $ref: '#/components/schemas/CreatorTemplateContent' }
@@ -319,6 +334,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
  *       409: { description: Creator-owned Template is not editable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  */
 router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  if (!hasOnlyFields(req.body, ['content'])) return res.status(400).json({ error: 'invalid_input' });
   const key = req.params.key;
   if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
   try {
@@ -328,6 +344,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
       version: result.version.version,
       status: result.template.status,
       origin: result.template.origin,
+      ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
     });
   } catch (error) {
@@ -351,7 +368,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
  *   post:
  *     tags: [Creator Templates]
  *     summary: Submit an exact immutable Template version for Admin review
- *     description: Only the authenticated Creator's own draft Template may be submitted, and the explicitly supplied version must be its latest persisted version. Geographic normal-checkpoint configuration requires all normal positions, one complete FinishPoint and exactly one shared gameplay entry with role=terminal; legacy non-geographic content remains supported. Submission does not approve or publish the Template.
+ *     description: Only the authenticated Creator's own draft Template may be submitted, and the explicitly supplied version must be its latest persisted version. Geographic normal-checkpoint configuration requires all normal positions, one complete FinishPoint and exactly one shared gameplay entry with role=terminal; Universal may omit route geography while retaining counted gameplay checks. Local must supply the complete geographic contract; legacy non-geographic content remains supported. Submission does not approve or publish the Template.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
@@ -361,6 +378,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
  *         application/json:
  *           schema:
  *             type: object
+ *             additionalProperties: false
  *             required: [version]
  *             properties:
  *               version: { type: integer, minimum: 1 }
@@ -376,7 +394,7 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
   const key = req.params.key;
   const version = req.body?.version;
   if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
-  if (!Number.isInteger(version) || version < 1) {
+  if (!hasOnlyFields(req.body, ['version']) || !Number.isInteger(version) || version < 1) {
     return res.status(400).json({ error: 'invalid_input' });
   }
 
@@ -387,6 +405,7 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
       version: result.version.version,
       status: result.template.status,
       origin: result.template.origin,
+      ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
     });
   } catch (error) {
