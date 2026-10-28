@@ -246,7 +246,7 @@ router.get('/', requireAuth, requireRole('creator'), async (req: AuthRequest, re
  *   delete:
  *     tags: [Creator Templates]
  *     summary: Permanently delete an unused Creator-owned draft Template
- *     description: Only draft or changes_requested Templates owned by the authenticated Creator may be deleted. Removes all associated versions transactionally. Any Hunt reference or protected foreign-key dependency prevents deletion. Submitted and approved Templates are immutable. Missing, other-owned and platform keys (including repeated deletion) return the same 404.
+ *     description: Only draft or changes_requested Templates owned by the authenticated Creator may be deleted. Removes all associated versions transactionally. Any Hunt reference or protected foreign-key dependency prevents deletion. Submitted and approved Templates, published Universals and classified Templates with review history cannot be deleted. Missing, other-owned and platform keys (including repeated deletion) return the same 404.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
@@ -367,7 +367,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
  *   post:
  *     tags: [Creator Templates]
  *     summary: Save a new immutable version of a Creator-owned draft Template
- *     description: The complete Template snapshot must be supplied. The backend calculates the next version; only the authenticated Creator's own draft Templates are editable.
+ *     description: The complete Template snapshot must be supplied. The backend calculates the next version; only the authenticated Creator's own Templates are editable. Approved Universals or classified changes_requested Templates may be revised by saving a new immutable candidate, returning status to draft and preserving any published Universal. Submitted candidates remain locked.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }

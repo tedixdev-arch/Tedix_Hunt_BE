@@ -49,7 +49,7 @@ describe('Admin Template review reads', () => {
     await request(app).post('/api/admin/templates/review/algebra-trail/approve')
       .set('Authorization', bearer).send({ reviewerUserId: 'other-admin', version: 999 })
       .expect(403, { error: 'template_self_approval_forbidden' });
-    expect(mocks.approve).toHaveBeenCalledWith('algebra-trail', 'hydrated-admin');
+    expect(mocks.approve).toHaveBeenCalledWith('algebra-trail', 'hydrated-admin', 999);
   });
 
   it('lists submitted Creator review artifacts deterministically as supplied by persistence', async () => {
