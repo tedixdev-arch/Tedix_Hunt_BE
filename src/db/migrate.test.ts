@@ -28,6 +28,7 @@ import { templateChangesRequestedMigration } from './migrations/020_template_cha
 import { templateReviewDecisionsMigration } from './migrations/021_template_review_decisions.js';
 import { templateClassificationMigration } from './migrations/022_template_classification.js';
 import localityProposalsMigration from './migrations/025_locality_proposals.js';
+import templateLocalityBindingMigration from './migrations/026_template_locality_binding.js';
 import countryLocalityMigration from './migrations/024_country_locality.js';
 import templatePublicationMigration from './migrations/023_template_publication.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
@@ -53,6 +54,7 @@ const migrations = [
   templatePublicationMigration,
   countryLocalityMigration,
   localityProposalsMigration,
+  templateLocalityBindingMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -153,6 +155,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '023_template_publication',
       '024_country_locality',
       '025_locality_proposals',
+      '026_template_locality_binding',
     ]);
     try {
       await expect(client.query(
@@ -231,6 +234,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '023_template_publication' },
       { id: '024_country_locality' },
       { id: '025_locality_proposals' },
+      { id: '026_template_locality_binding' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
@@ -375,7 +379,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       expect(concurrent.map(({ status }) => status).sort()).toEqual([201, 409]);
       const created = concurrent.find(({ status }) => status === 201)!;
       const v1 = createSignalClujNapocaStarter(key);
-      expect(created.body).toEqual({ key, version: 1, origin: 'creator', status: 'draft', content: v1 });
+      expect(created.body).toEqual({ key, version: 1, origin: 'creator', status: 'draft', content: v1, localityId: null, localitySnapshot: null });
       const persisted = await client.query(
         `SELECT t.status, t.origin, t.created_by_user_id, v.version, v.content,
                 v.origin AS version_origin, v.created_by_user_id AS version_creator
@@ -387,7 +391,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
         version_origin: 'creator', version_creator: creatorId,
       }]);
       await request(app).get(draftPath).set('Authorization', creatorAuth).expect(200, {
-        key, version: 1, origin: 'creator', status: 'draft', submittedVersion: null, content: v1,
+        key, version: 1, origin: 'creator', status: 'draft', submittedVersion: null, localityId: null, localitySnapshot: null, content: v1,
       });
       await request(app).get(draftPath).set('Authorization', auth(other.id)).expect(404);
       await request(app).post(`${draftPath}/versions`).set('Authorization', auth(other.id))
@@ -414,14 +418,14 @@ describeWithDatabase('PostgreSQL migrations', () => {
         },
       };
       await request(app).post(`${draftPath}/versions`).set('Authorization', creatorAuth)
-        .send({ content: v2 }).expect(201, { key, version: 2, status: 'draft', origin: 'creator', content: v2 });
+        .send({ content: v2 }).expect(201, { key, version: 2, status: 'draft', origin: 'creator', localityId: null, localitySnapshot: null, content: v2 });
       await request(app).get(draftPath).set('Authorization', creatorAuth).expect(200, {
-        key, version: 2, status: 'draft', origin: 'creator', submittedVersion: null, content: v2,
+        key, version: 2, status: 'draft', origin: 'creator', submittedVersion: null, localityId: null, localitySnapshot: null, content: v2,
       });
       await request(app).post(`${draftPath}/submit`).set('Authorization', creatorAuth)
         .send({ version: 1 }).expect(409, { error: 'template_version_not_latest' });
       await request(app).post(`${draftPath}/submit`).set('Authorization', creatorAuth)
-        .send({ version: 2 }).expect(200, { key, version: 2, status: 'submitted', origin: 'creator', content: v2 });
+        .send({ version: 2 }).expect(200, { key, version: 2, status: 'submitted', origin: 'creator', localityId: null, localitySnapshot: null, content: v2 });
       const reviewPath = `/api/admin/templates/review/${key}`;
       const review = await request(app).get(reviewPath).set('Authorization', auth(adminId)).expect(200);
       expect(review.body).toMatchObject({ version: 2, content: v2, creator: { id: creatorId } });
@@ -899,7 +903,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       };
       await request(app).post(`/api/creator/templates/${key}/versions`)
         .set('Authorization', auth).send({ content: v2 }).expect(201, {
-          key, version: 2, status: 'draft', origin: 'creator', content: v2,
+          key, version: 2, status: 'draft', origin: 'creator', localityId: null, localitySnapshot: null, content: v2,
         });
       const v3 = { ...v2, version: 3, displayName: 'Version three' };
       await request(app).post(`/api/creator/templates/${key}/versions`)
@@ -920,7 +924,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       ]);
       await request(app).get(`/api/creator/templates/${key}`).set('Authorization', auth)
         .expect(200, {
-          key, version: 3, status: 'draft', origin: 'creator', submittedVersion: null, content: v3,
+          key, version: 3, status: 'draft', origin: 'creator', submittedVersion: null, localityId: null, localitySnapshot: null, content: v3,
         });
       await expect(client.query(
         'SELECT template_version, template_snapshot FROM hunts WHERE id = $1', [huntId],
@@ -952,7 +956,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       const submitted = await request(app).post(`/api/creator/templates/${key}/submit`)
         .set('Authorization', auth).send({ version: 4 }).expect(200);
       expect(submitted.body).toEqual({
-        key, version: 4, status: 'submitted', origin: 'creator', content: v4,
+        key, version: 4, status: 'submitted', origin: 'creator', localityId: null, localitySnapshot: null, content: v4,
       });
       await expect(client.query(
         'SELECT status, submitted_version FROM hunt_templates WHERE id = $1',
@@ -960,7 +964,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       )).resolves.toMatchObject({ rows: [{ status: 'submitted', submitted_version: 4 }] });
       await request(app).get(`/api/creator/templates/${key}`).set('Authorization', auth)
         .expect(200, {
-          key, version: 4, status: 'submitted', origin: 'creator', submittedVersion: 4, content: v4,
+          key, version: 4, status: 'submitted', origin: 'creator', submittedVersion: 4, localityId: null, localitySnapshot: null, content: v4,
         });
       await request(app).post(`/api/creator/templates/${key}/versions`)
         .set('Authorization', auth).send({ content: { ...v4, version: 5 } })

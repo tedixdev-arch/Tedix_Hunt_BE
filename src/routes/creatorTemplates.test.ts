@@ -235,7 +235,7 @@ describe('POST /api/creator/templates', () => {
     const response = await request(app).post('/api/creator/templates').set('Authorization', bearer)
       .send({ key: '  Algebra-Trail ', content }).expect(201);
     expect(response.body).toEqual({ key: content.key, version: 1, status: 'draft', origin: 'creator', content });
-    expect(mocks.createCreatorDraft).toHaveBeenCalledWith(content.key, content, 'user-1');
+    expect(mocks.createCreatorDraft).toHaveBeenCalledWith(content.key, content, 'user-1', undefined, undefined);
   });
 
   it('accepts and preserves progressive geographic draft content', async () => {
@@ -259,7 +259,7 @@ describe('POST /api/creator/templates', () => {
         content: geographicDraft,
       });
     expect(mocks.createCreatorDraft).toHaveBeenCalledWith(
-      content.key, geographicDraft, 'user-1',
+      content.key, geographicDraft, 'user-1', undefined, undefined,
     );
   });
 
@@ -317,7 +317,7 @@ describe('POST /api/creator/templates/:key/versions', () => {
       .set('Authorization', bearer).send({ content: version2 }).expect(201, {
         key: content.key, version: 2, status: 'draft', origin: 'creator', content: version2,
       });
-    expect(mocks.createCreatorVersion).toHaveBeenCalledWith(content.key, version2, 'user-1');
+    expect(mocks.createCreatorVersion).toHaveBeenCalledWith(content.key, version2, 'user-1', undefined);
   });
 
   it.each([

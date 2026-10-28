@@ -9,7 +9,7 @@ import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.j
 import {
   HuntTemplateNotDeletableError, HuntTemplateInUseError, HuntTemplateKeyConflictError, HuntTemplateNotEditableError, HuntTemplateNotFoundError,
   HuntTemplateNotSubmittableError, HuntTemplates, HuntTemplateVersionNotLatestError,
-  InvalidHuntTemplateContentError,
+  InvalidHuntTemplateContentError, TemplateLocalityError,
 } from '../models/HuntTemplate.js';
 
 const router = express.Router();
@@ -152,6 +152,8 @@ router.post('/starters/signal-cluj-napoca', requireAuth, requireRole('creator'),
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
+      localityId: result.version.localityId,
+      localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
     if (error instanceof HuntTemplateKeyConflictError) {
@@ -207,6 +209,8 @@ router.post('/starters/signal-overload-cluj-napoca', requireAuth, requireRole('c
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
+      localityId: result.version.localityId,
+      localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
     if (error instanceof HuntTemplateKeyConflictError) {
@@ -323,18 +327,20 @@ router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest
  *             properties:
  *               category: { type: string, enum: [universal, local], description: Omit for legacy unclassified creation. Immutable after creation. }
  *               key: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+ *               localityId: { type: string, format: uuid, nullable: true, description: Local only. Omit to inherit on save; null clears; explicit UUID snapshots an active stored Locality. }
  *               content: { $ref: '#/components/schemas/CreatorTemplateContent' }
  *     responses:
  *       201: { description: Draft Template and version 1 created }
  *       400: { description: Invalid Template content, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
- *       409: { description: Template key already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: locality_not_found for an absent catalog UUID }
+ *       409: { description: Template key already exists or locality_unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  */
 router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
   const key = normalizeTemplateKey(req.body?.key);
   const category = req.body?.category;
-  if (!hasOnlyFields(req.body, ['key', 'content', 'category'])
+  if (!hasOnlyFields(req.body, ['key', 'content', 'category', 'localityId'])
     || (category !== undefined && category !== 'universal' && category !== 'local')
     || !key || !isTemplateContent(req.body?.content, key, 1)) {
     return res.status(400).json({ error: 'invalid_input' });
@@ -342,9 +348,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
 
   try {
     // Authorization uses authoritative user_roles materialized on the authenticated identity.
-    const result = category === undefined
-      ? await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id)
-      : await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id, category);
+    const result = await HuntTemplates.createCreatorDraft(key, req.body.content, req.user!.id, category, req.body.localityId);
     return res.status(201).json({
       key: result.template.key,
       version: result.version.version,
@@ -352,8 +356,11 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
+      localityId: result.version.localityId,
+      localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     if (error instanceof HuntTemplateKeyConflictError) {
       return res.status(409).json({ error: 'template_key_conflict' });
     }
@@ -380,21 +387,22 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
  *             additionalProperties: false
  *             required: [content]
  *             properties:
+ *               localityId: { type: string, format: uuid, nullable: true, description: Local only. Omit to inherit on save; null clears; explicit UUID snapshots an active stored Locality. }
  *               content: { $ref: '#/components/schemas/CreatorTemplateContent' }
  *     responses:
  *       201: { description: New immutable Template version created }
  *       400: { description: Invalid complete Template content, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  *       401: { description: Authentication required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  *       403: { description: Creator capability required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
- *       404: { description: Template not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
- *       409: { description: Creator-owned Template is not editable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       404: { description: Template not found or locality_not_found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+ *       409: { description: Template is not editable or locality_unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  */
 router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
-  if (!hasOnlyFields(req.body, ['content'])) return res.status(400).json({ error: 'invalid_input' });
+  if (!hasOnlyFields(req.body, ['content', 'localityId'])) return res.status(400).json({ error: 'invalid_input' });
   const key = req.params.key;
   if (typeof key !== 'string') return res.status(404).json({ error: 'not_found' });
   try {
-    const result = await HuntTemplates.createCreatorVersion(key, req.body?.content, req.user!.id);
+    const result = await HuntTemplates.createCreatorVersion(key, req.body?.content, req.user!.id, req.body.localityId);
     return res.status(201).json({
       key: result.template.key,
       version: result.version.version,
@@ -402,8 +410,11 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
+      localityId: result.version.localityId,
+      localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     // Missing and other-owned identities deliberately share one response.
     if (error instanceof HuntTemplateNotFoundError) {
       return res.status(404).json({ error: 'not_found' });
@@ -463,6 +474,8 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
       origin: result.template.origin,
       ...(result.template.category ? { category: result.template.category } : {}),
       content: result.version.content,
+      localityId: result.version.localityId,
+      localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
     // Unknown, other-owned, and platform keys are deliberately indistinguishable.
