@@ -75,22 +75,20 @@ BEGIN
         AND OLD.submitted_version=NEW.local_approved_version
         AND NEW.submitted_version=OLD.submitted_version
         AND NOT EXISTS (SELECT 1 FROM hunt_template_reviews r
-          WHERE r.template_id=OLD.id AND r.version=NEW.local_approved_version
-            AND r.xmin <> (txid_current() % 4294967296)::text::xid))
+          WHERE r.template_id=OLD.id AND r.version=NEW.local_approved_version))
       OR
       (OLD.local_approved_version IS NULL AND OLD.status='approved'
         AND OLD.submitted_version=NEW.local_approved_version
         AND NEW.status=OLD.status AND NEW.submitted_version=OLD.submitted_version
-        AND (SELECT xmin FROM hunt_templates WHERE id=OLD.id) <> (txid_current() % 4294967296)::text::xid
         AND EXISTS (SELECT 1 FROM hunt_template_reviews r
           WHERE r.template_id=OLD.id AND r.version=OLD.submitted_version
-            AND r.decision='approved' AND r.reviewer_user_id<>OLD.created_by_user_id
-            AND r.xmin <> (txid_current() % 4294967296)::text::xid))
+            AND r.decision='approved' AND r.reviewer_user_id<>OLD.created_by_user_id))
     ) THEN
       RAISE EXCEPTION 'Local pointer requires exact approval or pre-existing compatibility capture' USING ERRCODE = '23514';
     END IF;
   END IF;
-  IF NEW.category='local' AND NEW.status='approved' AND OLD.status<>'approved'
+  IF NEW.category='local' AND NEW.status='approved'
+    AND (NEW.local_approved_version IS NOT NULL OR OLD.status<>'approved')
     AND NEW.local_approved_version IS DISTINCT FROM NEW.submitted_version THEN
     RAISE EXCEPTION 'New Local approval must establish exact authority' USING ERRCODE = '23514';
   END IF;
@@ -107,25 +105,61 @@ CREATE TRIGGER hunt_templates_local_authority_protection
   BEFORE INSERT OR UPDATE OR DELETE ON hunt_templates
   FOR EACH ROW EXECUTE FUNCTION protect_local_template_authority();
 
-CREATE FUNCTION enforce_local_template_approval() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE compatibility BOOLEAN;
+-- Approved Local evidence can only be inserted for an approval already in progress.
+-- The identity guard requires NO prior decision before a normal promotion. Together,
+-- these rules make historical evidence pre-existing without inspecting xmin/txids:
+-- historical NULL-pointer approvals cannot acquire new approved reviews, and a new
+-- approval cannot first insert a review and subsequently relabel it as compatibility.
+CREATE FUNCTION bind_local_approval_review() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE identity_row hunt_templates%ROWTYPE;
 BEGIN
-  IF TG_OP='INSERT' OR NEW.local_approved_version IS NOT DISTINCT FROM OLD.local_approved_version THEN
-    RETURN NULL;
+  IF NEW.decision<>'approved' THEN RETURN NEW; END IF;
+  SELECT * INTO identity_row FROM hunt_templates WHERE id=NEW.template_id AND category='local' FOR UPDATE;
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  IF (identity_row.status<>'approved'
+      OR identity_row.local_approved_version IS DISTINCT FROM NEW.version
+      OR identity_row.submitted_version IS DISTINCT FROM NEW.version) THEN
+    RAISE EXCEPTION 'Local approved evidence requires an exact approval in progress' USING ERRCODE = '23514';
   END IF;
-  compatibility := OLD.local_approved_version IS NULL AND OLD.status='approved'
-    AND OLD.submitted_version=NEW.local_approved_version
-    AND NEW.status='approved' AND NEW.submitted_version=OLD.submitted_version;
-  IF NEW.local_approved_version IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM hunt_templates t JOIN hunt_template_reviews r
-      ON r.template_id=t.id AND r.version=NEW.local_approved_version
-    WHERE t.id=NEW.id AND t.local_approved_version=NEW.local_approved_version
-      AND r.decision='approved' AND r.reviewer_user_id<>t.created_by_user_id
-      AND (compatibility OR EXISTS (SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id
-        WHERE u.id=r.reviewer_user_id AND ur.role='admin' AND u.account_status='active' AND NOT u.is_guest))
-      AND (compatibility OR (t.status='approved' AND t.submitted_version=t.local_approved_version))
-  ) THEN
-    RAISE EXCEPTION 'Local approval requires exact independent evidence' USING ERRCODE = '23514';
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER hunt_template_reviews_local_approval_binding
+  BEFORE INSERT ON hunt_template_reviews
+  FOR EACH ROW EXECUTE FUNCTION bind_local_approval_review();
+
+CREATE FUNCTION enforce_local_template_approval() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE final_identity hunt_templates%ROWTYPE;
+BEGIN
+  -- A queued event's NEW is an intermediate row. Always reload the final identity,
+  -- including on pointer-unchanged events; compatibility never bypasses this check.
+  SELECT * INTO final_identity FROM hunt_templates WHERE id=NEW.id;
+  IF NOT FOUND OR final_identity.category IS DISTINCT FROM 'local' THEN RETURN NULL; END IF;
+  IF final_identity.local_approved_version IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM hunt_template_reviews r
+      WHERE r.template_id=final_identity.id AND r.version=final_identity.local_approved_version
+        AND r.decision='approved' AND r.reviewer_user_id<>final_identity.created_by_user_id)
+      OR (final_identity.status='approved'
+        AND final_identity.submitted_version IS DISTINCT FROM final_identity.local_approved_version) THEN
+      RAISE EXCEPTION 'Final Local authority requires exact independent approval and a coherent candidate' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  -- Only a NEW approval needs a currently active Admin and the exact approved
+  -- candidate at commit. Retained/historical evidence survives reviewer retirement
+  -- and candidate drafting, submission or request-changes as before.
+  IF TG_OP='UPDATE' AND NEW.local_approved_version IS DISTINCT FROM OLD.local_approved_version
+    AND OLD.status='submitted' THEN
+    IF final_identity.local_approved_version IS DISTINCT FROM NEW.local_approved_version
+      OR final_identity.status<>'approved'
+      OR final_identity.submitted_version IS DISTINCT FROM NEW.local_approved_version
+      OR NOT EXISTS (SELECT 1 FROM hunt_template_reviews r
+        JOIN users u ON u.id=r.reviewer_user_id JOIN user_roles ur ON ur.user_id=u.id
+        WHERE r.template_id=final_identity.id AND r.version=NEW.local_approved_version
+          AND r.decision='approved' AND r.reviewer_user_id<>final_identity.created_by_user_id
+          AND ur.role='admin' AND u.account_status='active' AND NOT u.is_guest) THEN
+      RAISE EXCEPTION 'New Local approval requires final exact candidate and active independent Admin evidence' USING ERRCODE = '23514';
+    END IF;
   END IF;
   RETURN NULL;
 END;

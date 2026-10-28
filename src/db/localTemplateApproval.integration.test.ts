@@ -135,7 +135,8 @@ suite('C6b-5 Local approval continuity against disposable PostgreSQL', () => {
     const inspectSchema=async()=>({
       columns:(await client.query(`SELECT column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='hunt_templates' ORDER BY column_name`)).rows,
       constraints:(await client.query(`SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='hunt_templates'::regclass AND conname LIKE 'hunt_templates_local_%' ORDER BY conname`)).rows,
-      functions:await Promise.all(['protect_local_template_authority','enforce_local_template_approval'].map(async name=>(await client.query('SELECT prosrc FROM pg_proc WHERE oid=$1::regprocedure',[`${name}()`])).rows)),
+      triggers:(await client.query("SELECT tgname,pg_get_triggerdef(oid) AS definition FROM pg_trigger WHERE tgrelid='hunt_template_reviews'::regclass AND tgname='hunt_template_reviews_local_approval_binding'")).rows.map(r=>({ ...r, definition:r.definition.replace(/ ON [^ ]+\./,' ON ') })),
+      functions:await Promise.all(['protect_local_template_authority','enforce_local_template_approval','bind_local_approval_review'].map(async name=>(await client.query('SELECT prosrc FROM pg_proc WHERE oid=$1::regprocedure',[`${name}()`])).rows)),
     });
     try { const upgraded=await inspectSchema();await client.query('BEGIN; CREATE SCHEMA fresh_local; SET LOCAL search_path TO fresh_local,public');
       await client.query(await readFile(new URL('./schema.sql',import.meta.url),'utf8'));expect(await inspectSchema()).toEqual(upgraded);
@@ -272,17 +273,11 @@ suite('C6b-5 Local approval continuity against disposable PostgreSQL', () => {
     // This historical record still has no pointer/review and must nevertheless remain retained.
     await expect(db.query("DELETE FROM hunt_templates WHERE key='historical-inconsistent'")).rejects.toMatchObject({code:'23514'});
   });
-  it('rejects newly invented compatibility evidence and arbitrary historical-review promotion',async()=>{
-    const key=await create();const id=(await state(key)).identity[0].id;const client=await db.connect();
-    try{
-      await client.query('BEGIN');
-      await client.query("INSERT INTO hunt_template_reviews (template_id,version,reviewer_user_id,decision) VALUES ($1,1,$2,'approved')",[id,actors.admin]);
-      await expect(client.query("UPDATE hunt_templates SET status='approved',submitted_version=1,local_approved_version=1 WHERE id=$1",[id])).rejects.toMatchObject({code:'23514'});
-    }finally{await client.query('ROLLBACK');client.release();}
-    expect((await state(key)).reviews).toEqual([]);
-    // Existing review alone is insufficient when the pre-operation identity is draft.
-    await db.query("INSERT INTO hunt_template_reviews (template_id,version,reviewer_user_id,decision) VALUES ($1,1,$2,'approved')",[id,actors.admin]);
-    await expect(db.query('UPDATE hunt_templates SET local_approved_version=1 WHERE id=$1',[id])).rejects.toMatchObject({code:'23514'});
+  it('rejects newly invented approved evidence before any normal promotion',async()=>{
+    const key=await create();const id=(await state(key)).identity[0].id;const before=await state(key);
+    await expect(db.query("INSERT INTO hunt_template_reviews (template_id,version,reviewer_user_id,decision) VALUES ($1,1,$2,'approved')",[id,actors.admin])).rejects.toMatchObject({code:'23514'});
+    await expect(db.query("UPDATE hunt_templates SET status='approved',submitted_version=1,local_approved_version=1 WHERE id=$1",[id])).rejects.toMatchObject({code:'23514'});
+    expect(await state(key)).toEqual(before);
   });
   it.each(['missing','self','changes','nonadmin'])('defers exact independent %s evidence checks and rolls back SQL approval completely',async kind=>{
     const key=await create();await submit(key,1).expect(200);const before=await state(key);const id=before.identity[0].id;const client=await db.connect();
@@ -294,11 +289,10 @@ suite('C6b-5 Local approval continuity against disposable PostgreSQL', () => {
     }finally{await client.query('ROLLBACK');client.release();}
     expect(await state(key)).toEqual(before);
   });
-  it('rejects old committed-review promotion even when the candidate is submitted',async()=>{
-    const key=await create();const id=(await state(key)).identity[0].id;
-    await db.query("INSERT INTO hunt_template_reviews (template_id,version,reviewer_user_id,decision) VALUES ($1,1,$2,'approved')",[id,actors.admin]);
-    await submit(key,1).expect(200);
-    await expect(db.query("UPDATE hunt_templates SET status='approved',local_approved_version=1 WHERE id=$1",[id])).rejects.toMatchObject({code:'23514'});
+  it('rejects insertion of approved evidence while the candidate is merely submitted',async()=>{
+    const key=await create();const id=(await state(key)).identity[0].id;await submit(key,1).expect(200);const before=await state(key);
+    await expect(db.query("INSERT INTO hunt_template_reviews (template_id,version,reviewer_user_id,decision) VALUES ($1,1,$2,'approved')",[id,actors.admin])).rejects.toMatchObject({code:'23514'});
+    expect(await state(key)).toEqual(before);
   });
   it('keeps an initial changes-requested candidate without approval authority',async()=>{
     const key=await create();await submit(key,1).expect(200);await decide(key,1,'request-changes','creator').expect(200);

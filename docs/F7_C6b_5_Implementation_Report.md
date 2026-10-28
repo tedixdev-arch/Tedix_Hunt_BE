@@ -19,11 +19,15 @@ changes to an established suspension tuple. New approval requires the exact subm
 candidate. A deferred guard checks independent approved evidence and an active Admin
 reviewer before commit; Universal publication and classified-review protection remain
 unchanged. Compatibility capture allows an already approved historical pin only with
-an existing independent review committed before the operation. The immediate check
-uses PostgreSQL tuple transaction IDs (`xmin`), including the identity's pre-operation
-state, to distinguish capture from evidence/status manufactured in the transaction.
-The capture precedes candidate changes; the deferred check permits the resulting draft.
-Historical reviewers can subsequently retire without destroying existing evidence.
+pre-existing independent evidence. A Local-only approved-review insertion guard now
+requires an exact approval already in progress; normal promotion requires that no
+decision already exists. Together these durable lifecycle/evidence rules prevent
+fabricated historical evidence without `xmin` or transaction-ID inference. The capture
+precedes candidate changes; the deferred check permits the resulting draft. Every
+deferred identity event reloads and validates final authority, including pointer-unchanged
+updates and compatibility captures. Historical reviewers can subsequently retire without
+destroying existing evidence. See [the guard review](F7_C6b_5_Authority_Guard_Review.md)
+for the reproduced bypass, integrity argument and adversarial SQL acceptance cases.
 
 Controlled deletion retires an account referenced only by suspension attribution.
 Retained Local pointers/audit tuples prevent deletion even during replacement drafting.
@@ -92,8 +96,9 @@ in shared mode through commit and recheck membership. Catalog writes never acqui
 Template locks. Candidate/pointer/review/audit writes commit together or roll back,
 including deferred PostgreSQL failures; pooled connections remain reusable.
 
-`src/db/localTemplateApproval.integration.test.ts` contains 61 PostgreSQL tests, with
-existing Locality/classification/Creator/Admin/publication/catalog/Hunt suites retained.
+`src/db/localTemplateApproval.integration.test.ts` contains 61 PostgreSQL tests and
+`src/db/localTemplateAuthorityGuards.integration.test.ts` adds 29 adversarial SQL tests.
+Existing Locality/classification/Creator/Admin/publication/catalog/Hunt suites are retained.
 Coverage includes:
 
 | Contract section 7 requirement | Evidence |
@@ -113,9 +118,9 @@ Coverage includes:
 Executed on disposable **PostgreSQL 17.10**, using `TEST_DATABASE_URL` and unique
 per-suite databases. The supplied root database contains only disposable test state.
 
-- Focused PostgreSQL suites: **105 passed, 0 failed, 0 skipped** (Local approval,
-  Locality binding, classification and Creator lifecycle).
-- Complete suite: **1,137 passed, 0 failed, 0 skipped**, 58 files.
+- Focused PostgreSQL suites: **90 passed, 0 failed, 0 skipped** (Local approval and
+  adversarial authority guards).
+- Complete suite: **1,166 passed, 0 failed, 0 skipped**, 59 files.
 - `npm run typecheck`: pass.
 - `npm run build`: pass.
 - `git diff --check`: pass.
