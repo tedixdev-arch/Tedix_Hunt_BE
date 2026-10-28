@@ -1,3 +1,4 @@
+import { copyPublishedUniversal, UniversalCopyForbiddenError, UniversalCopySourceNotFoundError, UniversalCopyStaleError } from '../models/PublishedUniversal.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { isTemplateContent, isTemplateContentV1, normalizeTemplateKey } from '../domain/creatorTemplates.js';
@@ -15,6 +16,61 @@ const router = express.Router();
 const hasOnlyFields = (body: unknown, fields: string[]): boolean =>
   typeof body === 'object' && body !== null && !Array.isArray(body)
   && Object.keys(body).every(field => fields.includes(field));
+
+/**
+ * @openapi
+ * /api/creator/templates/from-universal/{sourceKey}:
+ *   post:
+ *     tags: [Creator Templates]
+ *     summary: Create an independent Local draft from the exact published Universal
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: sourceKey, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [key, publishedReference]
+ *             properties:
+ *               key: { type: string, maxLength: 100 }
+ *               publishedReference:
+ *                 type: object
+ *                 additionalProperties: false
+ *                 required: [templateId, version]
+ *                 properties:
+ *                   templateId: { type: string, format: uuid }
+ *                   version: { type: integer, minimum: 1 }
+ *     responses:
+ *       201: { description: Local draft and immutable version 1; key, version, status, origin, category, content }
+ *       400: { description: Invalid input or forbidden metadata }
+ *       401: { description: Authentication required }
+ *       403: { description: Active Creator capability required }
+ *       404: { description: Source is not a published Universal }
+ *       409: { description: Stale reference or duplicate destination key }
+ */
+router.post('/from-universal/:sourceKey', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
+  const key = normalizeTemplateKey(req.body?.key);
+  const reference = req.body?.publishedReference;
+  if (!hasOnlyFields(req.body, ['key', 'publishedReference']) || !key
+    || !hasOnlyFields(reference, ['templateId', 'version'])
+    || typeof reference.templateId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reference.templateId)
+    || !Number.isSafeInteger(reference.version) || reference.version < 1) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  try {
+    return res.status(201).json(await copyPublishedUniversal(req.params.sourceKey as string, reference, key, req.user!.id));
+  } catch (error) {
+    if (error instanceof UniversalCopyForbiddenError) return res.status(403).json({ error: 'forbidden' });
+    if (error instanceof UniversalCopySourceNotFoundError) return res.status(404).json({ error: 'not_found' });
+    if (error instanceof UniversalCopyStaleError) return res.status(409).json({ error: 'stale_published_reference' });
+    if (error instanceof HuntTemplateKeyConflictError) return res.status(409).json({ error: 'template_key_conflict' });
+    return next(error);
+  }
+});
 
 /**
  * @openapi
