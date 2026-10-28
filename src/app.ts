@@ -1,3 +1,4 @@
+import { localityProposalsRouter, adminLocalityProposalsRouter } from './routes/localityProposals.js';
 import { geographyRouter } from './routes/geography.js';
 import { creatorUniversalLibraryRouter } from './routes/creatorUniversalLibrary.js';
 import cors from 'cors';
@@ -48,6 +49,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
     response.status(200).json({ pong: true, timestamp: new Date().toISOString() });
   });
 
+  app.use('/api/geography/locality-proposals', localityProposalsRouter);
+  app.use('/api/admin/locality-proposals', adminLocalityProposalsRouter);
   app.use('/api/geography', geographyRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
@@ -106,3 +109,4 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   return app;
 };
+
