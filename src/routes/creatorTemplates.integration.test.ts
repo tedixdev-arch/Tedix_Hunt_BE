@@ -73,6 +73,99 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await admin.end();
   });
 
+  it('C4 copies exact published snapshots with independent ownership, immutable lineage and Local review gates', async () => {
+    const source = await create('universal', false);
+    const sourceId = (await model.HuntTemplates.findByKey(source.key))!.id;
+    const reference = { templateId: sourceId, version: 1 };
+    const copy = (key: string, who = other, publishedReference = reference, extra = {}) =>
+      post(`${root}/from-universal/${source.key}`, { key, publishedReference, ...extra }, who);
+    for (const state of ['draft', 'submitted', 'changes_requested']) {
+      if (state === 'submitted') await post(`${root}/${source.key}/submit`, { version: 1 }).expect(200);
+      if (state === 'changes_requested') {
+        await db.query("UPDATE hunt_templates SET status='changes_requested' WHERE id=$1", [sourceId]);
+      }
+      await copy(`c4-${randomUUID()}`).expect(404);
+    }
+    await db.query("UPDATE hunt_templates SET status='submitted' WHERE id=$1", [sourceId]);
+    await post(`/api/admin/templates/review/${source.key}/approve`, {}, reviewer).expect(200);
+    const before = (await db.query('SELECT * FROM hunt_templates WHERE id=$1', [sourceId])).rows[0];
+    const sourceVersion = await model.HuntTemplates.getVersion(sourceId, 1);
+    await copy(`c4-${randomUUID()}`, other, { ...reference, version: 2 }).expect(409);
+    await copy(`c4-${randomUUID()}`, other, { ...reference, templateId: randomUUID() }).expect(409);
+    for (const field of ['category', 'status', 'owner', 'source_template_id', 'approval']) {
+      await copy(`c4-${randomUUID()}`, other, reference, { [field]: 'forged' }).expect(400);
+    }
+    const key = `c4-${randomUUID()}`;
+    const response = await copy(key).expect(201);
+    expect(response.body).toEqual({ key, version: 1, category: 'local', origin: 'creator', status: 'draft', content: { ...source.content, key, version: 1 } });
+    const local = (await db.query('SELECT * FROM hunt_templates WHERE key=$1', [key])).rows[0];
+    expect(local.id).not.toBe(sourceId);
+    expect(local).toMatchObject({ created_by_user_id: other.id, category: 'local', status: 'draft', submitted_version: null,
+      source_template_id: sourceId, source_version: 1, source_creator_user_id: owner.id, source_review_decision: 'approved' });
+    await copy(key).expect(409);
+    expect((await db.query('SELECT * FROM hunt_template_versions WHERE template_id=$1', [local.id])).rows).toHaveLength(1);
+    await copy(`c4-${randomUUID()}`, owner).expect(201);
+    await post(`${root}/${key}/submit`, { version: 1 }, other).expect(400);
+    const adapted = { ...snapshot(key, 2, true), displayName: 'Independent Local' };
+    await post(`${root}/${key}/versions`, { content: adapted }, other).expect(201);
+    expect(await model.HuntTemplates.getVersion(sourceId, 1)).toEqual(sourceVersion);
+    expect((await db.query('SELECT * FROM hunt_templates WHERE id=$1', [sourceId])).rows[0]).toEqual(before);
+    // Simulate a future source version only through SQL: C5 authoring is out of scope.
+    await db.query(`INSERT INTO hunt_template_versions (template_id,version,content,origin,category,created_by_user_id)
+      VALUES ($1,2,$2,'creator','universal',$3)`, [sourceId, { ...source.content, version: 2, displayName: 'Later Universal' }, owner.id]);
+    expect((await model.HuntTemplates.getVersion(local.id, 1))!.content).toEqual(response.body.content);
+    expect((await model.HuntTemplates.getVersion(local.id, 2))!.content).toEqual(adapted);
+    await post(`${root}/${key}/submit`, { version: 2 }, other).expect(200);
+    expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
+    await post(`/api/admin/templates/review/${key}/approve`, {}, other).expect(403);
+    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
+    for (const category of ['local', undefined]) {
+      const invalid = await create(category);
+      await post(`${root}/from-universal/${invalid.key}`, { key: `c4-${randomUUID()}`, publishedReference: reference }, other).expect(404);
+    }
+    for (const roles of [[], ['admin'], ['organizer'], ['participant']]) {
+      await copy(`c4-${randomUUID()}`, await actor(roles)).expect(403);
+    }
+    for (const options of [{ guest: true }, { status: 'blocked' }, { status: 'retired' }]) {
+      await copy(`c4-${randomUUID()}`, await actor(['creator'], options)).expect(options.guest ? 403 : 401);
+    }
+    await request(app).post(`${root}/from-universal/${source.key}`).send({ key, publishedReference: reference }).expect(401);
+    await db.query('DELETE FROM hunt_template_reviews WHERE template_id=$1', [sourceId]).then(
+      () => { throw new Error('Expected provenance dependency restriction'); }, () => undefined);
+  });
+
+  it('C4 preserves optional geography as draft, rejects nonpublished sources, serializes keys and rolls back insert failures', async () => {
+    const source = await create('universal', true);
+    const id = (await model.HuntTemplates.findByKey(source.key))!.id;
+    const copy = (key: string) => post(`${root}/from-universal/${source.key}`, {
+      key, publishedReference: { templateId: id, version: 1 },
+    }, other);
+    await post(`${root}/${source.key}/submit`, { version: 1 }).expect(200);
+    await db.query("UPDATE hunt_templates SET status='approved' WHERE id=$1", [id]);
+    await copy(`c4-${randomUUID()}`).expect(404); // Historical status lacks exact decision.
+    await db.query("UPDATE hunt_templates SET status='submitted' WHERE id=$1", [id]);
+    await post(`/api/admin/templates/review/${source.key}/approve`, {}, reviewer).expect(200);
+    const key = `c4-${randomUUID()}`;
+    const results = await Promise.all([copy(key), copy(key)]);
+    expect(results.map(result => result.status).sort()).toEqual([201, 409]);
+    expect(results.find(result => result.status === 201)!.body.content.configuration).toEqual(source.content.configuration);
+    const local = (await model.HuntTemplates.findByKey(key))!;
+    await post(`${root}/${key}/submit`, { version: 1 }, other).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    await post(`${root}/from-universal/${key}`, { key: `c4-${randomUUID()}`, publishedReference: { templateId: local.id, version: 1 } }, other).expect(404);
+    const failedKey = `c4-${randomUUID()}`;
+    await db.query(`CREATE FUNCTION c4_fail_version() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.content->>'key' = '${failedKey}' THEN RAISE EXCEPTION 'injected failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER c4_fail_version BEFORE INSERT ON hunt_template_versions FOR EACH ROW EXECUTE FUNCTION c4_fail_version()`);
+    try {
+      await copy(failedKey).expect(500);
+      expect(await model.HuntTemplates.findByKey(failedKey)).toBeNull();
+    } finally {
+      await db.query('DROP TRIGGER c4_fail_version ON hunt_template_versions; DROP FUNCTION c4_fail_version()');
+    }
+  });
+
   it.each(['universal', 'local'])('creates, saves, pins, reviews and isolates %s', async category => {
     const { key, content, response } = await create(category);
     expect(response.body.category).toBe(category);
