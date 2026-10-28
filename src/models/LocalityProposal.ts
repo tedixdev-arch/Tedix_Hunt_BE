@@ -48,8 +48,9 @@ export const LocalityProposals = {
         // All new catalog writers must lock this country before duplicate check + insertion.
         await client.query('SELECT code FROM countries WHERE code=$1 FOR UPDATE', [proposal.country_code]);
         const duplicate = await client.query(`SELECT id FROM localities WHERE country_code=$1
-          AND regexp_replace(lower(name), '[^[:alnum:]]', '', 'g') = regexp_replace(lower($2::text), '[^[:alnum:]]', '', 'g') LIMIT 1`,
-        [proposal.country_code, proposal.name]);
+          AND regexp_replace(lower(name), '[^[:alnum:]]', '', 'g') = regexp_replace(lower($2::text), '[^[:alnum:]]', '', 'g')
+          AND regexp_replace(lower(administrative_context), '[^[:alnum:]]', '', 'g') = regexp_replace(lower($3::text), '[^[:alnum:]]', '', 'g') LIMIT 1`,
+        [proposal.country_code, proposal.name, proposal.administrative_context]);
         if (duplicate.rowCount) throw new ProposalError('locality_duplicate_conflict', 409);
         localityId = (await client.query(`INSERT INTO localities
           (country_code,name,administrative_context,latitude,longitude,provenance)

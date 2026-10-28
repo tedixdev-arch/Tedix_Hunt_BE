@@ -173,12 +173,12 @@ suite('Manual locality proposals against PostgreSQL', () => {
     expect(result.body).toMatchObject({ status: 'rejected', localityId: null, reviewerUserId: actors.admin });
     expect(await count()).toBe(before); await decide(p.id).expect(409);
   });
-  it('blocks normalized same-country names including inactive records; never silently merges', async () => {
+  it('blocks normalized names in the same normalized context and country, including inactive records', async () => {
     const name = `Conflict-${randomUUID()}`;
     const first = (await submit(input(name)).expect(201)).body;
     const approved = (await decide(first.id).expect(200)).body;
     await db.query('UPDATE localities SET active=false WHERE id=$1', [approved.localityId]);
-    const other = (await submit({ ...input(name.toUpperCase().replaceAll('-', ' ')), administrativeContext: 'Other region', latitude: -40 }).expect(201)).body;
+    const other = (await submit({ ...input(name.toUpperCase().replaceAll('-', ' ')), administrativeContext: '  CLUJ-County  ', latitude: -40 }).expect(201)).body;
     const before = await count();
     await decide(other.id).expect(409, { error: 'locality_duplicate_conflict' });
     expect(await count()).toBe(before);
@@ -190,6 +190,19 @@ suite('Manual locality proposals against PostgreSQL', () => {
     const foreign = (await submit({ ...input(name), countryCode: 'US' }).expect(201)).body;
     await decide(foreign.id).expect(200);
   });
+  it('allows identical names in different administrative contexts within one country', async () => {
+    const name = `Same-name-${randomUUID()}`;
+    const proposals = await Promise.all(['Cluj County', 'Alba County'].map(administrativeContext =>
+      submit({ ...input(name), administrativeContext }).expect(201)));
+    const before = await count();
+    const results = await Promise.all(proposals.map(p => decide(p.body.id).expect(200)));
+    expect(await count()).toBe(before + 2);
+    expect(results[0].body.localityId).not.toBe(results[1].body.localityId);
+    expect((await db.query('SELECT name,administrative_context FROM localities WHERE id=ANY($1::uuid[]) ORDER BY administrative_context',
+      [results.map(r => r.body.localityId)])).rows).toEqual([
+      { name, administrative_context: 'Alba County' }, { name, administrative_context: 'Cluj County' },
+    ]);
+  });
   it('serializes identical and conflicting concurrent decisions on one proposal', async () => {
     for (const decisions of [['approved','approved'], ['approved','rejected']]) {
       const p = (await submit().expect(201)).body; const before = await count();
@@ -199,9 +212,9 @@ suite('Manual locality proposals against PostgreSQL', () => {
       expect(await count()).toBe(before + (winner.body.status === 'approved' ? 1 : 0));
     }
   });
-  it('serializes different proposals with the same normalized name under the country lock', async () => {
+  it('serializes different proposals with the same normalized name and context under the country lock', async () => {
     const name = `Concurrent-${randomUUID()}`;
-    const proposals = await Promise.all([submit(input(name)), submit(input(name.toUpperCase().replaceAll('-', ' ')))]);
+    const proposals = await Promise.all([submit(input(name)), submit({ ...input(name.toUpperCase().replaceAll('-', ' ')), administrativeContext: 'CLUJ-County' })]);
     const before = await count();
     const results = await Promise.all(proposals.map(p => decide(p.body.id)));
     expect(results.map(r => r.status).sort()).toEqual([200,409]); expect(await count()).toBe(before + 1);
