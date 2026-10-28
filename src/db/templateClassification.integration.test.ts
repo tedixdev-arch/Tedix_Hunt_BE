@@ -62,7 +62,7 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
     try {
       await client.query(await readFile(new URL('./pre_migration_baseline.sql', import.meta.url), 'utf8'));
       const directory = new URL('./migrations/', import.meta.url);
-      for (const filename of (await readdir(directory)).filter(name => /^\d{3}_.*\.ts$/.test(name) && !name.startsWith('022')).sort()) {
+      for (const filename of (await readdir(directory)).filter(name => /^\d{3}_.*\.ts$/.test(name) && name < '022').sort()) {
         migrations.push((await import(new URL(filename, directory).href)).default);
       }
       await runMigrations(client, migrations);
@@ -180,7 +180,7 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
     const constraints = `SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
       FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace
       WHERE n.nspname=current_schema() AND
-        (c.conname LIKE '%category%' OR c.conname LIKE 'hunt_templates_source%' OR
+        ((c.conname LIKE '%category%' AND c.conname NOT LIKE '%published%') OR c.conname LIKE 'hunt_templates_source%' OR
          c.conname IN ('hunt_templates_classified_owner_check', 'hunt_template_reviews_exact_decision_key'))
       ORDER BY c.conname`;
     const migratedConstraints = (await client.query(constraints)).rows;
@@ -188,7 +188,7 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
       await client.query('BEGIN; CREATE SCHEMA baseline_c1; SET LOCAL search_path TO baseline_c1, public');
       await client.query(await readFile(new URL('./schema.sql', import.meta.url), 'utf8'));
       expect((await client.query(constraints)).rows).toEqual(migratedConstraints);
-      expect((await client.query("SELECT tgname FROM pg_trigger WHERE tgrelid IN ('hunt_templates'::regclass, 'hunt_template_versions'::regclass) AND NOT tgisinternal ORDER BY tgname")).rows)
+      expect((await client.query("SELECT tgname FROM pg_trigger WHERE tgrelid IN ('hunt_templates'::regclass, 'hunt_template_versions'::regclass) AND tgname IN ('hunt_templates_identity_binding', 'hunt_template_versions_identity_binding') ORDER BY tgname")).rows)
         .toEqual([{ tgname: 'hunt_template_versions_identity_binding' }, { tgname: 'hunt_templates_identity_binding' }]);
       await expect(client.query("INSERT INTO hunt_templates (key, origin, status, category) VALUES ('bad', 'platform', 'draft', 'local')"))
         .rejects.toMatchObject({ code: '23514' });

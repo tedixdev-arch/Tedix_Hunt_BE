@@ -136,8 +136,17 @@ export const HuntTemplates = {
       );
       const template = result.rows[0];
       if (!template) throw new HuntTemplateNotFoundError();
-      if (template.status !== 'draft' && template.status !== 'changes_requested') {
+      if (template.published_version != null
+        || (template.status !== 'draft' && template.status !== 'changes_requested')) {
         throw new HuntTemplateNotDeletableError();
+      }
+
+      // A corrected draft still owns immutable prior review evidence.
+      if (template.category != null) {
+        const reviews = await client.query(
+          'SELECT 1 FROM hunt_template_reviews WHERE template_id = $1 LIMIT 1', [template.id],
+        );
+        if (reviews.rows.length) throw new HuntTemplateNotDeletableError();
       }
 
       // Hunt references are snapshot fields, not foreign keys. Serialize their writes
@@ -236,8 +245,12 @@ export const HuntTemplates = {
       );
       if (!templateResult.rows[0]) throw new HuntTemplateNotFoundError();
       const template = mapTemplate(templateResult.rows[0]);
-      // Only draft authoring is editable in this workflow slice.
-      if (template.status !== 'draft') throw new HuntTemplateNotEditableError();
+      // Classified owners may correct a reviewed candidate or revise an approved product.
+      if (template.status !== 'draft'
+        && !(template.category != null && template.status === 'changes_requested')
+        && !(template.category === 'universal' && template.status === 'approved')) {
+        throw new HuntTemplateNotEditableError();
+      }
 
       const versionResult = await client.query(
         `SELECT COALESCE(MAX(version), 0)::integer AS current_version
@@ -255,6 +268,12 @@ export const HuntTemplates = {
          VALUES ($1, $2, $3, 'creator', $4, $5) RETURNING *`,
         [template.id, nextVersion, content, creatorUserId, template.category],
       );
+      // Keep publication/history intact; drafts have no active submission pin.
+      if (template.status !== 'draft') {
+        await client.query("UPDATE hunt_templates SET status = 'draft', submitted_version = NULL, updated_at = now() WHERE id = $1", [template.id]);
+        template.status = 'draft';
+        template.submittedVersion = null;
+      }
       await client.query('COMMIT');
       return { template, version: mapVersion(inserted.rows[0]) };
     } catch (error) {
@@ -351,7 +370,7 @@ export const HuntTemplates = {
     return rows[0] ? mapVersion(rows[0]) : null;
   },
 
-  async approveSubmittedCreator(key: string, reviewerUserId: string): Promise<ApprovedAdminTemplateReview | null> {
+  async approveSubmittedCreator(key: string, reviewerUserId: string, expectedVersion?: number): Promise<ApprovedAdminTemplateReview | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -367,7 +386,8 @@ export const HuntTemplates = {
         await client.query('ROLLBACK');
         return null;
       }
-      if (row.status !== 'submitted' || row.submitted_version === null) {
+      if (row.status !== 'submitted' || row.submitted_version === null
+        || (row.category != null && expectedVersion !== row.submitted_version)) {
         throw new HuntTemplateNotReviewableError();
       }
 
@@ -388,7 +408,8 @@ export const HuntTemplates = {
       if (!reviewResult.rows[0]) throw new HuntTemplateNotReviewableError();
 
       await client.query(
-        `UPDATE hunt_templates SET status = 'approved', updated_at = now()
+        `UPDATE hunt_templates SET status = 'approved', updated_at = now(),
+           published_version = CASE WHEN category = 'universal' THEN submitted_version ELSE published_version END
          WHERE id = $1 AND status = 'submitted'`,
         [row.id],
       );
@@ -410,6 +431,7 @@ export const HuntTemplates = {
   async requestChangesForSubmittedCreator(
     key: string,
     reviewerUserId: string,
+    expectedVersion?: number,
   ): Promise<ChangesRequestedAdminTemplateReview | null> {
     const client = await pool.connect();
     try {
@@ -426,7 +448,8 @@ export const HuntTemplates = {
         await client.query('ROLLBACK');
         return null;
       }
-      if (row.status !== 'submitted' || row.submitted_version === null) {
+      if (row.status !== 'submitted' || row.submitted_version === null
+        || (row.category != null && expectedVersion !== row.submitted_version)) {
         throw new HuntTemplateNotReviewableError();
       }
 

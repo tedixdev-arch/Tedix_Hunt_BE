@@ -11,19 +11,19 @@ export interface PublishedUniversal {
   publishedReference: { templateId: string; version: number };
 }
 
-// Approval's submitted_version pin is the sole publication authority. The exact
+// Publication survives candidate status/submitted_version transitions. The exact
 // independent decision is required; historical status alone never grants reuse.
 const publishedQuery = `
   SELECT t.id, t.key, v.version, v.content,
          creator.id AS creator_id, creator.name AS creator_name
   FROM hunt_templates t
   JOIN hunt_template_versions v
-    ON v.template_id = t.id AND v.version = t.submitted_version
+    ON v.template_id = t.id AND v.version = t.published_version
   JOIN hunt_template_reviews r
-    ON r.template_id = t.id AND r.version = t.submitted_version
+    ON r.template_id = t.id AND r.version = t.published_version
    AND r.decision = 'approved' AND r.reviewer_user_id <> t.created_by_user_id
   JOIN users creator ON creator.id = t.created_by_user_id
-  WHERE t.category = 'universal' AND t.origin = 'creator' AND t.status = 'approved'`;
+  WHERE t.category = 'universal' AND t.origin = 'creator' AND t.published_version IS NOT NULL`;
 
 const project = (row: any): PublishedUniversal => ({
   id: row.id,

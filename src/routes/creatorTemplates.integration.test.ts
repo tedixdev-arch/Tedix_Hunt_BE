@@ -73,6 +73,153 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await admin.end();
   });
 
+  it('C5 keeps v1 authoritative through draft, review and changes, then publishes exact v3 without changing existing Locals', async () => {
+    const source = await create('universal');
+    const key = source.key;
+    const id = (await model.HuntTemplates.findByKey(key))!.id;
+    const library = '/api/creator/universal-library';
+    const get = (path: string) => request(app).get(path).set('Authorization', other.auth);
+    const decide = (action: string, version: number, who = reviewer) =>
+      post(`/api/admin/templates/review/${key}/${action}`, { version }, who);
+    const copy = (version: number) => post(`${root}/from-universal/${key}`, {
+      key: `c5-local-${randomUUID()}`, publishedReference: { templateId: id, version },
+    }, other);
+    const published = async (version: number) => {
+      const detail = await get(`${library}/${key}?version=999`).expect(200);
+      expect(detail.body.publishedReference).toEqual({ templateId: id, version });
+      const list = await get(library).expect(200);
+      expect(list.body.items.filter((item: { key: string }) => item.key === key))
+        .toEqual([expect.objectContaining({ publishedReference: { templateId: id, version } })]);
+      return detail.body.content;
+    };
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
+    await decide('approve', 1, owner).expect(403);
+    await decide('approve', 1).expect(200);
+    const localResponse = await copy(1).expect(201);
+    const local = (await db.query('SELECT * FROM hunt_templates WHERE key=$1', [localResponse.body.key])).rows[0];
+    const localVersions = (await db.query('SELECT * FROM hunt_template_versions WHERE template_id=$1', [local.id])).rows;
+    const beforeReviews = (await db.query('SELECT * FROM hunt_template_reviews WHERE template_id=$1', [id])).rows;
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 2) }, other).expect(404);
+    const revoked = await actor(['creator']);
+    await db.query('DELETE FROM user_roles WHERE user_id=$1', [revoked.id]);
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 2) }, revoked).expect(403);
+    await post(`${root}/${key}/versions`, { content: { ...snapshot(key, 2), displayName: 'Candidate v2' } }).expect(201);
+    expect(await published(1)).toEqual(source.content);
+    await request(app).delete(`${root}/${key}`).set('Authorization', owner.auth).expect(409);
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(409);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    expect(await published(1)).toEqual(source.content);
+    expect((await copy(1).expect(201)).body.content).toMatchObject({ displayName: source.content.displayName });
+    await decide('approve', 1).expect(409);
+    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(409);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: '2' }, reviewer).expect(400);
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 3) }).expect(409);
+    await decide('request-changes', 2).expect(200);
+    expect(await published(1)).toEqual(source.content);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(409);
+    await decide('approve', 2).expect(409);
+    await post(`${root}/${key}/versions`, { content: { ...snapshot(key, 3), displayName: 'Replacement v3' } }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 3 }).expect(200);
+    await decide('approve', 2).expect(409); // An old review screen must not approve v3.
+    await decide('request-changes', 2).expect(409);
+    await decide('approve', 3, owner).expect(403);
+    // An internally saved later artifact must not replace the submitted candidate.
+    await db.query(`INSERT INTO hunt_template_versions (template_id,version,content,origin,category,created_by_user_id)
+      VALUES ($1,4,$2,'creator','universal',$3)`, [id, snapshot(key, 4), owner.id]);
+    await db.query(`CREATE FUNCTION c5_fail_review() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.template_id = '${id}'::uuid AND NEW.version = 3 THEN
+        RAISE EXCEPTION 'injected review failure'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER c5_fail_review BEFORE INSERT ON hunt_template_reviews FOR EACH ROW EXECUTE FUNCTION c5_fail_review()`);
+    try {
+      await decide('approve', 3).expect(500);
+      expect(await published(1)).toEqual(source.content);
+      expect((await model.HuntTemplates.findByKey(key))!.status).toBe('submitted');
+    } finally { await db.query('DROP TRIGGER c5_fail_review ON hunt_template_reviews; DROP FUNCTION c5_fail_review()'); }
+    await decide('approve', 3).expect(200);
+    expect(await published(3)).toMatchObject({ version: 3, displayName: 'Replacement v3' });
+    expect((await copy(3).expect(201)).body.content).toMatchObject({ version: 1, displayName: 'Replacement v3' });
+    await copy(1).expect(409);
+    await decide('approve', 3).expect(409);
+    expect((await db.query('SELECT * FROM hunt_templates WHERE id=$1', [local.id])).rows[0]).toEqual(local);
+    expect((await db.query('SELECT * FROM hunt_template_versions WHERE template_id=$1', [local.id])).rows).toEqual(localVersions);
+    const reviews = (await db.query('SELECT * FROM hunt_template_reviews WHERE template_id=$1 ORDER BY version', [id])).rows;
+    expect(reviews[0]).toEqual(beforeReviews[0]);
+    expect(reviews.map(row => [row.version, row.decision])).toEqual([[1, 'approved'], [2, 'changes_requested'], [3, 'approved']]);
+    await expect(db.query('UPDATE hunt_template_reviews SET decided_at=now() WHERE template_id=$1', [id])).rejects.toMatchObject({ code: '23514' });
+    await expect(db.query('UPDATE hunt_templates SET published_version=4 WHERE id=$1', [id])).rejects.toMatchObject({ code: '23514' });
+    await expect(db.query('UPDATE hunt_templates SET published_version=NULL WHERE id=$1', [id])).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('C5 supports Local corrections without relaxing geography or enabling Organizer selection', async () => {
+    const { key } = await create('local');
+    const decision = (action: string, version: number) => post(`/api/admin/templates/review/${key}/${action}`, { version }, reviewer);
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
+    await decision('request-changes', 1).expect(200);
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 2) }).expect(201);
+    await request(app).delete(`${root}/${key}`).set('Authorization', owner.auth).expect(409);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(400);
+    await post(`${root}/${key}/versions`, { content: snapshot(key, 3, true) }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 3 }).expect(200);
+    await decision('approve', 1).expect(409);
+    await decision('approve', 3).expect(200);
+    expect((await db.query('SELECT published_version FROM hunt_templates WHERE key=$1', [key])).rows[0].published_version).toBeNull();
+    expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
+    await request(app).get(`/api/hunt-templates/${key}/geography`).set('Authorization', owner.auth).expect(404);
+    // Legacy lifecycle stays unchanged, including its former correction restriction.
+    const legacy = await create();
+    await post(`${root}/${legacy.key}/submit`, { version: 1 }).expect(200);
+    await post(`/api/admin/templates/review/${legacy.key}/request-changes`, {}, reviewer).expect(200);
+    await post(`${root}/${legacy.key}/versions`, { content: snapshot(legacy.key, 2) }).expect(409);
+  });
+
+  it.each([true, false])('C5 serializes copy and republication on the C4 source identity (copy first: %s)', async copyFirst => {
+    const { key } = await create('universal');
+    const id = (await model.HuntTemplates.findByKey(key))!.id;
+    const approve = (version: number) => post(`/api/admin/templates/review/${key}/approve`, { version }, reviewer);
+    await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
+    await approve(1).expect(200);
+    await post(`${root}/${key}/versions`, { content: { ...snapshot(key, 2), displayName: 'Concurrent replacement' } }).expect(201);
+    await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
+    const blocker = await db.connect();
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT id FROM hunt_templates WHERE id=$1 FOR UPDATE', [id]);
+    const waiting = async (count: number) => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const result = await db.query(`SELECT count(*)::integer AS n FROM pg_stat_activity
+          WHERE datname=current_database() AND wait_event_type='Lock' AND pid <> pg_backend_pid()`);
+        if (result.rows[0].n >= count) return;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      throw new Error('Expected source identity lock contention');
+    };
+    const destination = `c5-race-${randomUUID()}`;
+    const copy = () => post(`${root}/from-universal/${key}`, {
+      key: destination, publishedReference: { templateId: id, version: 1 },
+    }, other).then(result => result);
+    let copying: ReturnType<typeof copy> | undefined;
+    let approving: Promise<request.Response> | undefined;
+    try {
+      if (copyFirst) copying = copy(); else approving = approve(2).then(result => result);
+      await waiting(1);
+      if (copyFirst) approving = approve(2).then(result => result); else copying = copy();
+      await waiting(2);
+    } finally {
+      await blocker.query('ROLLBACK'); blocker.release();
+    }
+    const [copied, approved] = await Promise.all([copying!, approving!]);
+    expect(approved.status).toBe(200);
+    expect(copied.status).toBe(copyFirst ? 201 : 409);
+    if (copyFirst) {
+      expect(copied.body.content.displayName).toBe('Scratch puzzle');
+      expect((await db.query('SELECT source_version FROM hunt_templates WHERE key=$1', [destination])).rows[0].source_version).toBe(1);
+    } else expect(await model.HuntTemplates.findByKey(destination)).toBeNull();
+    const currentCopy = await post(`${root}/from-universal/${key}`, {
+      key: `c5-current-${randomUUID()}`, publishedReference: { templateId: id, version: 2 },
+    }, other).expect(201);
+    expect(currentCopy.body.content.displayName).toBe('Concurrent replacement');
+  });
+
   it('C4 copies exact published snapshots with independent ownership, immutable lineage and Local review gates', async () => {
     const source = await create('universal', false);
     const sourceId = (await model.HuntTemplates.findByKey(source.key))!.id;
@@ -87,7 +234,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
       await copy(`c4-${randomUUID()}`).expect(404);
     }
     await db.query("UPDATE hunt_templates SET status='submitted' WHERE id=$1", [sourceId]);
-    await post(`/api/admin/templates/review/${source.key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${source.key}/approve`, { version: 1 }, reviewer).expect(200);
     const before = (await db.query('SELECT * FROM hunt_templates WHERE id=$1', [sourceId])).rows[0];
     const sourceVersion = await model.HuntTemplates.getVersion(sourceId, 1);
     await copy(`c4-${randomUUID()}`, other, { ...reference, version: 2 }).expect(409);
@@ -117,8 +264,8 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     expect((await model.HuntTemplates.getVersion(local.id, 2))!.content).toEqual(adapted);
     await post(`${root}/${key}/submit`, { version: 2 }, other).expect(200);
     expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
-    await post(`/api/admin/templates/review/${key}/approve`, {}, other).expect(403);
-    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, other).expect(403);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, reviewer).expect(200);
     expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
     for (const category of ['local', undefined]) {
       const invalid = await create(category);
@@ -145,14 +292,14 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await db.query("UPDATE hunt_templates SET status='approved' WHERE id=$1", [id]);
     await copy(`c4-${randomUUID()}`).expect(404); // Historical status lacks exact decision.
     await db.query("UPDATE hunt_templates SET status='submitted' WHERE id=$1", [id]);
-    await post(`/api/admin/templates/review/${source.key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${source.key}/approve`, { version: 1 }, reviewer).expect(200);
     const key = `c4-${randomUUID()}`;
     const results = await Promise.all([copy(key), copy(key)]);
     expect(results.map(result => result.status).sort()).toEqual([201, 409]);
     expect(results.find(result => result.status === 201)!.body.content.configuration).toEqual(source.content.configuration);
     const local = (await model.HuntTemplates.findByKey(key))!;
     await post(`${root}/${key}/submit`, { version: 1 }, other).expect(200);
-    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 1 }, reviewer).expect(200);
     await post(`${root}/from-universal/${key}`, { key: `c4-${randomUUID()}`, publishedReference: { templateId: local.id, version: 1 } }, other).expect(404);
     const failedKey = `c4-${randomUUID()}`;
     await db.query(`CREATE FUNCTION c4_fail_version() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -185,13 +332,13 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
     const review = await request(app).get(`/api/admin/templates/review/${key}`).set('Authorization', reviewer.auth).expect(200);
     expect(review.body).toMatchObject({ category, version: 2, content: v2 });
-    await post(`/api/admin/templates/review/${key}/approve`, {}).expect(403);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }).expect(403);
     expect((await db.query('SELECT * FROM hunt_template_reviews WHERE template_id=$1', [id])).rows).toHaveLength(0);
-    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, reviewer).expect(200);
     expect((await db.query('SELECT version, reviewer_user_id, decision FROM hunt_template_reviews WHERE template_id=$1', [id])).rows)
       .toEqual([{ version: 2, reviewer_user_id: reviewer.id, decision: 'approved' }]);
-    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }).expect(409);
-    expect((await model.HuntTemplates.findByKey(key))?.submittedVersion).toBe(2);
+    await post(`${root}/${key}/versions`, { content: { ...v2, version: 3 } }).expect(category === 'universal' ? 201 : 409);
+    expect((await model.HuntTemplates.findByKey(key))?.submittedVersion).toBe(category === 'universal' ? null : 2);
     expect(await model.HuntTemplates.findApprovedByKeyWithLatestVersion(key)).toBeNull();
     const catalog = await request(app).get('/api/hunt-templates').set('Authorization', owner.auth).expect(200);
     expect(catalog.body.some((item: { key: string }) => item.key === key)).toBe(false);
@@ -283,9 +430,9 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await post(`${root}/${key}/versions`, { content: approved }).expect(201);
     await post(`${root}/${key}/submit`, { version: 2 }).expect(200);
     await get(`${library}/${key}`).expect(404);
-    await post(`/api/admin/templates/review/${key}/approve`, {}).expect(403);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }).expect(403);
     await get(`${library}/${key}`).expect(404);
-    await post(`/api/admin/templates/review/${key}/approve`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 2 }, reviewer).expect(200);
     const identity = (await model.HuntTemplates.findByKey(key))!;
     // Internal extra version proves the library never substitutes MAX(version).
     await db.query(`INSERT INTO hunt_template_versions
@@ -307,12 +454,12 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await get(`${root}/${key}`).expect(404);
     const changes = await create('universal');
     await post(`${root}/${changes.key}/submit`, { version: 1 }).expect(200);
-    await post(`/api/admin/templates/review/${changes.key}/request-changes`, {}, reviewer).expect(200);
+    await post(`/api/admin/templates/review/${changes.key}/request-changes`, { version: 1 }, reviewer).expect(200);
     await get(`${library}/${changes.key}`).expect(404);
     for (const category of ['local', undefined]) {
       const excluded = await create(category);
       await post(`${root}/${excluded.key}/submit`, { version: 1 }).expect(200);
-      await post(`/api/admin/templates/review/${excluded.key}/approve`, {}, reviewer).expect(200);
+      await post(`/api/admin/templates/review/${excluded.key}/approve`, { version: 1 }, reviewer).expect(200);
       await get(`${library}/${excluded.key}`).expect(404);
     }
     // Status without an exact independent review record is insufficient authority.

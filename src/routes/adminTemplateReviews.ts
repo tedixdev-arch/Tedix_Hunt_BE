@@ -33,11 +33,14 @@ router.get('/', requireAuth, requireRole('admin'), async (_request, response, ne
  *   post:
  *     tags: [Admin Template Review]
  *     summary: Approve a submitted Creator Template
- *     description: Admin-only; the reviewing Admin must differ from the Creator. Records reviewer, version, decision and time atomically. Approves the exact immutable submitted_version without creating a version, making that artifact available for Organizer catalog selection and Hunt snapshotting.
+ *     description: Admin-only; the reviewing Admin must differ from the Creator. Records reviewer, version, decision and time atomically. Approves the exact immutable submitted_version without creating a version. Classified decisions require body version matching the inspected candidate; stale or missing versions return 409. Universal approval atomically replaces the published artifact. Classified Organizer selection remains closed.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     requestBody:
+ *       content: { application/json: { schema: { type: object, properties: { version: { type: integer, minimum: 1, description: Required for classified Templates; exact inspected version } } } } }
  *     responses:
+ *       400: { description: Invalid decision body }
  *       200: { description: Exact approved immutable artifact, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
  *       401: { description: Authentication required }
  *       403: { description: Authoritative Admin capability required; self-approval forbidden }
@@ -48,7 +51,14 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request: 
   try {
     const key = request.params.key;
     if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
-    const approved = await HuntTemplates.approveSubmittedCreator(key, request.user!.id);
+    const body = request.body;
+    if (body != null && (typeof body !== 'object' || Array.isArray(body)
+      || (body.version !== undefined && (!Number.isInteger(body.version) || body.version < 1)))) {
+      return response.status(400).json({ error: 'invalid_input' });
+    }
+    const approved = await HuntTemplates.approveSubmittedCreator(
+      key, request.user!.id, ...(body?.version === undefined ? [] : [body.version]),
+    );
     return approved
       ? response.json(approved)
       : response.status(404).json({ error: 'not_found' });
@@ -69,11 +79,14 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request: 
  *   post:
  *     tags: [Admin Template Review]
  *     summary: Request changes to a submitted Creator Template
- *     description: Admin-only. Records reviewer, version, decision and time atomically. Self-request-changes remains allowed. Changes status to changes_requested for the exact immutable submitted_version and preserves that pin. It neither mutates nor creates a Template version, does not publish the Template, and does not implement Creator revision or resubmission.
+ *     description: Admin-only. Records reviewer, version, decision and time atomically. Self-request-changes remains allowed. Changes status to changes_requested for the exact immutable submitted_version and preserves that pin. It neither mutates nor creates a Template version, preserves the previous Universal publication. Classified decisions require body version matching the inspected candidate; stale or missing versions return 409. The owner can save a new immutable correction and resubmit.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }
+ *     requestBody:
+ *       content: { application/json: { schema: { type: object, properties: { version: { type: integer, minimum: 1, description: Required for classified Templates; exact inspected version } } } } }
  *     responses:
+ *       400: { description: Invalid decision body }
  *       200: { description: Exact immutable artifact for which changes were requested, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTemplateReview' } } } }
  *       401: { description: Authentication required }
  *       403: { description: Authoritative Admin capability required }
@@ -84,7 +97,14 @@ router.post('/:key/request-changes', requireAuth, requireRole('admin'), async (r
   try {
     const key = request.params.key;
     if (typeof key !== 'string') return response.status(404).json({ error: 'not_found' });
-    const template = await HuntTemplates.requestChangesForSubmittedCreator(key, request.user!.id);
+    const body = request.body;
+    if (body != null && (typeof body !== 'object' || Array.isArray(body)
+      || (body.version !== undefined && (!Number.isInteger(body.version) || body.version < 1)))) {
+      return response.status(400).json({ error: 'invalid_input' });
+    }
+    const template = await HuntTemplates.requestChangesForSubmittedCreator(
+      key, request.user!.id, ...(body?.version === undefined ? [] : [body.version]),
+    );
     return template
       ? response.json(template)
       : response.status(404).json({ error: 'not_found' });
