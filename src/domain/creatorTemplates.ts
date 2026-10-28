@@ -5,7 +5,7 @@ export type TemplateCategory = 'universal' | 'local';
 // Authoritative metadata is never accepted inside extensible content JSON.
 export const hasTemplateMetadata = (value: unknown): boolean =>
   isObject(value) && Object.keys(value).some((field) =>
-    /^(category|origin|owner.*|createdBy.*|created_by_.*|source.*|submittedVersion|status)$/.test(field));
+    /^(localityId|localitySnapshot|category|origin|owner.*|createdBy.*|created_by_.*|source.*|submittedVersion|status)$/.test(field));
 
 export type TemplateContent = Record<string, unknown> & { key: string; version: number };
 

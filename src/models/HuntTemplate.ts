@@ -1,3 +1,5 @@
+import type { PoolClient } from 'pg';
+import type { Locality } from './Geography.js';
 import { pool } from '../lib/postgres.js';
 import { isTemplateContent, isTemplateContentSubmittable } from '../domain/creatorTemplates.js';
 
@@ -17,7 +19,13 @@ export interface PersistedHuntTemplate {
   updatedAt: Date;
 }
 
-export interface PersistedHuntTemplateVersion {
+export type LocalitySnapshot = Omit<Locality, 'active'>;
+interface LocalityBinding {
+  localityId: string | null;
+  localitySnapshot: LocalitySnapshot | null;
+}
+
+export interface PersistedHuntTemplateVersion extends LocalityBinding {
   id: string;
   templateId: string;
   version: number;
@@ -39,7 +47,7 @@ export interface ApprovedHuntTemplateVersion {
   content: unknown;
 }
 
-export interface CreatorOwnedHuntTemplateVersion {
+export interface CreatorOwnedHuntTemplateVersion extends LocalityBinding {
   key: string;
   version: number;
   status: HuntTemplateStatus;
@@ -49,7 +57,7 @@ export interface CreatorOwnedHuntTemplateVersion {
   content: unknown;
 }
 
-export interface AdminTemplateReview {
+export interface AdminTemplateReview extends LocalityBinding {
   key: string;
   version: number;
   status: 'submitted';
@@ -100,6 +108,41 @@ export class HuntTemplateNotReviewableError extends Error {}
 export class HuntTemplateSelfApprovalError extends Error {}
 export class InvalidHuntTemplateContentError extends Error {}
 
+export class TemplateLocalityError extends Error {
+  constructor(public readonly code: string, public readonly status: number) { super(code); }
+}
+
+// Called only after the identity/lifecycle/content checks, on the save transaction.
+async function resolveLocalityBinding(
+  client: PoolClient, category: HuntTemplateCategory | null, selection: unknown,
+  previous?: { locality_id: string | null; locality_snapshot: LocalitySnapshot | null },
+): Promise<LocalityBinding> {
+  if (selection !== undefined && (category !== 'local'
+    || (selection !== null && (typeof selection !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selection))))) {
+    throw new TemplateLocalityError('invalid_input', 400);
+  }
+  if (selection === undefined) return {
+    localityId: previous?.locality_id ?? null, localitySnapshot: previous?.locality_snapshot ?? null,
+  };
+  if (selection === null) return { localityId: null, localitySnapshot: null };
+  const initial = (await client.query('SELECT country_code FROM localities WHERE id=$1', [selection])).rows[0];
+  if (!initial) throw new TemplateLocalityError('locality_not_found', 404);
+  await client.query('SELECT code FROM countries WHERE code=$1 FOR SHARE', [initial.country_code]);
+  const row = (await client.query(`SELECT l.id, l.country_code, c.display_name, l.name,
+    l.administrative_context, l.latitude, l.longitude, l.active
+    FROM localities l JOIN countries c ON c.code=l.country_code
+    WHERE l.id=$1 FOR SHARE OF l`, [selection])).rows[0];
+  if (!row || !row.active || row.country_code !== initial.country_code) {
+    throw new TemplateLocalityError('locality_unavailable', 409);
+  }
+  return { localityId: row.id, localitySnapshot: {
+    id: row.id, countryCode: row.country_code, countryDisplayName: row.display_name,
+    name: row.name, administrativeContext: row.administrative_context,
+    latitude: row.latitude, longitude: row.longitude,
+  } };
+}
+
 const mapTemplate = (row: any): PersistedHuntTemplate => ({
   id: row.id,
   key: row.key,
@@ -117,6 +160,8 @@ const mapVersion = (row: any): PersistedHuntTemplateVersion => ({
   templateId: row.template_id,
   version: row.version,
   content: row.content,
+  localityId: row.locality_id ?? null,
+  localitySnapshot: row.locality_snapshot ?? null,
   origin: row.origin,
   category: row.category ?? null,
   createdByUserId: row.created_by_user_id,
@@ -232,6 +277,7 @@ export const HuntTemplates = {
     key: string,
     content: unknown,
     creatorUserId: string,
+    localityId?: unknown,
   ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
     const client = await pool.connect();
     try {
@@ -253,20 +299,20 @@ export const HuntTemplates = {
       }
 
       const versionResult = await client.query(
-        `SELECT COALESCE(MAX(version), 0)::integer AS current_version
-         FROM hunt_template_versions WHERE template_id = $1`,
+        `SELECT * FROM hunt_template_versions WHERE template_id = $1 ORDER BY version DESC LIMIT 1`,
         [template.id],
       );
-      const nextVersion = versionResult.rows[0].current_version + 1;
+      const nextVersion = (versionResult.rows[0]?.version ?? 0) + 1;
       if (!isTemplateContent(content, key, nextVersion)) {
         throw new InvalidHuntTemplateContentError();
       }
+      const binding = await resolveLocalityBinding(client, template.category, localityId, versionResult.rows[0]);
       // Versions are complete immutable snapshots; existing rows are never updated.
       const inserted = await client.query(
         `INSERT INTO hunt_template_versions
-           (template_id, version, content, origin, created_by_user_id, category)
-         VALUES ($1, $2, $3, 'creator', $4, $5) RETURNING *`,
-        [template.id, nextVersion, content, creatorUserId, template.category],
+           (template_id, version, content, origin, created_by_user_id, category, locality_id, locality_snapshot)
+         VALUES ($1, $2, $3, 'creator', $4, $5, $6, $7) RETURNING *`,
+        [template.id, nextVersion, content, creatorUserId, template.category, binding.localityId, binding.localitySnapshot],
       );
       // Keep publication/history intact; drafts have no active submission pin.
       if (template.status !== 'draft') {
@@ -289,6 +335,7 @@ export const HuntTemplates = {
     content: unknown,
     creatorUserId: string,
     category?: HuntTemplateCategory,
+    localityId?: unknown,
   ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
     if ((category !== undefined && category !== 'universal' && category !== 'local')
       || !isTemplateContent(content, key, 1)) throw new InvalidHuntTemplateContentError();
@@ -302,11 +349,12 @@ export const HuntTemplates = {
         [key, creatorUserId, category ?? null],
       );
       const template = mapTemplate(templateResult.rows[0]);
+      const binding = await resolveLocalityBinding(client, template.category, localityId);
       const versionResult = await client.query(
         `INSERT INTO hunt_template_versions
-           (template_id, version, content, origin, created_by_user_id, category)
-         VALUES ($1, 1, $2, 'creator', $3, $4) RETURNING *`,
-        [template.id, content, creatorUserId, template.category],
+           (template_id, version, content, origin, created_by_user_id, category, locality_id, locality_snapshot)
+         VALUES ($1, 1, $2, 'creator', $3, $4, $5, $6) RETURNING *`,
+        [template.id, content, creatorUserId, template.category, binding.localityId, binding.localitySnapshot],
       );
       const version = mapVersion(versionResult.rows[0]);
       await client.query('COMMIT');
@@ -395,7 +443,7 @@ export const HuntTemplates = {
 
       // submitted_version is the approved artifact; never substitute the latest version.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, t.category, v.version, v.content,
+        `SELECT t.key, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
@@ -455,7 +503,7 @@ export const HuntTemplates = {
 
       // Resolve only the pinned review artifact; a newer version must never replace it.
       const reviewResult = await client.query(
-        `SELECT t.key, t.origin, t.category, v.version, v.content,
+        `SELECT t.key, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
                 creator.id AS creator_id, creator.name AS creator_name,
                 creator.email AS creator_email
          FROM hunt_templates t
@@ -538,10 +586,10 @@ export const HuntTemplates = {
   ): Promise<CreatorOwnedHuntTemplateVersion[]> {
     // Ownership belongs in SQL so private rows never leave PostgreSQL for route-level filtering.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
        JOIN LATERAL (
-         SELECT version, content
+         SELECT version, content, locality_id, locality_snapshot
          FROM hunt_template_versions
          WHERE template_id = t.id
          ORDER BY version DESC
@@ -551,8 +599,10 @@ export const HuntTemplates = {
        ORDER BY t.key ASC`,
       [creatorUserId],
     );
-    return rows.map(({ key, version, status, origin, category, submitted_version, content }) => ({
-      key, version, status, origin, ...(category ? { category } : {}), submittedVersion: submitted_version ?? null, content,
+    return rows.map(({ key, version, status, origin, category, submitted_version, content, locality_id, locality_snapshot }) => ({
+      key, version, status, origin, ...(category ? { category } : {}),
+      submittedVersion: submitted_version ?? null, content,
+      localityId: locality_id ?? null, localitySnapshot: locality_snapshot ?? null,
     }));
   },
 
@@ -561,10 +611,10 @@ export const HuntTemplates = {
     creatorUserId: string,
   ): Promise<CreatorOwnedHuntTemplateVersion | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
        JOIN LATERAL (
-         SELECT version, content
+         SELECT version, content, locality_id, locality_snapshot
          FROM hunt_template_versions
          WHERE template_id = t.id
          ORDER BY version DESC
@@ -578,6 +628,8 @@ export const HuntTemplates = {
           key: rows[0].key, version: rows[0].version, status: rows[0].status,
           origin: rows[0].origin, ...(rows[0].category ? { category: rows[0].category } : {}), submittedVersion: rows[0].submitted_version ?? null,
           content: rows[0].content,
+          localityId: rows[0].locality_id ?? null,
+          localitySnapshot: rows[0].locality_snapshot ?? null,
         }
       : null;
   },
@@ -585,7 +637,7 @@ export const HuntTemplates = {
   async listSubmittedCreatorReviews(): Promise<AdminTemplateReview[]> {
     // Review is pinned to submitted_version. It must never drift to a newer version.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content,
+      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
@@ -602,7 +654,7 @@ export const HuntTemplates = {
 
   async findSubmittedCreatorReviewByKey(key: string): Promise<AdminTemplateReview | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content,
+      `SELECT t.key, t.status, t.origin, t.category, v.version, v.content, v.locality_id, v.locality_snapshot,
               creator.id AS creator_id, creator.name AS creator_name,
               creator.email AS creator_email
        FROM hunt_templates t
@@ -645,4 +697,6 @@ const mapAdminReview = (row: any): AdminTemplateReview => ({
   ...(row.category ? { category: row.category } : {}),
   creator: { id: row.creator_id, name: row.creator_name, email: row.creator_email },
   content: row.content,
+  localityId: row.locality_id ?? null,
+  localitySnapshot: row.locality_snapshot ?? null,
 });
