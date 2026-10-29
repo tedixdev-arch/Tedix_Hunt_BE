@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createHunt: vi.fn(),
   updateDraft: vi.fn(),
   transitionStatus: vi.fn(),
+  publishDraft: vi.fn(),
   ensureAccessCode: vi.fn(),
   findByAccessCode: vi.fn(),
   hasHuntRole: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('../models/Hunt.js', () => ({
     createWithOrganizerRole: mocks.createHunt,
     updateDraft: mocks.updateDraft,
     transitionStatus: mocks.transitionStatus,
+    publishDraft: mocks.publishDraft,
     ensureAccessCode: mocks.ensureAccessCode,
     findByAccessCode: mocks.findByAccessCode,
   },
@@ -74,6 +76,8 @@ describe('Hunt routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transitionStatus.mockReset();
+    mocks.publishDraft.mockReset();
+    mocks.publishDraft.mockResolvedValue({ hunt: { ...hunt, status: 'published' }, issues: null });
     mocks.findUserById.mockResolvedValue(user);
     mocks.findHuntById.mockResolvedValue(hunt);
     mocks.findHuntsForUser.mockResolvedValue([]);
@@ -388,7 +392,8 @@ describe('Hunt routes', () => {
     ['cancel', ['draft', 'published', 'active', 'paused'], 'cancelled'],
   ])('applies the %s lifecycle transition conditionally', async (action, from, to) => {
     await request(app).post(`/api/hunts/hunt-1/${action}`).set('Authorization', auth).expect(200);
-    expect(mocks.transitionStatus).toHaveBeenCalledWith({ id: 'hunt-1', from, to });
+    if (action === 'publish') expect(mocks.publishDraft).toHaveBeenCalledWith('hunt-1');
+    else expect(mocks.transitionStatus).toHaveBeenCalledWith({ id: 'hunt-1', from, to });
   });
 
   it.each([
@@ -433,8 +438,8 @@ describe('Hunt routes', () => {
     expect(mocks.transitionStatus).not.toHaveBeenCalled();
   });
 
-  it('keeps the conditional publish transition as the final race check', async () => {
-    mocks.transitionStatus.mockResolvedValueOnce(null);
+  it('rechecks publish readiness and state under the Hunt lock', async () => {
+    mocks.publishDraft.mockResolvedValueOnce({ hunt: null, issues: null });
     await request(app).post('/api/hunts/hunt-1/publish').set('Authorization', auth)
       .expect(409, { error: 'invalid_hunt_state' });
   });

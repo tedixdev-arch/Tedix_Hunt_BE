@@ -104,6 +104,7 @@ describe('core Hunt persistence', () => {
       country: null, region: null, city: null, startDate: null, startTime: null, timezone: null,
       durationMinutes: null, capacity: null, contactName: null,
       templateKey: null, templateVersion: null, templateSnapshot: null,
+      templateId: null, templateLocalityId: null, templateLocalitySnapshot: null,
       format: null, teamSize: null, accessMode: null, difficulty: null, checkpointOrder: null,
       accessCode: null,
       huntRoles: ['organizer', 'supervisor'],

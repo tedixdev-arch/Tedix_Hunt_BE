@@ -354,6 +354,8 @@ export const HuntTemplates = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Account before Template: agrees with selection and account retirement writers.
+      await client.query('SELECT id FROM users WHERE id=$1 FOR SHARE', [creatorUserId]);
       // The identity lock serializes version allocation across application instances.
       const templateResult = await client.query(
         `SELECT * FROM hunt_templates
@@ -505,6 +507,8 @@ export const HuntTemplates = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Account before Template: agrees with selection and account retirement writers.
+      await client.query('SELECT id FROM users WHERE id=$1 FOR SHARE', [reviewerUserId]);
       // Lock the Creator identity first: only one concurrent Admin can perform the transition.
       const templateResult = await client.query(
         `SELECT * FROM hunt_templates
@@ -581,6 +585,8 @@ export const HuntTemplates = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Account before Template: agrees with selection and account retirement writers.
+      await client.query('SELECT id FROM users WHERE id=$1 FOR SHARE', [reviewerUserId]);
       // The identity lock serializes request-changes with every other Admin decision.
       const templateResult = await client.query(
         `SELECT * FROM hunt_templates
@@ -824,6 +830,12 @@ export const HuntTemplates = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query('SELECT id FROM users WHERE id=$1 FOR SHARE', [actor]);
+      const admin = await client.query(`SELECT 1 FROM user_roles
+        WHERE user_id=$1 AND role='admin' FOR SHARE`, [actor]);
+      const account = (await client.query("SELECT account_status,is_guest FROM users WHERE id=$1", [actor])).rows[0];
+      if (!admin.rowCount || !account || account.account_status !== 'active' || account.is_guest)
+        throw new TemplateLocalityError('forbidden', 403);
       const row = (await client.query(`SELECT * FROM hunt_templates
         WHERE key=$1 AND origin='creator' FOR UPDATE`, [key])).rows[0];
       if (!row) throw new HuntTemplateNotFoundError();
@@ -833,9 +845,6 @@ export const HuntTemplates = {
         throw new TemplateEligibilityConflictError();
       }
       if (typeof reason !== 'string' || !reason.trim() || reason.length > 1000) throw new TemplateLocalityError('invalid_input', 400);
-      const admin = await client.query(`SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id
-        WHERE u.id=$1 AND ur.role='admin' AND u.account_status='active' AND NOT u.is_guest FOR SHARE OF u,ur`, [actor]);
-      if (!admin.rowCount) throw new TemplateLocalityError('forbidden', 403);
       const result = await client.query(`UPDATE hunt_templates SET local_suspended_at=now(),
         local_suspended_by_user_id=$2, local_suspension_reason=$3, local_suspended_version=$4,
         updated_at=now() WHERE id=$1 RETURNING *`, [row.id, actor, reason.trim(), authority]);

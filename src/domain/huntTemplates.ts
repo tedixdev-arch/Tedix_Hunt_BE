@@ -74,11 +74,17 @@ export const findApprovedHuntTemplateGeography = async (
 ): Promise<HuntTemplateGeography | null> => {
   const template = await HuntTemplates.findApprovedByKeyWithLatestVersion(key);
   if (!template) return null;
-  if (!isRecord(template.content)) throw new HuntTemplateGeographyUnavailableError();
+  const configuration = projectTemplateGeography(template.content);
+  return { key: template.key, version: template.version, configuration };
+};
+
+/** The same nested allowlist is used by C7 exact-version previews. */
+export const projectTemplateGeography = (content: unknown): HuntTemplateGeography['configuration'] => {
+  if (!isRecord(content)) throw new HuntTemplateGeographyUnavailableError();
   const configuration: HuntTemplateGeography['configuration'] = {};
-  const saved = template.content.configuration;
+  const saved = content.configuration;
   // Pre-geography versions still identify the approved artifact, with no invented fields.
-  if (saved === undefined) return { key: template.key, version: template.version, configuration };
+  if (saved === undefined) return configuration;
   if (!isRecord(saved)) throw new HuntTemplateGeographyUnavailableError();
   if (Object.hasOwn(saved, 'normalCheckpointCount')) {
     if (!Number.isInteger(saved.normalCheckpointCount)) throw new HuntTemplateGeographyUnavailableError();
@@ -89,5 +95,5 @@ export const findApprovedHuntTemplateGeography = async (
     configuration.checkpointPositions = saved.checkpointPositions.map((point) => projectPoint(point, true));
   }
   if (Object.hasOwn(saved, 'finishPoint')) configuration.finishPoint = projectPoint(saved.finishPoint);
-  return { key: template.key, version: template.version, configuration };
+  return configuration;
 };
