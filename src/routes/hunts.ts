@@ -245,6 +245,7 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const update = parseDraftUpdate(req.body);
   if (!update) return res.status(400).json({ error: 'invalid_input' });
   if (hunt.status !== 'draft') return res.status(409).json({ error: 'invalid_hunt_state' });
+  if (update.templateKey && hunt.templateId) return res.status(409).json({ error: 'template_selection_conflict' });
   if (update.templateKey) {
     // Only an approved identity may be instantiated. Keep the version and its complete content
     // together from this single resolution so the Hunt records exactly what was selected.
@@ -255,7 +256,10 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
     update.templateSnapshot = template.content as Record<string, unknown>;
   }
   const updated = await Hunt.updateDraft(id, update);
-  if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });
+  if (!updated) {
+    const current = await Hunt.findById(id);
+    return res.status(409).json({ error: update.templateKey && current?.templateId ? 'template_selection_conflict' : 'invalid_hunt_state' });
+  }
   return res.json(updated);
 });
 
@@ -405,6 +409,12 @@ router.post('/:id/:action', requireAuth, async (req: AuthRequest, res) => {
     // Publishing is authoritative on persisted setup; frontend readiness is UX only.
     const readiness = validateHuntForPublish(hunt);
     if (!readiness.ready) return res.status(422).json({ error: 'hunt_not_ready', issues: readiness.issues });
+  }
+  if (String(req.params.action) === 'publish') {
+    const result = await Hunt.publishDraft(id);
+    if (result.issues) return res.status(422).json({ error: 'hunt_not_ready', issues: result.issues });
+    if (!result.hunt) return res.status(409).json({ error: 'invalid_hunt_state' });
+    return res.json(result.hunt);
   }
   const updated = await Hunt.transitionStatus({ id, ...action });
   if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });

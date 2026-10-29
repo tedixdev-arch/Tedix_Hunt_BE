@@ -70,7 +70,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     const approvedContent = { ...content, version: 2, marker: 'approved-not-latest' };
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [{
       key: templateRow.key, origin: 'creator', version: 2, content: approvedContent,
@@ -81,12 +81,12 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
       key: templateRow.key, version: 2, status: 'approved', origin: 'creator',
       creator: { id: creatorId, name: 'Ada', email: 'ada@example.com' }, content: approvedContent, localityId: null, localitySnapshot: null,
     });
-    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
-    expect(client.query.mock.calls[2][0]).toContain('v.version = t.submitted_version');
-    expect(client.query.mock.calls[2][0]).not.toContain('MAX(');
-    expect(client.query.mock.calls[3][0]).not.toContain('submitted_version =');
+    expect(client.query.mock.calls[2][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[3][0]).toContain('v.version = t.submitted_version');
+    expect(client.query.mock.calls[3][0]).not.toContain('MAX(');
+    expect(client.query.mock.calls[4][0]).not.toContain('submitted_version =');
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
-      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
+      'BEGIN', 'SELECT', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
     ]);
   });
 
@@ -94,7 +94,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     const reviewedContent = { ...content, version: 2, marker: 'reviewed-not-latest' };
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [{
       key: templateRow.key, origin: 'creator', version: 2, content: reviewedContent,
@@ -105,20 +105,20 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
       key: templateRow.key, version: 2, status: 'changes_requested', origin: 'creator',
       creator: { id: creatorId, name: 'Ada', email: 'ada@example.com' }, content: reviewedContent, localityId: null, localitySnapshot: null,
     });
-    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
-    expect(client.query.mock.calls[2][0]).toContain('v.version = t.submitted_version');
-    expect(client.query.mock.calls[2][0]).not.toContain('MAX(');
-    expect(client.query.mock.calls[3][0]).toContain("status = 'changes_requested'");
-    expect(client.query.mock.calls[3][0]).not.toContain('submitted_version =');
+    expect(client.query.mock.calls[2][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[3][0]).toContain('v.version = t.submitted_version');
+    expect(client.query.mock.calls[3][0]).not.toContain('MAX(');
+    expect(client.query.mock.calls[4][0]).toContain("status = 'changes_requested'");
+    expect(client.query.mock.calls[4][0]).not.toContain('submitted_version =');
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
-      'BEGIN', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
+      'BEGIN', 'SELECT', 'SELECT', 'SELECT', 'UPDATE', 'INSERT', 'COMMIT',
     ]);
   });
 
   it.each(['draft', 'approved', 'changes_requested'])('rolls back %s request-changes', async (status) => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status, submitted_version: status === 'draft' ? null : 1,
     }] }).mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key, 'admin-1'))
@@ -129,7 +129,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
   it('rolls back request-changes when the exact submitted version cannot be loaded', async () => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.requestChangesForSubmittedCreator(templateRow.key, 'admin-1'))
@@ -140,7 +140,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
   it.each(['draft', 'approved', 'changes_requested'])('rolls back %s approval', async (status) => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status, submitted_version: status === 'draft' ? null : 1,
     }] }).mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.approveSubmittedCreator(templateRow.key, 'admin-1'))
@@ -151,7 +151,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
   it('rolls back if exact submitted version cannot be loaded', async () => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{
       ...templateRow, status: 'submitted', submitted_version: 2,
     }] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.approveSubmittedCreator(templateRow.key, 'admin-1'))
@@ -244,7 +244,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     const v2 = { ...content, version: 2, nested: { survives: ['jsonb'] } };
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
       .mockResolvedValueOnce({ rows: [{ version: 1 }] })
       .mockResolvedValueOnce({ rows: [{
         id: 'version-2', template_id: templateRow.id, version: 2, content: v2,
@@ -253,26 +253,26 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
 
     await expect(HuntTemplates.createCreatorVersion(templateRow.key, v2, creatorId)).resolves
       .toMatchObject({ version: { version: 2, content: v2, createdByUserId: creatorId } });
-    expect(client.query.mock.calls[1][0]).toContain('FOR UPDATE');
-    expect(client.query.mock.calls[1][0]).toContain("origin = 'creator'");
-    expect(client.query.mock.calls[1][1]).toEqual([templateRow.key, creatorId]);
-    expect(client.query.mock.calls[3][1]).toEqual([templateRow.id, 2, v2, creatorId, null, null, null]);
+    expect(client.query.mock.calls[2][0]).toContain('FOR UPDATE');
+    expect(client.query.mock.calls[2][0]).toContain("origin = 'creator'");
+    expect(client.query.mock.calls[2][1]).toEqual([templateRow.key, creatorId]);
+    expect(client.query.mock.calls[4][1]).toEqual([templateRow.id, 2, v2, creatorId, null, null, null]);
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
-      'BEGIN', 'SELECT', 'SELECT', 'INSERT', 'COMMIT',
+      'BEGIN', 'SELECT', 'SELECT', 'SELECT', 'INSERT', 'COMMIT',
     ]);
   });
 
   it('rejects non-owned and non-editable Templates inside the transaction', async () => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.createCreatorVersion('private', content, creatorId))
       .rejects.toBeInstanceOf(HuntTemplateNotFoundError);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
 
     client.query.mockReset();
-    client.query.mockResolvedValueOnce({ rows: [] })
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ ...templateRow, status: 'submitted' }] })
       .mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.createCreatorVersion(templateRow.key, content, creatorId))
@@ -288,7 +288,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
   ])('rolls back %s content without inserting', async (_case, invalid) => {
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
       .mockResolvedValueOnce({ rows: [{ version: 1 }] }).mockResolvedValueOnce({ rows: [] });
     await expect(HuntTemplates.createCreatorVersion(templateRow.key, invalid, creatorId))
       .rejects.toBeInstanceOf(InvalidHuntTemplateContentError);
@@ -301,7 +301,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
     const v2 = { ...content, version: 2 };
     const client = { query: vi.fn(), release: vi.fn() };
     connect.mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
+    client.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [templateRow] })
       .mockResolvedValueOnce({ rows: [{ version: 1 }] }).mockRejectedValueOnce(failure)
       .mockResolvedValueOnce({ rows: [] });
 

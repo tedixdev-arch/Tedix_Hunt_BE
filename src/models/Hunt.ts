@@ -1,3 +1,5 @@
+import type { PoolClient } from 'pg';
+import { validateHuntForPublish } from '../domain/huntReadiness.js';
 import { pool } from '../lib/postgres.js';
 import { HuntRoles, type HuntRole } from './HuntRole.js';
 import { generateHuntAccessCode } from '../domain/huntAccess.js';
@@ -23,6 +25,9 @@ export interface IHunt {
   durationMinutes: number | null;
   capacity: number | null;
   contactName: string | null;
+  templateId?: string | null;
+  templateLocalityId?: string | null;
+  templateLocalitySnapshot?: import('./HuntTemplate.js').LocalitySnapshot | null;
   templateKey: string | null;
   templateVersion: number | null;
   templateSnapshot: HuntTemplateSnapshot | null;
@@ -74,7 +79,7 @@ export interface UpdateHuntGeneralSetupInput {
   checkpointOrder?: 'recommended';
 }
 
-const mapRow = (row: any): IHunt => ({
+export const mapHuntRow = (row: any): IHunt => ({
   id: row.id,
   organizationId: row.organization_id,
   createdByUserId: row.created_by_user_id,
@@ -83,12 +88,17 @@ const mapRow = (row: any): IHunt => ({
   country: row.country ?? null,
   region: row.region ?? null,
   city: row.city ?? null,
-  startDate: row.start_date ?? null,
+  startDate: row.start_date instanceof Date
+    ? `${row.start_date.getFullYear()}-${String(row.start_date.getMonth()+1).padStart(2,'0')}-${String(row.start_date.getDate()).padStart(2,'0')}`
+    : row.start_date ?? null,
   startTime: row.start_time ?? null,
   timezone: row.timezone ?? null,
   durationMinutes: row.duration_minutes ?? null,
   capacity: row.capacity ?? null,
   contactName: row.contact_name ?? null,
+  templateId: row.template_id ?? null,
+  templateLocalityId: row.template_locality_id ?? null,
+  templateLocalitySnapshot: row.template_locality_snapshot ?? null,
   templateKey: row.template_key ?? null,
   templateVersion: row.template_version ?? null,
   templateSnapshot: row.template_snapshot ?? null,
@@ -110,17 +120,17 @@ export const Hunt = {
        RETURNING *`,
       [input.organizationId, input.createdByUserId, input.name, input.status ?? 'draft'],
     );
-    return mapRow(rows[0]);
+    return mapHuntRow(rows[0]);
   },
 
   async findById(id: string): Promise<IHunt | null> {
     const { rows } = await pool.query('SELECT * FROM hunts WHERE id = $1 LIMIT 1', [id]);
-    return rows[0] ? mapRow(rows[0]) : null;
+    return rows[0] ? mapHuntRow(rows[0]) : null;
   },
 
   async findByAccessCode(code: string): Promise<IHunt | null> {
     const { rows } = await pool.query('SELECT * FROM hunts WHERE access_code = $1 LIMIT 1', [code]);
-    return rows[0] ? mapRow(rows[0]) : null;
+    return rows[0] ? mapHuntRow(rows[0]) : null;
   },
 
   async ensureAccessCode(
@@ -139,7 +149,7 @@ export const Hunt = {
            RETURNING *`,
           [id, code, ['published', 'active', 'paused']],
         );
-        if (rows[0]) return mapRow(rows[0]);
+        if (rows[0]) return mapHuntRow(rows[0]);
         return Hunt.findById(id);
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
@@ -160,7 +170,7 @@ export const Hunt = {
        ORDER BY h.updated_at DESC, h.created_at DESC`,
       [userId],
     );
-    return rows.map((row) => ({ ...mapRow(row), huntRoles: row.hunt_roles }));
+    return rows.map((row) => ({ ...mapHuntRow(row), huntRoles: row.hunt_roles }));
   },
 
   async createWithOrganizerRole(input: Omit<CreateHuntInput, 'status'>): Promise<IHunt> {
@@ -175,7 +185,7 @@ export const Hunt = {
       );
       await HuntRoles.assign(rows[0].id, input.createdByUserId, 'organizer', client);
       await client.query('COMMIT');
-      return mapRow(rows[0]);
+      return mapHuntRow(rows[0]);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -184,7 +194,7 @@ export const Hunt = {
     }
   },
 
-  async updateDraft(id: string, input: UpdateHuntGeneralSetupInput): Promise<IHunt | null> {
+  async updateDraft(id: string, input: UpdateHuntGeneralSetupInput, client: Pick<PoolClient, 'query'> = pool): Promise<IHunt | null> {
     const columns: Record<keyof UpdateHuntGeneralSetupInput, string> = {
       name: 'name', country: 'country', region: 'region', city: 'city', startDate: 'start_date',
       startTime: 'start_time', timezone: 'timezone', durationMinutes: 'duration_minutes',
@@ -196,13 +206,28 @@ export const Hunt = {
     };
     const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, unknown][];
     const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `UPDATE hunts SET ${assignments.join(', ')}, updated_at = now()
-       WHERE id = $1 AND status = 'draft'
+       WHERE id = $1 AND status = 'draft'${input.templateKey ? ' AND template_id IS NULL' : ''}
        RETURNING *`,
       [id, ...entries.map(([, value]) => value)],
     );
-    return rows[0] ? mapRow(rows[0]) : null;
+    return rows[0] ? mapHuntRow(rows[0]) : null;
+  },
+
+  async publishDraft(id: string) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const row = (await client.query('SELECT * FROM hunts WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if (!row || row.status !== 'draft') { await client.query('ROLLBACK'); return { hunt: null, issues: null }; }
+      const readiness = validateHuntForPublish(mapHuntRow(row));
+      if (!readiness.ready) { await client.query('ROLLBACK'); return { hunt: null, issues: readiness.issues }; }
+      const result = await client.query("UPDATE hunts SET status='published',updated_at=now() WHERE id=$1 RETURNING *",[id]);
+      await client.query('COMMIT');
+      return { hunt: mapHuntRow(result.rows[0]), issues: null };
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
   },
 
   async transitionStatus(input: TransitionHuntInput): Promise<IHunt | null> {
@@ -212,6 +237,6 @@ export const Hunt = {
        RETURNING *`,
       [input.id, input.to, input.from],
     );
-    return rows[0] ? mapRow(rows[0]) : null;
+    return rows[0] ? mapHuntRow(rows[0]) : null;
   },
 };
