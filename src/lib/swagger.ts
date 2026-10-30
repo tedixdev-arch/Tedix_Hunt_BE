@@ -1,3 +1,4 @@
+import { exerciseSchema, mechanics, personalMechanics, teamMechanics } from '../domain/customExerciseSchemas.js';
 import { checkpointGameplayTypes } from '../domain/checkpointGameplay.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { environment } from '../config/environment.js';
@@ -21,6 +22,20 @@ const options: swaggerJsdoc.Options = {
         },
       },
       schemas: {
+        CustomExercise: {
+          description: 'Template-version-owned data-only snapshot. Omit id and owner together for a new instance. A save may echo the latest source version instance at its same checkpoint/classification slot; the server allocates a fresh id and destination owner for every new immutable version. Never pass IDs from another Template/version/slot. Assignment is containment in checkpoints[].customExercises. Plain text only; strings retain exact whitespace. Payload limit 100 KiB, maximum depth 12 and 12000 values. Collections have bounded sizes and unique IDs; relational membership/completeness rules apply. See docs/Custom_Exercise_Persistence.md.',
+          oneOf: Object.keys(mechanics).map(type => exerciseSchema(type as keyof typeof mechanics)),
+        },
+        CustomPersonalExercise: { oneOf: Object.keys(personalMechanics).map(type => exerciseSchema(type as keyof typeof mechanics)) },
+        CustomTeamExercise: { oneOf: Object.keys(teamMechanics).map(type => exerciseSchema(type as keyof typeof mechanics)) },
+        CheckpointCustomExercises: {
+          type: 'object', additionalProperties: false, minProperties: 1,
+          description: 'At most one custom Personal and one custom Team instance. Omit the object for predefined-only behavior. Custom content takes precedence for its slot in future gameplay integration; all original predefined fields remain intact. No custom gameplay is currently delivered and Hunts containing custom exercises cannot be published.',
+          properties: {
+            personal: { $ref: '#/components/schemas/CustomPersonalExercise' },
+            team: { $ref: '#/components/schemas/CustomTeamExercise' },
+          },
+        },
         Error: {
           type: 'object',
           properties: {
@@ -300,6 +315,7 @@ const options: swaggerJsdoc.Options = {
               items: {
                 type: 'object', additionalProperties: true,
                 properties: {
+                  customExercises: { $ref: '#/components/schemas/CheckpointCustomExercises' },
                   role: { type: 'string', enum: ['normal', 'terminal'] },
                   checkpoint: { type: 'integer', description: 'Existing normal gameplay number; required at geographic submission, unique and in 1..normalCheckpointCount. Matches geographic checkpointNumber; forbidden on terminal entries.' },
                   kind: { type: 'string', enum: [...checkpointGameplayTypes.kind] },

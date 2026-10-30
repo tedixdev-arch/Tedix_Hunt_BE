@@ -1,3 +1,4 @@
+import { copyCustomExercises } from '../domain/customExercises.js';
 import { HuntTemplateKeyConflictError } from './HuntTemplate.js';
 import { isTemplateContent, normalizeTemplateKey } from '../domain/creatorTemplates.js';
 import { pool } from '../lib/postgres.js';
@@ -74,7 +75,7 @@ export async function copyPublishedUniversal(
     const row = resolved.rows[0];
     if (!row) throw new UniversalCopySourceNotFoundError();
     if (row.id !== expected.templateId || row.version !== expected.version) throw new UniversalCopyStaleError();
-    const content = { ...row.content, key, version: 1 };
+    const content = copyCustomExercises(row.content, key, 1);
     if (!isTemplateContent(content, key, 1)) throw new Error('Invalid published content');
     const inserted = await client.query(`INSERT INTO hunt_templates
       (key, origin, category, status, created_by_user_id,
