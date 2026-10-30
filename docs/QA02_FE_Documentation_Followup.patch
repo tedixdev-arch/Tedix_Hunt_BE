@@ -1,0 +1,134 @@
+--- a/docs/TedixHunt_Master_Execution_Plan.md
++++ b/docs/TedixHunt_Master_Execution_Plan.md
+@@ -51,7 +51,7 @@
+ | <a id="task-a1"></a> **A1** · Task | Deployment topology and verification | [A1](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a1-deployment-topology-and-verification); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a1) | Partial foundation; verification not started | [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a1) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a1) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a1) |
+ | <a id="task-a2"></a> **A2** · Task | PostgreSQL migration foundation | [A2](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a2-postgresql-migration-foundation); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a2) | Partial foundation; verification not started | [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a2) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a2) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a2) |
+ | <a id="task-a3"></a> **A3** · Task | User normalization and compatibility | [A3](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a3-user-normalization-and-compatibility); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a3) | Partial foundation; verification not started | [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a3) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a3) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a3) |
+-| <a id="task-a4"></a> **A4** · Task | Core authentication | [A4](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a4-core-authentication); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | Partial foundation; bounded QA-01 source verification; full verification pending | [QA-01 correction](evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md#qa-01-bounded-source-correction--30-october-2026); [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) |
++| <a id="task-a4"></a> **A4** · Task | Core authentication | [A4](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a4-core-authentication); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | Partial foundation; bounded QA-01/QA-02 source verification; full verification pending | [QA-01 correction](evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md#qa-01-bounded-source-correction--30-october-2026); [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a4) |
+ | <a id="task-a5"></a> **A5** · Task | Frontend API/session layer | [A5](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a5-frontend-apisession-layer); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a5) | Partial foundation; bounded QA-01 source verification; full verification pending | [QA-01 correction](evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md#qa-01-bounded-source-correction--30-october-2026); [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a5) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a5) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a5) |
+ | <a id="task-a6"></a> **A6** · Task | Existing real login flows | [A6](TedixHunt_Prototype_Architecture_Implementation_Plan.md#a6-existing-real-login-flows); §20.2–20.4 gates; [Details](TedixHunt_Execution_Plan_Reconciliation.md#detail-a6) | Partial foundation; verification not started | [Phase evidence](TedixHunt_Master_Implementation_Control_Plan_v3.md#phase-evidence-and-completion-limits); [Basis](TedixHunt_Execution_Plan_Reconciliation.md#detail-a6) | [Requirements](TedixHunt_Execution_Plan_Reconciliation.md#detail-a6) | Foundation audit; [constraints](TedixHunt_Execution_Plan_Reconciliation.md#detail-a6) |
+
+@@ -407,7 +407,7 @@
+ | Finding | Current disposition / risk | Existing task mapping |
+ | --- | --- | --- |
+ | QA-01 refresh concurrency | Confirmed in source and controlled FE reproduction; High / proposed P0 | A5, A4; bounded correction source-tested, Draft #132 in review; integration open |
+-| QA-02 abuse / guest accumulation | Partially verified: no in-repo limiter/automatic cleanup; deployment protections unknown; provisional High / P1 | A4/A6/B4/L1 context; additional bounded scope proposed |
++| QA-02 abuse / guest accumulation | Bounded A4 repair source implemented/local-tested; Draft review pending; deployment configuration/enforcement/acceptance unverified; retention assessment only | Explicit PO authorization under A4; no new task; QA-02 remains open |
+ | QA-03 guest name ignored | Confirmed source contract mismatch; Low / P1–P2 semantics batch | A6, H3 context |
+ | QA-04 obsolete Creator register caller | Confirmed caller/route drift; no current UI caller found; Low / P2 | A5, E11 context; preserve application/approval policy |
+ | QA-05 false Join success | Confirmed source defect; High correctness / P1; `SIGNAL26` contains excluded `I` | H1, H1-VERIFY-1 lookup only; H2-EXEC-1 enrollment remains gated |
+@@ -443,3 +443,55 @@
+
+ Corrective source revision: `43dc36e535e9bd4a8f814189349ea76d70f7a81a` in existing Draft #132. [Corrective CI 41094613684](https://github.com/tedixdev-arch/Tedix_Hunt_FE/actions/runs/41094613684) passed typecheck/build/full tests; dev/production deploy jobs skipped. Source re-review remains pending; integration/deployed status and QA-01 closure remain unchanged.
+
++
++### QA-02 bounded A4 repair — 30 October 2026
++
++The Product Owner explicitly authorized development, automated testing and documentation
++of QA-02 under existing **A4 — Core Authentication**. QA-02 remains a finding ID;
++no task is added and all 169 task IDs/order and frozen reconciliation are unchanged.
++This supersedes the prior proposed-only scope for this bounded repair; automatic
++guest cleanup and changes to Participant registration policy remain unauthorized.
++
++**Source:** BE branch `codex/qa-02-auth-abuse`, based on merged main
++`a7df0f963feb8b431dfa83913eeca0facc43c116`; FE reference main
++`4cc23dab1d7fbe6de5079934056792f168801777`. The bounded BE Draft includes
++reusable token buckets, independent account/network login controls, separate
++registration/application, guest, activation and refresh budgets, explicit trusted
++proxy CIDRs, bounded memory/expiry and generic 429/Retry-After responses.
++[BE evidence and activation decisions](https://github.com/tedixdev-arch/Tedix_Hunt_BE/blob/codex/qa-02-auth-abuse/docs/QA02_Authentication_Abuse_Protection.md).
++
++**Local evidence:** focused middleware/auth 188 passed; focused PostgreSQL auth,
++guest/reference-safety 34 passed; full backend suite **1,360 tests / 62 files passed**,
++zero failures/skips, with disposable PostgreSQL 17. Typecheck, build and diff checks
++passed. Forty guest rows were created behind one IP; excess admission at the
++configured boundary persisted no extra row, then recovered with controlled time.
++Existing auth regressions run both enabled and disabled. CI has not run at Draft
++preparation; no CI pass is claimed. Guest retention is assessment only, with no cleanup.
++
++**Completion:** source implemented for Draft review; locally tested. Actual deployment
++configuration unverified; enforcement defaults disabled in all environments; no
++production enablement or independent production verification performed. Operator/PO
++must confirm ingress, trusted proxies, direct reachability, worker/instance counts,
++WAF limits, classroom capacity and numerical thresholds before activation. In-memory
++budgets are per process. Anonymous clients can exhaust a shared classroom allowance;
++no guaranteed admission under attack or complete distributed-abuse prevention is claimed.
++QA-02 remains open for those decisions and separately authorized acceptance. A4
++remains a partial foundation; unrelated statuses, task order and gates are unchanged.
++No merge or deployment. Stop for ChatGPT Draft review.
++
++
++
++**QA-02 / BE Draft #91 lifecycle re-review, 30 October 2026:** the corrected
++limiter separates continuous token replenishment from full-window idle expiry.
++An indexed expiry heap keeps exactly one record per bucket and an exact earliest
++deadline, with no live capacity eviction, stale tickets or full-map cleanup scans.
++Nine additional deterministic regressions verify spaced-request admission bounds,
++idle expiry, selective reclamation, overload and Retry-After, including a 2,000-step
++reference-model check. Rework focused limiter/auth/PostgreSQL suites: 233 passed;
++final full backend/PostgreSQL suite: **1,369 tests / 62 files passed**, zero
++failures/skips; typecheck/build/diff checks passed. Corrective CI is not yet
++observed at evidence preparation. The longer conservative idle retention can
++increase occupied slots; configured limits/cap, defaults-off enforcement and all
++operator/PO activation gates remain unchanged. Same A4 authorization and Draft
++#91 only; QA-02 remains open, with deployment configuration, production enablement
++and independent production acceptance unverified. No merge or deployment.
+--- a/docs/evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md
++++ b/docs/evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md
+@@ -175,3 +175,55 @@
+
+ **Pushed rework and CI:** corrective source commit `43dc36e535e9bd4a8f814189349ea76d70f7a81a` is pushed to existing [Draft #132](https://github.com/tedixdev-arch/Tedix_Hunt_FE/pull/132), branch `codex/qa-01-concurrent-refresh`. [Corrective source CI 41094613684](https://github.com/tedixdev-arch/Tedix_Hunt_FE/actions/runs/41094613684) passed install, typecheck, production build and full tests. Dev and production deployment jobs were skipped. Exactly seven corrective paths changed from reviewed head; published blobs match locally tested files. This follow-up records immutable source/CI references only and does not promote integration or deployed acceptance. Stop for re-review; do not merge or deploy.
+
++
++### QA-02 bounded A4 repair — 30 October 2026
++
++The Product Owner explicitly authorized development, automated testing and documentation
++of QA-02 under existing **A4 — Core Authentication**. QA-02 remains a finding ID;
++no task is added and all 169 task IDs/order and frozen reconciliation are unchanged.
++This supersedes the prior proposed-only scope for this bounded repair; automatic
++guest cleanup and changes to Participant registration policy remain unauthorized.
++
++**Source:** BE branch `codex/qa-02-auth-abuse`, based on merged main
++`a7df0f963feb8b431dfa83913eeca0facc43c116`; FE reference main
++`4cc23dab1d7fbe6de5079934056792f168801777`. The bounded BE Draft includes
++reusable token buckets, independent account/network login controls, separate
++registration/application, guest, activation and refresh budgets, explicit trusted
++proxy CIDRs, bounded memory/expiry and generic 429/Retry-After responses.
++[BE evidence and activation decisions](https://github.com/tedixdev-arch/Tedix_Hunt_BE/blob/codex/qa-02-auth-abuse/docs/QA02_Authentication_Abuse_Protection.md).
++
++**Local evidence:** focused middleware/auth 188 passed; focused PostgreSQL auth,
++guest/reference-safety 34 passed; full backend suite **1,360 tests / 62 files passed**,
++zero failures/skips, with disposable PostgreSQL 17. Typecheck, build and diff checks
++passed. Forty guest rows were created behind one IP; excess admission at the
++configured boundary persisted no extra row, then recovered with controlled time.
++Existing auth regressions run both enabled and disabled. CI has not run at Draft
++preparation; no CI pass is claimed. Guest retention is assessment only, with no cleanup.
++
++**Completion:** source implemented for Draft review; locally tested. Actual deployment
++configuration unverified; enforcement defaults disabled in all environments; no
++production enablement or independent production verification performed. Operator/PO
++must confirm ingress, trusted proxies, direct reachability, worker/instance counts,
++WAF limits, classroom capacity and numerical thresholds before activation. In-memory
++budgets are per process. Anonymous clients can exhaust a shared classroom allowance;
++no guaranteed admission under attack or complete distributed-abuse prevention is claimed.
++QA-02 remains open for those decisions and separately authorized acceptance. A4
++remains a partial foundation; unrelated statuses, task order and gates are unchanged.
++No merge or deployment. Stop for ChatGPT Draft review.
++
++
++
++**QA-02 / BE Draft #91 lifecycle re-review, 30 October 2026:** the corrected
++limiter separates continuous token replenishment from full-window idle expiry.
++An indexed expiry heap keeps exactly one record per bucket and an exact earliest
++deadline, with no live capacity eviction, stale tickets or full-map cleanup scans.
++Nine additional deterministic regressions verify spaced-request admission bounds,
++idle expiry, selective reclamation, overload and Retry-After, including a 2,000-step
++reference-model check. Rework focused limiter/auth/PostgreSQL suites: 233 passed;
++final full backend/PostgreSQL suite: **1,369 tests / 62 files passed**, zero
++failures/skips; typecheck/build/diff checks passed. Corrective CI is not yet
++observed at evidence preparation. The longer conservative idle retention can
++increase occupied slots; configured limits/cap, defaults-off enforcement and all
++operator/PO activation gates remain unchanged. Same A4 authorization and Draft
++#91 only; QA-02 remains open, with deployment configuration, production enablement
++and independent production acceptance unverified. No merge or deployment.

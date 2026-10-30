@@ -1,6 +1,6 @@
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createUser: vi.fn(),
@@ -46,6 +46,7 @@ vi.mock('../models/ProfessionalProvisioning.js', () => ({
 }));
 
 import { createApp } from '../app.js';
+import { readAbuseProtectionConfig } from '../config/abuseProtection.js';
 import { signJwt } from '../lib/jwt.js';
 
 const createdAt = new Date('2026-01-02T03:04:05Z');
@@ -62,10 +63,12 @@ const registeredUser = {
   createdAt,
 };
 
-describe('user account API', () => {
-  const app = createApp();
+describe.each([false, true])('user account API (abuse enforcement=%s)', (enabled) => {
+  let app: ReturnType<typeof createApp>;
+  afterEach(() => app.locals.stopAbuseProtection());
 
   beforeEach(() => {
+    app = createApp({ abuseProtection: { ...readAbuseProtectionConfig({}), enabled } });
     vi.clearAllMocks();
     mocks.findUser.mockResolvedValue(null);
     mocks.createUser.mockResolvedValue(registeredUser);
@@ -76,6 +79,36 @@ describe('user account API', () => {
     mocks.activateAdmin.mockResolvedValue(null);
     mocks.activateProfessional.mockResolvedValue(null);
     mocks.changePasswordAndRevokeSessions.mockResolvedValue(undefined);
+  });
+
+  it('handles malformed JSON safely when enabled and preserves the disabled parser contract', async () => {
+    const response = await request(app).post('/api/auth/participant/login').type('json').send('{')
+      .expect(enabled ? 400 : 500);
+    expect(response.body.error).toBe(enabled ? 'invalid_input' : 'internal_server_error');
+    if (enabled) expect(response.body.detail).toBeUndefined();
+    expect(mocks.findUser).not.toHaveBeenCalled();
+  });
+
+  it('admits forty actual guest creations behind one socket address', async () => {
+    for (let i = 0; i < 40; i++) {
+      const response = await request(app).post('/api/auth/guest').expect(201);
+      expect(response.body.tokens.accessToken).toEqual(expect.any(String));
+      expect(response.body.tokens.refreshToken).toBeUndefined();
+    }
+    expect(mocks.createUser).toHaveBeenCalledTimes(40);
+    expect(mocks.createRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('preserves login error contracts until the configured network boundary', async () => {
+    app.locals.stopAbuseProtection();
+    const config = { ...readAbuseProtectionConfig({}), enabled };
+    config.budgets.loginNetwork.capacity = 2;
+    app = createApp({ abuseProtection: config });
+    await request(app).post('/api/auth/participant/login').send({ email: 'one', password: 'bad' }).expect(401, { error: 'invalid_credentials' });
+    await request(app).post('/api/auth/admin/login').send({ email: 'two', password: 'bad' }).expect(401, { error: 'invalid_credentials' });
+    const response = await request(app).post('/api/auth/creator/login').send({ email: 'three', password: 'bad' }).expect(enabled ? 429 : 401);
+    expect(response.body.error).toBe(enabled ? 'too_many_requests' : 'invalid_credentials');
+    if (enabled) expect(response.headers['retry-after']).toBe('30');
   });
 
   it.each(['organizer', 'creator'] as const)('directly activates a provisioned %s', async (role) => {
