@@ -128,6 +128,150 @@ describe('bounded authentication abuse protection', () => {
     expect(buckets.consume('b', { capacity: 1, windowMs: 100 })).toBe(0);
     expect(buckets.size).toBe(1);
   });
+  it('separates one-token replenishment from full-window idle cleanup', () => {
+    let now = 0;
+    const buckets = new TokenBuckets(1, () => now);
+    const budget = { capacity: 10, windowMs: 10_000 };
+    expect(buckets.consume('one', budget)).toBe(0);
+    expect(buckets.nextExpiry).toBe(10_000);
+    now = 1_000; buckets.sweep();
+    expect(buckets.size).toBe(1);
+    // Exactly one token has returned; the balance legitimately is full again.
+    for (let i = 0; i < 10; i++) expect(buckets.consume('one', budget)).toBe(0);
+    expect(buckets.consume('one', budget)).toBe(1);
+    expect(buckets.nextExpiry).toBe(11_000);
+  });
+  it('retains a partially depleted balance after one token-refill interval', () => {
+    let now = 0; const buckets = new TokenBuckets(1, () => now);
+    const budget = { capacity: 10, windowMs: 10_000 };
+    for (let i = 0; i < 7; i++) expect(buckets.consume('one', budget)).toBe(0);
+    now = 1_000; buckets.sweep();
+    for (let i = 0; i < 4; i++) expect(buckets.consume('one', budget)).toBe(0);
+    expect(buckets.consume('one', budget)).toBe(1);
+  });
+  it('does not issue fresh bursts to repeated or continuously active requests', () => {
+    let now = 0; const buckets = new TokenBuckets(1, () => now);
+    const budget = { capacity: 5, windowMs: 10_000 };
+    let accepted = 0;
+    for (let step = 0; step <= 100; step++) {
+      now = step * 500; buckets.sweep();
+      for (let burst = 0; burst < 10; burst++) {
+        if (buckets.consume('active', budget) === 0) accepted++;
+      }
+      expect(accepted).toBe(5 + Math.floor(now / 2_000));
+      expect(buckets.size).toBe(1);
+      expect(buckets.nextExpiry).toBe(now + 10_000);
+    }
+  });
+  it('automatically removes a replenished idle bucket only after its idle deadline', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const c = config(); c.maxEntries = 1;
+    const limiter = createAbuseProtection(c, () => now); stops.push(limiter.stop);
+    limiter.store.consume('one', { capacity: 10, windowMs: 10_000 });
+    now = 1_000; vi.advanceTimersByTime(1_000);
+    expect(limiter.store.size).toBe(1);
+    now = 9_999; vi.advanceTimersByTime(1_000);
+    expect(limiter.store.size).toBe(1);
+    now = 10_000; vi.advanceTimersByTime(1_000);
+    expect(limiter.store.size).toBe(0);
+    expect(limiter.store.nextExpiry).toBe(Infinity);
+  });
+  it('keeps the earliest deadline exact after updates, rejections and expiry', () => {
+    let now = 0; const buckets = new TokenBuckets(2, () => now);
+    const budget = { capacity: 2, windowMs: 4_000 };
+    buckets.consume('a', budget);
+    now = 1_000; buckets.consume('b', budget);
+    expect(buckets.nextExpiry).toBe(4_000);
+    now = 2_000; buckets.consume('a', budget);
+    expect(buckets.nextExpiry).toBe(5_000);
+    now = 5_000; buckets.sweep();
+    expect(buckets.size).toBe(1);
+    expect(buckets.nextExpiry).toBe(6_000);
+    expect(buckets.consume('a', budget)).toBe(0);
+    expect(buckets.nextExpiry).toBe(9_000);
+    now = 5_500; expect(buckets.consume('a', budget)).toBe(0);
+    expect(buckets.consume('a', budget)).toBe(2);
+    expect(buckets.nextExpiry).toBe(9_500);
+    now = 9_500; buckets.sweep();
+    expect(buckets.nextExpiry).toBe(Infinity);
+  });
+  it('reclaims expired entries without resetting active budgets under capacity pressure', () => {
+    let now = 0; const buckets = new TokenBuckets(2, () => now);
+    const budget = { capacity: 2, windowMs: 4_000 };
+    buckets.consume('idle', budget);
+    buckets.consume('active', budget); buckets.consume('active', budget);
+    now = 1_000;
+    expect(buckets.consume('active', budget)).toBe(1);
+    expect(buckets.nextExpiry).toBe(4_000);
+    now = 4_000;
+    expect(buckets.consume('new', budget)).toBe(0);
+    expect(buckets.size).toBe(2);
+    expect(buckets.nextExpiry).toBe(5_000);
+    // Active has two replenished tokens, not more; capacity admission cannot reset it.
+    expect(buckets.consume('active', budget)).toBe(0);
+    expect(buckets.consume('active', budget)).toBe(0);
+    expect(buckets.consume('active', budget)).toBe(2);
+    expect(buckets.nextExpiry).toBe(8_000);
+    for (let i = 0; i < 1_000; i++) expect(buckets.consume(`attack-${i}`, budget)).toBe(4);
+    expect(buckets.size).toBe(2);
+    expect(buckets.nextExpiry).toBe(8_000);
+  });
+  it('does not repeatedly sweep live entries during capacity floods after a deadline moves', () => {
+    let now = 0; const buckets = new TokenBuckets(1, () => now);
+    const budget = { capacity: 2, windowMs: 10_000 };
+    buckets.consume('active', budget);
+    now = 1_000; buckets.consume('active', budget);
+    now = 10_000;
+    const sweeps = vi.spyOn(buckets, 'sweep');
+    for (let i = 0; i < 1_000; i++) expect(buckets.consume(`attack-${i}`, budget)).toBe(1);
+    expect(sweeps).not.toHaveBeenCalled();
+    expect(buckets.size).toBe(1);
+    expect(buckets.nextExpiry).toBe(11_000);
+    now = 11_000;
+    expect(buckets.consume('new', budget)).toBe(0);
+    expect(buckets.nextExpiry).toBe(21_000);
+  });
+  it('keeps HTTP Retry-After accurate during repeated denials without postponing refill', async () => {
+    const c = config(); c.budgets.guest = { capacity: 2, windowMs: 10_000 };
+    const f = fixture(c);
+    await request(f.app).post('/api/auth/guest').expect(200);
+    await request(f.app).post('/api/auth/guest').expect(200);
+    f.advance(1_000); f.limiter.store.sweep();
+    expect((await request(f.app).post('/api/auth/guest').expect(429)).headers['retry-after']).toBe('4');
+    f.advance(3_001); f.limiter.store.sweep();
+    expect((await request(f.app).post('/api/auth/guest').expect(429)).headers['retry-after']).toBe('1');
+    f.advance(999); await request(f.app).post('/api/auth/guest').expect(200);
+    expect((await request(f.app).post('/api/auth/guest').expect(429)).headers['retry-after']).toBe('5');
+  });
+  it('matches a simple reference model across mixed budgets, heap updates and reclamation', () => {
+    let now = 0;
+    const buckets = new TokenBuckets(8, () => now);
+    const model = new Map<string, { tokens: number; updatedAt: number; expiresAt: number }>();
+    for (let step = 0; step < 2_000; step++) {
+      now += (step * 7 % 5) * 250;
+      const id = step * 11 % 17, key = `id-${id}`;
+      const capacity = 2 ** (1 + id % 3), windowMs = capacity * 1_000;
+      for (const [id, entry] of model) if (entry.expiresAt <= now) model.delete(id);
+      let entry = model.get(key), expected: number;
+      if (!entry && model.size === 8) {
+        expected = Math.max(1, Math.ceil((Math.min(...[...model.values()].map((e) => e.expiresAt)) - now) / 1_000));
+      } else {
+        if (!entry) { entry = { tokens: capacity, updatedAt: now, expiresAt: 0 }; model.set(key, entry); }
+        entry.tokens = Math.min(capacity, entry.tokens + (now - entry.updatedAt) / 1_000);
+        entry.updatedAt = now; entry.expiresAt = now + windowMs;
+        if (entry.tokens >= 1) { entry.tokens--; expected = 0; }
+        else expected = Math.max(1, Math.ceil((1 - entry.tokens)));
+      }
+      expect(buckets.consume(key, { capacity, windowMs })).toBe(expected);
+      expect(buckets.size).toBe(model.size);
+      // The expiry index must be bounded too, including repeated deadline extensions.
+      expect(Reflect.get(buckets, 'deadlines')).toHaveLength(model.size);
+      expect(buckets.nextExpiry).toBe(Math.min(...[...model.values()].map((e) => e.expiresAt)));
+    }
+    now += 100_000; buckets.sweep();
+    expect(buckets.size).toBe(0); expect(buckets.nextExpiry).toBe(Infinity);
+  });
   it('canonicalizes mapped IPv4 and aggregates IPv6 /64 suffix rotation', () => {
     expect(networkIdentity('::ffff:192.0.2.1')).toBe(networkIdentity('192.0.2.1'));
     expect(networkIdentity('2001:db8:0:1::1')).toBe(networkIdentity('2001:0db8:0000:0001::abcd'));

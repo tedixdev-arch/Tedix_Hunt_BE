@@ -110,11 +110,17 @@ email; this availability tradeoff requires threshold approval and monitoring.
 ## Bounded memory and overload
 
 One map contains at most `AUTH_ABUSE_MAX_ENTRIES` entries (20,000 default, accepted
-range 1–100,000). Keys have fixed length. Fully replenished entries expire, with a
-one-second unref'ed sweep reclaiming idle entries and lazy reclamation on access.
+range 1–100,000). Keys have fixed length. Entries expire after a full configured window without activity; continuous token
+refill is independent of this conservative idle TTL. Even an empty bucket has
+replenished fully before it can be removed. A one-second unref'ed sweep reclaims
+idle entries, with lazy reclamation on access.
 `app.locals.stopAbuseProtection()` releases the timer for application disposal.
-The next expiry bounds repeated capacity sweeps; denied novel identities cannot
-force full scans on every request before that expiry. No live entry is evicted to
+An indexed min-heap holds exactly one expiry record per map entry; updating a
+deadline adjusts that record in O(log N), and nextExpiry always reads the exact
+root deadline. Sweeps remove only expired roots in O(K log N) for K removals;
+no live-entry scans or stale queued deadlines accumulate. Repeated capacity
+denials with no expired entries do O(1) expiry work. Each removal is chargeable to
+an earlier insertion, and a single operation removes at most the configured cap. No live entry is evicted to
 admit another key, which would let cycling identities reset budgets.
 
 When full, requests needing a new entry fail closed with the same generic 429.
@@ -247,3 +253,74 @@ leave the historical QA report intact. Only the BE Draft is published.
 Final source validation includes two additional enabled/disabled malformed-JSON
 compatibility cases in the full 1,360-test run. The earlier focused 188-test run
 preceded those additions; no final focused rerun is claimed.
+
+### PR #91 re-review — refill, idle expiration and capacity accounting
+
+30 October 2026. Rework of existing Draft #91, reviewed source
+`e6e09f9ef5368fedc74dce8ab3652162b22a8231`. The user's explicit correction request
+stays within the existing bounded A4 authorization; no second PR, task, dependency,
+configuration/default change, production activation, merge or deployment.
+
+**Finding assessment:** a deficit-based expiry is mathematically valid when its
+refill accounting is exact: capacity 10 / 10 seconds, one token spent, becomes
+full after one second. Removing that fully replenished bucket does not by itself
+grant extra tokens. No excess-admission reproduction solely from that formula is
+claimed. The reviewed implementation did cache nextExpiry using only `Math.min`:
+when an entry's deadline moved later, the cache could remain earlier than every
+actual deadline, permitting unnecessary whole-map reclamation scans under capacity
+pressure. Prior tests covered frozen bursts and capacity-one expiry but did not
+adequately prove spaced-request bounds, idle retention or expiry-index invariants.
+
+**Correction:** cleanup now uses an explicit, conservative full-window idle TTL:
+`expiresAt = now + windowMs` after each attempt on an existing/admitted bucket.
+Refill still uses elapsed time and the configured token rate; rejection spends no
+additional token. A full idle window is sufficient to restore even an empty
+bucket, so cleanup cannot remove a partially replenished entry. Requests before
+idle expiry use the retained balance; repeated denials do not postpone token
+replenishment. Idle retention can be longer than the previous deficit-based TTL,
+keeping more identities resident and potentially causing capacity denials sooner;
+this bounded availability tradeoff is documented without increasing the memory cap.
+
+**Expiry index:** a min-heap holds one mutable record per map entry, indexed by the
+entry's heap position. Rescheduling adjusts that existing record; it never appends
+stale expiry tickets. nextExpiry is derived from the root, not an independently
+cached lower bound. Removing expired roots updates both map and heap, including
+the empty state (Infinity), while preserving live entries. New identities at
+capacity fail closed; no live entry is evicted and no capacity denial refreshes a
+victim's state. Cleanup visits expired roots only. Updates cost O(log N), a denial
+without expirations costs O(1) expiry work, and K removals cost O(K log N), bounded
+by the configured entry cap and amortized against earlier insertions.
+
+**Deterministic coverage:** nine new injected-clock regressions (23 limiter tests
+total) cover one-token consumption and retained idle lifetime, partially depleted
+refill, 101 spaced bursts with exact admitted-token bounds, automatic idle expiry,
+exact nextExpiry after updates/rejections/removals, selective reclamation under
+capacity pressure, repeated capacity floods without live scans, HTTP Retry-After
+through repeated denials and a 2,000-step mixed-budget reference model. The model
+checks admitted/denied outcomes, map size, exact earliest deadline and one expiry
+record per map entry after every step. Existing forty-student shared-NAT tests
+remain in the middleware, auth route and real PostgreSQL suites.
+
+**Other middleware review:** route/category matching, independent account/network
+keys, proxy identity canonicalization, JSON-stage ordering, generic 429 responses,
+disabled enforcement and bypassed logout/gameplay routes were reviewed. No further
+confirmed bypass was found in this source review. Existing protections and their
+NAT, account-denial, per-process and deployment limitations remain as documented.
+Budgets are immutable for the lifetime of an application instance; deployment
+configuration is not hot-reloaded into existing buckets.
+
+**Executed rework validation:** focused limiter suite **23 passed**; combined
+focused limiter/auth/refresh/authorization and relevant PostgreSQL suites **233
+passed across 7 files**. Final full suite with disposable local PostgreSQL 17:
+**1,369 tests across 62 files passed**, zero failures/skips. Typecheck, build and
+whitespace checks passed. The full suite additionally verifies the bounded expiry
+index assertion added after the focused run. No lint/format configuration exists.
+The disposable database container was removed after validation. Rework CI is not
+yet observed at evidence preparation; no corrective CI pass is claimed.
+
+**Completion dimensions:** corrected source/local tests only, awaiting ChatGPT
+re-review in the same Draft #91. Actual deployment configuration, production
+enablement and independent production acceptance remain unverified. Enforcement
+defaults remain disabled; QA-02 and A4's full verification remain open. The FE
+follow-up patch includes this correction status without changing its 169 ordered
+task anchors or the frozen reconciliation. No merge or deployment.

@@ -23,3 +23,8 @@ BE source evidence. CI is explicitly unrun at Draft preparation; once the Draft
 has actual CI results, a documentation follow-up must cite its immutable source
 revision/run rather than promoting production status. No source-test result
 closes QA-02, A4 or any unrelated integration/deployment gate.
+
+PR #91 re-review: the adjacent patch additionally appends the lifecycle correction
+status and superseding 1,369-test full-suite evidence to both FE documents.
+Historical initial results remain intact. Corrective CI is explicitly unobserved
+at preparation; deployment dimensions and all 169 ordered task anchors are preserved.

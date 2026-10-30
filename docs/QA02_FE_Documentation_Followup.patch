@@ -18,7 +18,7 @@
  | QA-03 guest name ignored | Confirmed source contract mismatch; Low / P1–P2 semantics batch | A6, H3 context |
  | QA-04 obsolete Creator register caller | Confirmed caller/route drift; no current UI caller found; Low / P2 | A5, E11 context; preserve application/approval policy |
  | QA-05 false Join success | Confirmed source defect; High correctness / P1; `SIGNAL26` contains excluded `I` | H1, H1-VERIFY-1 lookup only; H2-EXEC-1 enrollment remains gated |
-@@ -443,3 +443,39 @@
+@@ -443,3 +443,55 @@
 
  Corrective source revision: `43dc36e535e9bd4a8f814189349ea76d70f7a81a` in existing Draft #132. [Corrective CI 41094613684](https://github.com/tedixdev-arch/Tedix_Hunt_FE/actions/runs/41094613684) passed typecheck/build/full tests; dev/production deploy jobs skipped. Source re-review remains pending; integration/deployed status and QA-01 closure remain unchanged.
 
@@ -58,9 +58,25 @@
 +remains a partial foundation; unrelated statuses, task order and gates are unchanged.
 +No merge or deployment. Stop for ChatGPT Draft review.
 +
++
++
++**QA-02 / BE Draft #91 lifecycle re-review, 30 October 2026:** the corrected
++limiter separates continuous token replenishment from full-window idle expiry.
++An indexed expiry heap keeps exactly one record per bucket and an exact earliest
++deadline, with no live capacity eviction, stale tickets or full-map cleanup scans.
++Nine additional deterministic regressions verify spaced-request admission bounds,
++idle expiry, selective reclamation, overload and Retry-After, including a 2,000-step
++reference-model check. Rework focused limiter/auth/PostgreSQL suites: 233 passed;
++final full backend/PostgreSQL suite: **1,369 tests / 62 files passed**, zero
++failures/skips; typecheck/build/diff checks passed. Corrective CI is not yet
++observed at evidence preparation. The longer conservative idle retention can
++increase occupied slots; configured limits/cap, defaults-off enforcement and all
++operator/PO activation gates remain unchanged. Same A4 authorization and Draft
++#91 only; QA-02 remains open, with deployment configuration, production enablement
++and independent production acceptance unverified. No merge or deployment.
 --- a/docs/evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md
 +++ b/docs/evidence/TedixHunt_Cross_Repo_QA_2026-10-30.md
-@@ -175,3 +175,39 @@
+@@ -175,3 +175,55 @@
 
  **Pushed rework and CI:** corrective source commit `43dc36e535e9bd4a8f814189349ea76d70f7a81a` is pushed to existing [Draft #132](https://github.com/tedixdev-arch/Tedix_Hunt_FE/pull/132), branch `codex/qa-01-concurrent-refresh`. [Corrective source CI 41094613684](https://github.com/tedixdev-arch/Tedix_Hunt_FE/actions/runs/41094613684) passed install, typecheck, production build and full tests. Dev and production deployment jobs were skipped. Exactly seven corrective paths changed from reviewed head; published blobs match locally tested files. This follow-up records immutable source/CI references only and does not promote integration or deployed acceptance. Stop for re-review; do not merge or deploy.
 
@@ -100,3 +116,19 @@
 +remains a partial foundation; unrelated statuses, task order and gates are unchanged.
 +No merge or deployment. Stop for ChatGPT Draft review.
 +
++
++
++**QA-02 / BE Draft #91 lifecycle re-review, 30 October 2026:** the corrected
++limiter separates continuous token replenishment from full-window idle expiry.
++An indexed expiry heap keeps exactly one record per bucket and an exact earliest
++deadline, with no live capacity eviction, stale tickets or full-map cleanup scans.
++Nine additional deterministic regressions verify spaced-request admission bounds,
++idle expiry, selective reclamation, overload and Retry-After, including a 2,000-step
++reference-model check. Rework focused limiter/auth/PostgreSQL suites: 233 passed;
++final full backend/PostgreSQL suite: **1,369 tests / 62 files passed**, zero
++failures/skips; typecheck/build/diff checks passed. Corrective CI is not yet
++observed at evidence preparation. The longer conservative idle retention can
++increase occupied slots; configured limits/cap, defaults-off enforcement and all
++operator/PO activation gates remain unchanged. Same A4 authorization and Draft
++#91 only; QA-02 remains open, with deployment configuration, production enablement
++and independent production acceptance unverified. No merge or deployment.

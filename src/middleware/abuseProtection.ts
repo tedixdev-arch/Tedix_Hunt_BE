@@ -4,39 +4,79 @@ import { performance } from 'node:perf_hooks';
 import type { RequestHandler } from 'express';
 import type { AbuseProtectionConfig, Budget, BudgetName } from '../config/abuseProtection.js';
 
-interface Entry { tokens: number; updatedAt: number; expiresAt: number }
+interface Entry {
+  key: string;
+  tokens: number;
+  updatedAt: number;
+  expiresAt: number;
+  heapIndex: number;
+}
 
-/** Bounded token buckets: full burst capacity, replenished evenly over windowMs. */
+/** Token refill and idle retention are independent; cleanup never grants extra tokens. */
 export class TokenBuckets {
   private readonly entries = new Map<string, Entry>();
-  private nextExpiry = Infinity;
+  // One indexed deadline per map entry: no stale records or scans of live entries.
+  private readonly deadlines: Entry[] = [];
   constructor(private readonly maxEntries: number, private readonly now = () => performance.now()) {}
   get size() { return this.entries.size; }
-  sweep() {
-    const now = this.now();
-    this.nextExpiry = Infinity;
-    for (const [key, entry] of this.entries) {
-      if (entry.expiresAt <= now) this.entries.delete(key);
-      else this.nextExpiry = Math.min(this.nextExpiry, entry.expiresAt);
+  get nextExpiry() { return this.deadlines[0]?.expiresAt ?? Infinity; }
+
+  private swap(a: number, b: number) {
+    [this.deadlines[a], this.deadlines[b]] = [this.deadlines[b], this.deadlines[a]];
+    this.deadlines[a].heapIndex = a;
+    this.deadlines[b].heapIndex = b;
+  }
+  private up(index: number) {
+    while (index > 0) {
+      const parent = (index - 1) >>> 1;
+      if (this.deadlines[parent].expiresAt <= this.deadlines[index].expiresAt) break;
+      this.swap(parent, index); index = parent;
     }
   }
+  private down(index: number) {
+    for (;;) {
+      const left = index * 2 + 1, right = left + 1;
+      let smallest = index;
+      if (left < this.deadlines.length && this.deadlines[left].expiresAt < this.deadlines[smallest].expiresAt) smallest = left;
+      if (right < this.deadlines.length && this.deadlines[right].expiresAt < this.deadlines[smallest].expiresAt) smallest = right;
+      if (smallest === index) return;
+      this.swap(index, smallest); index = smallest;
+    }
+  }
+  private expire(now: number) {
+    while (this.nextExpiry <= now) {
+      const expired = this.deadlines[0];
+      const last = this.deadlines.pop()!;
+      this.entries.delete(expired.key);
+      if (this.deadlines.length) {
+        this.deadlines[0] = last; last.heapIndex = 0; this.down(0);
+      }
+    }
+  }
+  sweep() { this.expire(this.now()); }
+
   consume(key: string, budget: Budget): number {
     const now = this.now();
+    // Only expired roots are visited; overload cannot trigger scans of active buckets.
+    this.expire(now);
     let entry = this.entries.get(key);
-    if (entry && entry.expiresAt <= now) { this.entries.delete(key); entry = undefined; }
     if (!entry) {
-      if (this.entries.size >= this.maxEntries && now >= this.nextExpiry) this.sweep();
-      // Fail closed without evicting a live identity (which would reset its budget).
+      // Never evict a live identity to make room, which would reset its budget.
       if (this.entries.size >= this.maxEntries) return Math.max(1, Math.ceil((this.nextExpiry - now) / 1_000));
-      entry = { tokens: budget.capacity, updatedAt: now, expiresAt: now };
+      entry = { key, tokens: budget.capacity, updatedAt: now, expiresAt: now + budget.windowMs, heapIndex: this.deadlines.length };
       this.entries.set(key, entry);
+      this.deadlines.push(entry); this.up(entry.heapIndex);
     }
     entry.tokens = Math.min(budget.capacity, entry.tokens + Math.max(0, now - entry.updatedAt) * budget.capacity / budget.windowMs);
     entry.updatedAt = now;
     const allowed = entry.tokens >= 1;
     if (allowed) entry.tokens -= 1;
-    entry.expiresAt = now + (budget.capacity - entry.tokens) * budget.windowMs / budget.capacity;
-    this.nextExpiry = Math.min(this.nextExpiry, entry.expiresAt);
+    // Conservative idle TTL: even an empty bucket is full after this much inactivity.
+    // Refill continues normally before expiry; rejection does not spend another token.
+    const previousExpiry = entry.expiresAt;
+    entry.expiresAt = now + budget.windowMs;
+    if (entry.expiresAt < previousExpiry) this.up(entry.heapIndex);
+    else this.down(entry.heapIndex);
     return allowed ? 0 : Math.max(1, Math.ceil((1 - entry.tokens) * budget.windowMs / budget.capacity / 1_000));
   }
 }
