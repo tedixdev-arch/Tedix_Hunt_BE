@@ -112,3 +112,12 @@ Do not weaken validation to bypass this gate.
    native login, protected authorization and refresh rotation; check health and
    readiness. Record results without tokens/keys. D07 remains pending review,
    merge and verification; this PR does not establish deployed security.
+
+## Authentication abuse protection (QA-02 / A4)
+
+Configurable per-process token buckets cover public authentication/account-creation
+routes. Enforcement defaults **disabled**, including production. See
+[QA-02 evidence, provisional budgets and operator activation gate](docs/QA02_Authentication_Abuse_Protection.md)
+and `.env.example`. Confirm actual ingress/trusted proxies, instance counts,
+classroom traffic and approved limits before enabling; no production activation
+or automatic guest cleanup is included.

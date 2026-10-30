@@ -24,17 +24,29 @@ import { creatorTemplatesRouter } from './routes/creatorTemplates.js';
 import { adminTemplateEligibilityRouter } from './routes/adminTemplateEligibility.js';
 import { adminTemplateReviewsRouter } from './routes/adminTemplateReviews.js';
 
+import { readAbuseProtectionConfig, type AbuseProtectionConfig } from './config/abuseProtection.js';
+import { createAbuseProtection } from './middleware/abuseProtection.js';
+
 interface CreateAppOptions {
+  abuseProtection?: AbuseProtectionConfig;
+  abuseClock?: () => number;
   includeErrorProbe?: boolean;
 }
 
 export const createApp = (options: CreateAppOptions = {}) => {
   const app = express();
 
-  app.use(express.json());
+  const abuseConfig = options.abuseProtection ?? readAbuseProtectionConfig();
+  app.set('trust proxy', abuseConfig.trustedProxies.length ? abuseConfig.trustedProxies : false);
+  const abuse = createAbuseProtection(abuseConfig, options.abuseClock);
+  app.locals.stopAbuseProtection = abuse.stop;
   if (environment.webOrigin) {
     app.use(cors({ origin: environment.webOrigin }));
   }
+
+  app.use(abuse.middleware);
+  app.use(express.json());
+  app.use(abuse.accountMiddleware);
 
   app.get('/', (_request, response) => {
     response.status(200).json({
@@ -97,6 +109,10 @@ export const createApp = (options: CreateAppOptions = {}) => {
     response,
     _next,
   ) => {
+    if (abuseConfig.enabled && (error?.type === 'entity.parse.failed' || error?.type === 'entity.too.large')) {
+      response.status(error.type === 'entity.too.large' ? 413 : 400).json({ error: 'invalid_input' });
+      return;
+    }
     const message = error instanceof Error ? error.message : 'Unexpected error';
     const isPostgresError =
       typeof error === 'object' && error !== null && 'code' in error &&
