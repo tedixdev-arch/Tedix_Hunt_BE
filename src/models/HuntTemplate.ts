@@ -59,6 +59,8 @@ export interface ApprovedHuntTemplateVersion {
 }
 
 export interface CreatorOwnedHuntTemplateVersion extends LocalityBinding, Partial<LocalApprovalState> {
+  /** Universal GET projections only: exact retained C5 pin; null means never published. */
+  publishedVersion?: number | null;
   key: string;
   version: number;
   status: HuntTemplateStatus;
@@ -696,7 +698,7 @@ export const HuntTemplates = {
   ): Promise<CreatorOwnedHuntTemplateVersion[]> {
     // Ownership belongs in SQL so private rows never leave PostgreSQL for route-level filtering.
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, t.published_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
        ${localAuthorityJoins}
        JOIN LATERAL (
@@ -714,6 +716,7 @@ export const HuntTemplates = {
       const { key, version, status, origin, category, submitted_version, content, locality_id, locality_snapshot } = row;
       return ({
       ...(category === 'local' ? mapLocalApproval(row) : {}),
+      ...(category === 'universal' ? { publishedVersion: row.published_version } : {}),
       key, version, status, origin, ...(category ? { category } : {}),
       submittedVersion: submitted_version ?? null, content,
       localityId: locality_id ?? null, localitySnapshot: locality_snapshot ?? null,
@@ -725,7 +728,7 @@ export const HuntTemplates = {
     creatorUserId: string,
   ): Promise<CreatorOwnedHuntTemplateVersion | null> {
     const { rows } = await pool.query(
-      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
+      `SELECT t.key, t.status, t.origin, t.category, t.submitted_version, t.published_version, ${localAuthorityColumns}, latest.version, latest.content, latest.locality_id, latest.locality_snapshot
        FROM hunt_templates t
        ${localAuthorityJoins}
        JOIN LATERAL (
@@ -741,6 +744,7 @@ export const HuntTemplates = {
     return rows[0]
       ? {
           ...(rows[0].category === 'local' ? mapLocalApproval(rows[0]) : {}),
+          ...(rows[0].category === 'universal' ? { publishedVersion: rows[0].published_version } : {}),
           key: rows[0].key, version: rows[0].version, status: rows[0].status,
           origin: rows[0].origin, ...(rows[0].category ? { category: rows[0].category } : {}), submittedVersion: rows[0].submitted_version ?? null,
           content: rows[0].content,
