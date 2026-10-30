@@ -1,3 +1,4 @@
+import { allocateCustomExercises, validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
 import type { PoolClient } from 'pg';
 import type { Locality } from './Geography.js';
 import { pool } from '../lib/postgres.js';
@@ -379,9 +380,12 @@ export const HuntTemplates = {
         [template.id],
       );
       const nextVersion = (versionResult.rows[0]?.version ?? 0) + 1;
+      const customIssues = validateCustomExercises(content);
+      if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
       if (!isTemplateContent(content, key, nextVersion)) {
         throw new InvalidHuntTemplateContentError();
       }
+      content = allocateCustomExercises(content, key, nextVersion, versionResult.rows[0]?.content);
       if (template.category === 'local' && template.status === 'approved' && template.localApprovedVersion == null) {
         const evidence = await client.query(`SELECT v.version FROM hunt_template_versions v
           JOIN hunt_template_reviews r ON r.template_id=v.template_id AND r.version=v.version
@@ -424,8 +428,11 @@ export const HuntTemplates = {
     category?: HuntTemplateCategory,
     localityId?: unknown,
   ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
+    const customIssues = validateCustomExercises(content);
+    if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
     if ((category !== undefined && category !== 'universal' && category !== 'local')
       || !isTemplateContent(content, key, 1)) throw new InvalidHuntTemplateContentError();
+    content = allocateCustomExercises(content, key, 1);
     const client = await pool.connect();
     try {
       // Identity and immutable version 1 are one persistence operation: neither may exist alone.

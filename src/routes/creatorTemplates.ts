@@ -1,3 +1,4 @@
+import { validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
 import { copyPublishedUniversal, UniversalCopyForbiddenError, UniversalCopySourceNotFoundError, UniversalCopyStaleError } from '../models/PublishedUniversal.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
@@ -340,6 +341,8 @@ router.get('/:key', requireAuth, requireRole('creator'), async (req: AuthRequest
 router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, res, next) => {
   const key = normalizeTemplateKey(req.body?.key);
   const category = req.body?.category;
+  const details = validateCustomExercises(req.body?.content);
+  if (details.length) return res.status(400).json({ error: 'invalid_custom_exercises', details });
   if (!hasOnlyFields(req.body, ['key', 'content', 'category', 'localityId'])
     || (category !== undefined && category !== 'universal' && category !== 'local')
     || !key || !isTemplateContent(req.body?.content, key, 1)) {
@@ -364,6 +367,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     if (error instanceof HuntTemplateKeyConflictError) {
       return res.status(409).json({ error: 'template_key_conflict' });
@@ -422,6 +426,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
     if (error instanceof TemplateApprovalEvidenceError) return res.status(409).json({ error: 'template_approval_evidence_required' });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     // Missing and other-owned identities deliberately share one response.
@@ -491,6 +496,7 @@ router.post('/:key/submit', requireAuth, requireRole('creator'), async (req: Aut
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     // Unknown, other-owned, and platform keys are deliberately indistinguishable.
     if (error instanceof HuntTemplateNotFoundError) {

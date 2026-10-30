@@ -1,3 +1,4 @@
+import { projectHuntForReader } from '../domain/customExercises.js';
 import express from 'express';
 import { requireAnyRole, requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { Hunt, type HuntStatus, type UpdateHuntGeneralSetupInput } from '../models/Hunt.js';
@@ -148,7 +149,8 @@ const parseDraftUpdate = (body: unknown): UpdateHuntGeneralSetupInput | null => 
  *       404: { $ref: '#/components/responses/HuntNotFound' }
  */
 router.get('/', requireAuth, async (req: AuthRequest, res) => {
-  return res.json(await Hunt.findForUser(req.user!.id));
+  const hunts = await Hunt.findForUser(req.user!.id);
+  return res.json(hunts.map(hunt => projectHuntForReader(hunt, hunt.huntRoles.includes('organizer'))));
 });
 
 router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (req: AuthRequest, res) => {
@@ -175,7 +177,7 @@ router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (r
  *   get:
  *     tags: [Hunts]
  *     summary: Read a Hunt
- *     description: Hunt organizers and supervisors may read the Hunt.
+ *     description: Hunt organizers and supervisors may read the Hunt. A custom exercise snapshot is returned only to Hunt organizers; supervisor-only readers receive templateSnapshot=null until controlled gameplay delivery exists.
  *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     responses:
@@ -232,7 +234,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
     HuntRoles.hasRole(id, userId, 'supervisor'),
   ]);
   if (!organizer && !supervisor) return res.status(403).json({ error: 'forbidden' });
-  return res.json(hunt);
+  return res.json(projectHuntForReader(hunt, organizer));
 });
 
 router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
@@ -300,7 +302,7 @@ router.post('/:id/access', requireAuth, async (req: AuthRequest, res) => {
  *   post:
  *     tags: [Hunts]
  *     summary: Publish a draft Hunt (draft to published)
- *     description: Requires the Hunt-specific organizer role, draft state, and complete persisted General Setup, template snapshot, and supported pilot options.
+ *     description: Requires the Hunt-specific organizer role, draft state, and complete persisted General Setup, template snapshot, and supported pilot options. Hunts containing customExercises cannot be published until server gameplay delivery and answer validation are implemented (422 hunt_not_ready).
  *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     responses:

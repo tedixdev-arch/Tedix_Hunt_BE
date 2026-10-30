@@ -1,3 +1,4 @@
+import { validateCustomExercises, hasValidPersistedCustomOwnership } from './customExercises.js';
 import { checkpointGameplayTypes } from './checkpointGameplay.js';
 
 export type TemplateCategory = 'universal' | 'local';
@@ -98,7 +99,7 @@ export const isTemplateContent = (
   key: string,
   expectedVersion: number,
 ): value is TemplateContent => {
-  if (hasTemplateMetadata(value)) return false;
+  if (hasTemplateMetadata(value) || validateCustomExercises(value).length) return false;
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return false;
   if (!isObject(value) || value.key !== key || value.version !== expectedVersion) return false;
   if (typeof value.displayName !== 'string' || value.displayName.trim() === '') return false;
@@ -119,7 +120,7 @@ export const isTemplateContentV1 = (value: unknown, key: string): value is Templ
  * is optional. Counted gameplay remains complete for every category. Feature 6 never contributes to N.
  */
 export const isTemplateContentSubmittable = (value: unknown, category: TemplateCategory | null = null): value is TemplateContent => {
-  if (!isObject(value) || !isObject(value.configuration)) return false;
+  if (!isObject(value) || !isObject(value.configuration) || !hasValidPersistedCustomOwnership(value)) return false;
   const { normalCheckpointCount: count, checkpointPositions: positions } = value.configuration;
   if (!hasValidGeographicDraft(value.configuration)
     || !hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value))) return false;

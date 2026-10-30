@@ -1,3 +1,4 @@
+import { hasCustomExercises } from './customExercises.js';
 import type { IHunt } from '../models/Hunt.js';
 
 export interface HuntReadinessIssue {
@@ -38,6 +39,8 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
   if (!hasText(hunt.contactName)) add({ section: 'general', field: 'contactName', message: 'Add a local contact' });
 
   const snapshot = hunt.templateSnapshot;
+  if (hasCustomExercises(snapshot)) add({ section: 'template', field: 'templateSnapshot',
+    message: 'Custom exercise gameplay is not yet supported; this Hunt cannot be published' });
   const usableSnapshot = snapshot !== null && typeof snapshot === 'object'
     && hasText(snapshot.key) && Number.isInteger(snapshot.version) && (snapshot.version as number) >= 1
     && hasText(snapshot.displayName) && hasText(snapshot.theme)
