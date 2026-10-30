@@ -75,6 +75,78 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await admin.end();
   });
 
+  // Assert both HTTP projections against the same committed owner state.
+  const ownerProjection = async (key: string, expected: object, who = owner) => {
+    const detail = await request(app).get(`${root}/${key}`).set('Authorization', who.auth).expect(200);
+    const list = await request(app).get(root).set('Authorization', who.auth).expect(200);
+    expect(list.body.filter((item: { key: string }) => item.key === key)).toEqual([detail.body]);
+    expect(detail.body).toMatchObject(expected);
+    return detail.body;
+  };
+
+  it('F7-BE-01 distinguishes no publication and retains Local/legacy projections', async () => {
+    const universal = await create('universal');
+    expect(await ownerProjection(universal.key, { category: 'universal', publishedVersion: null, version: 1 }))
+      .not.toHaveProperty('localApproval');
+    await post(`${root}/${universal.key}/submit`, { version: 1 }).expect(200);
+    await ownerProjection(universal.key, { status: 'submitted', submittedVersion: 1, publishedVersion: null });
+    await post(`/api/admin/templates/review/${universal.key}/request-changes`, { version: 1 }, reviewer).expect(200);
+    await ownerProjection(universal.key, { status: 'changes_requested', publishedVersion: null });
+
+    const local = await create('local');
+    const localBefore = await ownerProjection(local.key, {
+      localApprovedVersion: null, localApproval: { version: null, authority: 'none' }, localSuspension: null,
+    });
+    expect(localBefore).not.toHaveProperty('publishedVersion');
+    await post(`${root}/${local.key}/submit`, { version: 1 }).expect(200);
+    await post(`/api/admin/templates/review/${local.key}/approve`, { version: 1 }, reviewer).expect(200);
+    expect(await ownerProjection(local.key, {
+      localApprovedVersion: 1,
+      localApproval: { version: 1, authority: 'approved', independentEvidence: true, localityBound: true },
+      localSuspension: null,
+    })).not.toHaveProperty('publishedVersion');
+    await post(`${root}/${local.key}/versions`, { content: snapshot(local.key, 2, true) }).expect(201);
+    expect(await ownerProjection(local.key, { version: 2, status: 'draft', localApprovedVersion: 1 }))
+      .not.toHaveProperty('publishedVersion');
+
+    const legacy = await create();
+    await post(`${root}/${legacy.key}/submit`, { version: 1 }).expect(200);
+    await post(`/api/admin/templates/review/${legacy.key}/approve`, {}, reviewer).expect(200);
+    const projection = await ownerProjection(legacy.key, { status: 'approved', submittedVersion: 1 });
+    for (const field of ['category', 'publishedVersion', 'localApproval', 'localApprovedVersion', 'localSuspension']) {
+      expect(projection).not.toHaveProperty(field);
+    }
+    expect((await db.query('SELECT category,published_version FROM hunt_templates WHERE key=$1', [legacy.key])).rows[0])
+      .toEqual({ category: null, published_version: null });
+  });
+
+  it('F7-BE-01 denies unauthorized/revoked readers and hides another owner publication', async () => {
+    const who = await actor(['creator']);
+    const { key } = await create('universal', false, who);
+    await post(`${root}/${key}/submit`, { version: 1 }, who).expect(200);
+    await post(`/api/admin/templates/review/${key}/approve`, { version: 1 }, reviewer).expect(200);
+    await ownerProjection(key, { publishedVersion: 1 }, who);
+    const privatePath = `${root}/${key}`;
+    const missing = await request(app).get(`${root}/absent-${randomUUID()}`).set('Authorization', other.auth).expect(404);
+    const hidden = await request(app).get(privatePath).set('Authorization', other.auth).expect(404);
+    expect(hidden.body).toEqual(missing.body);
+    const otherList = await request(app).get(root).set('Authorization', other.auth).expect(200);
+    expect(otherList.body.some((item: { key: string }) => item.key === key)).toBe(false);
+    for (const path of [root, privatePath]) await request(app).get(path).expect(401);
+    const denied: [Actor, number][] = [];
+    for (const roles of [[], ['participant'], ['admin'], ['organizer']]) denied.push([await actor(roles), 403]);
+    denied.push([await actor(['creator'], { guest: true }), 403]);
+    denied.push([await actor(['creator'], { status: 'blocked' }), 401]);
+    denied.push([await actor(['creator'], { status: 'retired' }), 401]);
+    // Reuse a previously successful owner's JWT after persisted capability revocation.
+    await db.query('DELETE FROM user_roles WHERE user_id=$1', [who.id]);
+    denied.push([who, 403]);
+    for (const [reader, status] of denied) for (const path of [root, privatePath]) {
+      const response = await request(app).get(path).set('Authorization', reader.auth).expect(status);
+      expect(response.body).not.toHaveProperty('publishedVersion');
+    }
+  });
+
   it('C5 keeps v1 authoritative through draft, review and changes, then publishes exact v3 without changing existing Locals', async () => {
     const source = await create('universal');
     const key = source.key;
@@ -87,6 +159,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
       key: `c5-local-${randomUUID()}`, publishedReference: { templateId: id, version },
     }, other);
     const published = async (version: number) => {
+      await ownerProjection(key, { publishedVersion: version });
       const detail = await get(`${library}/${key}?version=999`).expect(200);
       expect(detail.body.publishedReference).toEqual({ templateId: id, version });
       const list = await get(library).expect(200);
@@ -94,9 +167,11 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
         .toEqual([expect.objectContaining({ publishedReference: { templateId: id, version } })]);
       return detail.body.content;
     };
+    await ownerProjection(key, { publishedVersion: null, version: 1, status: 'draft' });
     await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
     await decide('approve', 1, owner).expect(403);
     await decide('approve', 1).expect(200);
+    await ownerProjection(key, { publishedVersion: 1, version: 1, status: 'approved', submittedVersion: 1 });
     const localResponse = await copy(1).expect(201);
     const local = (await db.query('SELECT * FROM hunt_templates WHERE key=$1', [localResponse.body.key])).rows[0];
     const localVersions = (await db.query('SELECT * FROM hunt_template_versions WHERE template_id=$1', [local.id])).rows;
@@ -106,6 +181,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await db.query('DELETE FROM user_roles WHERE user_id=$1', [revoked.id]);
     await post(`${root}/${key}/versions`, { content: snapshot(key, 2) }, revoked).expect(403);
     await post(`${root}/${key}/versions`, { content: { ...snapshot(key, 2), displayName: 'Candidate v2' } }).expect(201);
+    await ownerProjection(key, { publishedVersion: 1, version: 2, status: 'draft', submittedVersion: null });
     expect(await published(1)).toEqual(source.content);
     await request(app).delete(`${root}/${key}`).set('Authorization', owner.auth).expect(409);
     await post(`${root}/${key}/submit`, { version: 1 }).expect(409);
@@ -117,6 +193,7 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
     await post(`/api/admin/templates/review/${key}/approve`, { version: '2' }, reviewer).expect(400);
     await post(`${root}/${key}/versions`, { content: snapshot(key, 3) }).expect(409);
     await decide('request-changes', 2).expect(200);
+    await ownerProjection(key, { publishedVersion: 1, version: 2, status: 'changes_requested', submittedVersion: 2 });
     expect(await published(1)).toEqual(source.content);
     await post(`${root}/${key}/submit`, { version: 2 }).expect(409);
     await decide('approve', 2).expect(409);
@@ -137,7 +214,9 @@ suite('C2 scratch authoring against disposable PostgreSQL', () => {
       expect(await published(1)).toEqual(source.content);
       expect((await model.HuntTemplates.findByKey(key))!.status).toBe('submitted');
     } finally { await db.query('DROP TRIGGER c5_fail_review ON hunt_template_reviews; DROP FUNCTION c5_fail_review()'); }
+    await ownerProjection(key, { publishedVersion: 1, version: 4, status: 'submitted', submittedVersion: 3 });
     await decide('approve', 3).expect(200);
+    await ownerProjection(key, { publishedVersion: 3, version: 4, status: 'approved', submittedVersion: 3 });
     expect(await published(3)).toMatchObject({ version: 3, displayName: 'Replacement v3' });
     expect((await copy(3).expect(201)).body.content).toMatchObject({ version: 1, displayName: 'Replacement v3' });
     await copy(1).expect(409);

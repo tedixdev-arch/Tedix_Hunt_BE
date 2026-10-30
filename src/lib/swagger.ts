@@ -343,8 +343,13 @@ const options: swaggerJsdoc.Options = {
         },
         CreatorOwnedTemplate: {
           type: 'object',
+          description: 'Private owner GET projection. Universal publishedVersion is always present (integer or null); Local and legacy omit it. Missing on an older server means unsupported/unavailable, not no publication.',
           required: ['key', 'version', 'status', 'origin', 'submittedVersion', 'content', 'localityId', 'localitySnapshot'],
           properties: {
+            publishedVersion: {
+              type: 'integer', minimum: 1, nullable: true, readOnly: true,
+              description: 'Universal owner GETs only: exact persisted retained published_version, independent of candidate status/version/submittedVersion. Null means no publication; omitted means not applicable or unsupported by an older server. Never inferred from latest.',
+            },
             localApprovedVersion: { type: 'integer', nullable: true, description: 'Local only. Never inferred from latest.' },
             localApproval: { $ref: '#/components/schemas/LocalApproval' },
             localSuspension: { $ref: '#/components/schemas/LocalSuspension' },

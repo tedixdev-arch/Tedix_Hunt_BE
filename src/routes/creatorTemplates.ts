@@ -226,7 +226,7 @@ router.post('/starters/signal-overload-cluj-napoca', requireAuth, requireRole('c
  *   get:
  *     tags: [Creator Templates]
  *     summary: List the authenticated Creator's own authoring Templates
- *     description: Owner-scoped authoring read across all lifecycle states; unlike the approved discovery catalog, platform and other Creators' Templates are excluded.
+ *     description: Owner-scoped authoring read across all lifecycle states; unlike the approved discovery catalog, platform and other Creators' Templates are excluded. Universal records include publishedVersion, the exact retained publication pin or null when never published; candidate transitions do not clear it. Local and legacy records omit this field.
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
@@ -283,7 +283,7 @@ router.delete('/:key', requireAuth, requireRole('creator'), async (req: AuthRequ
  *   get:
  *     tags: [Creator Templates]
  *     summary: Read one of the authenticated Creator's own authoring Templates
- *     description: Returns the latest persisted version in any lifecycle state. Missing and other-owned keys are indistinguishable.
+ *     description: Returns the latest persisted version in any lifecycle state. Missing and other-owned keys are indistinguishable. Universal publishedVersion is the exact retained publication pin or null, separately from the latest candidate and submittedVersion. Local and legacy records omit it.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: path, name: key, required: true, schema: { type: string } }

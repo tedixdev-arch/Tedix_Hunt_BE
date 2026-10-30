@@ -66,3 +66,19 @@ Coverage includes:
 ## Remaining G4/D10 decisions
 
 G4 still owns canonical locality/geographic identity, route evidence, validity, safety and Local eligibility. D10 still owns eligible Local Organizer selection and controlled activation. Classified catalog/geography/direct Hunt-selection gates remain closed. No Local publication to Organizer selection, automatic Universal creation/extraction, new category, revision propagation, FE, Participant runtime, withdrawal workflow, merge or deployment is included.
+
+## F7-BE-01 private publication projection
+
+The existing owner-scoped `GET /api/creator/templates` and
+`GET /api/creator/templates/{key}` now expose `publishedVersion` for Universal
+Templates directly from `hunt_templates.published_version`. An integer is the
+exact retained publication, including through draft, submitted and
+changes_requested candidates; null explicitly means no publication. The latest
+candidate `version`, `content` and `submittedVersion` retain their meanings.
+Local and legacy records omit the new field. A missing field on a Universal
+from older/unsupported data must remain unavailable, never be interpreted as null
+or inferred from candidate state. Mutation response envelopes are unchanged.
+
+See [F7-BE-01 contract and verification](F7_BE_01_Retained_Universal_Publication.md)
+for examples, security evidence and limits. C5 persistence, approval, copying,
+revision and deletion behavior is unchanged; no migration is introduced.
