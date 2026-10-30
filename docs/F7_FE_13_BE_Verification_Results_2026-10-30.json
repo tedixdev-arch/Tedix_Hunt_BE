@@ -1,0 +1,2103 @@
+{
+  "task": "F7-FE-13 BE verification R1–R5",
+  "date": "2026-10-30",
+  "timezone": "Europe/Bucharest",
+  "backendRevision": "0729e83bd6471fdb8dd97553dcdb30ab730bf5c6",
+  "level": "Automated source/unit, disposable PostgreSQL and Supertest fixtures; no genuine independent-account or FE→BE acceptance",
+  "environment": {
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "postgresql": "17.11",
+    "container": "tedix-f7fe13-test",
+    "cleanup": "Container and anonymous volume removed; no per-suite databases remained"
+  },
+  "start": "2026-10-30T18:22:00.906Z",
+  "end": "2026-10-30T18:23:01.598Z",
+  "totals": {
+    "files": 62,
+    "passed": 1369,
+    "failed": 0,
+    "skipped": 0
+  },
+  "requests": {
+    "R1": {
+      "automated": "PASS",
+      "realIntegration": "BLOCKED",
+      "reason": "Approved independent authenticated accounts and integrated environment unavailable"
+    },
+    "R2": {
+      "automated": "PASS",
+      "realIntegration": "BLOCKED",
+      "reason": "Approved independent authenticated accounts and integrated environment unavailable"
+    },
+    "R3": {
+      "automated": "PASS",
+      "realIntegration": "BLOCKED",
+      "reason": "Approved independent authenticated accounts and integrated environment unavailable"
+    },
+    "R4": {
+      "automated": "PASS",
+      "realIntegration": "BLOCKED",
+      "reason": "Approved independent authenticated accounts and integrated environment unavailable"
+    },
+    "R5": {
+      "automated": "PASS",
+      "realIntegration": "BLOCKED",
+      "reason": "Approved independent authenticated accounts and integrated environment unavailable"
+    }
+  },
+  "files": [
+    {
+      "path": "src/app.test.ts",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/config/environment.test.ts",
+      "status": "passed",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/db/geography.integration.test.ts",
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "Country/Locality foundation returns the initial country reference and distinct active matches without creating rows",
+          "status": "passed"
+        },
+        {
+          "name": "Country/Locality foundation resolves the exact UUID including inactive catalog entries",
+          "status": "passed"
+        },
+        {
+          "name": "Country/Locality foundation authorizes every endpoint before validating or reading geography",
+          "status": "passed"
+        },
+        {
+          "name": "Country/Locality foundation rejects unbounded, malformed, unsupported country and external-provider requests",
+          "status": "passed"
+        },
+        {
+          "name": "Country/Locality foundation enforces ISO membership, nonblank bounded fields, finite coordinates, country FK and paired unique provider identity",
+          "status": "passed"
+        },
+        {
+          "name": "Country/Locality foundation matches fresh-schema constraints and indexes with the upgraded schema",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/localTemplateApproval.integration.test.ts",
+      "status": "passed",
+      "passed": 61,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL matches fresh schema constraints and Local authority functions after upgrade/rerun",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL preserves v1 through replacement v2, changes requested, v3 and switches only at independent approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL blocks historical evidence-free revision, retains exact pin and permits evidence-free protective suspension",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL blocks historical self revision, retains exact pin and permits evidence-free protective suspension",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL lazily captures evidence-backed unbound authority and retains its immutable unbound artifact",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL surfaces historical missing authority explicitly without choosing latest or mutating history",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL surfaces historical unresolvable authority explicitly without choosing latest or mutating history",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects unbound new submissions and old pending approvals, but still requests changes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects material active changes at both submission and approval without writes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects material country_code changes at both submission and approval without writes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects material latitude changes at both submission and approval without writes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects material longitude changes at both submission and approval without writes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL permits descriptive name drift before submit and review while preserving saved JSON",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL permits descriptive administrative_context drift before submit and review while preserving saved JSON",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL permits descriptive countryDisplayName drift before submit and review while preserving saved JSON",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL preserves one immutable suspension during replacement approval, reactivation and deletion attempts",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL validates suspension input, stale authority, category gates and authoritative actor access",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL retires a suspension-only actor, preserving the restrictive audit reference",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects SQL pointer clearing, regression, cross identity, category and immutable audit edits",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL enforces composite version ownership and refuses regression to an independently approved older version",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL prevents inserting new historical approvals and deleting evidence-less historical authority through SQL",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects newly invented approved evidence before any normal promotion",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL defers exact independent missing evidence checks and rolls back SQL approval completely",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL defers exact independent self evidence checks and rolls back SQL approval completely",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL defers exact independent changes evidence checks and rolls back SQL approval completely",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL defers exact independent nonadmin evidence checks and rolls back SQL approval completely",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rejects insertion of approved evidence while the candidate is merely submitted",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL keeps an initial changes-requested candidate without approval authority",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL serializes real concurrent approve-approve transactions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL serializes real concurrent approve-changes transactions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL serializes real concurrent approve-suspend transactions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL serializes real concurrent suspend-suspend transactions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL serializes real concurrent save-submit transactions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL preserves exact authority and suspension with deterministic suspension-first=true",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL preserves exact authority and suspension with deterministic suspension-first=false",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks active after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks latitude after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks longitude after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks country_code after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks name after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks administrative_context after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rechecks countryDisplayName after waiting for a catalog writer during approval",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'active' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'latitude' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'longitude' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'country_code' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'name' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'administrative_context' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'submit' commit against 'countryDisplayName' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'active' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'latitude' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'longitude' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'country_code' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'name' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'administrative_context' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL holds catalog shared locks through 'approve' commit against 'countryDisplayName' writer",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rolls back injected review failure with intact authority and reusable pool",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rolls back injected authority failure with intact authority and reusable pool",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rolls back injected audit failure with intact authority and reusable pool",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL rolls back injected deferred failure with intact authority and reusable pool",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-5 Local approval continuity against disposable PostgreSQL keeps classified Organizer gates and historical Hunt snapshots unchanged",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/localTemplateAuthorityGuards.integration.test.ts",
+      "status": "passed",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects a compatibility capture followed by approved candidate pin drift",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rechecks an established pointer when the approved pin changes without changing the pointer",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects fabricated same-transaction historical evidence inside a savepoint",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions cannot commit an independent non-Admin review laundered through a subtransaction as historical evidence",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions refuses old committed-review promotion after candidate changes to draft",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions refuses old committed-review promotion after candidate changes to submitted",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions refuses an older historical approval even after attempts to rewrite its compatibility pin",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions refuses regression after a legitimate newer independent approval",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions refuses capture of self-reviewed historical evidence",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects self new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects nonadmin new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects missing-role new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects blocked new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects retired new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects guest new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects missing-review new approval evidence at COMMIT after multiple identity updates",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects a nonexistent reviewer at its FK and rolls back the pending pointer",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rechecks Admin membership removed after an initially valid review insertion",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects an intermediate approval followed by final draft candidate at COMMIT",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects an intermediate approval followed by final submitted candidate at COMMIT",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rejects an intermediate approval followed by final changes_requested candidate at COMMIT",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions cannot insert historical evidence before promotion in a ordinary transaction",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions cannot insert historical evidence before promotion in a savepoint transaction",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions rolls back at COMMIT when a review insertion was undone at a savepoint",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions independently validates final authority for capture-final-check even if the immediate guard fails",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions independently validates final authority for established even if the immediate guard fails",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions accepts real compatibility capture after prior metadata updates and with a retired historical reviewer",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions accepts valid approval with savepoints and multiple identity writes when the final candidate is exact",
+          "status": "passed"
+        },
+        {
+          "name": "Local approval authority adversarial SQL transactions does not withdraw retained authority when its original Admin later loses capability",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/localityProposals.integration.test.ts",
+      "status": "passed",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "Manual locality proposals against PostgreSQL submits pending facts owned by the Creator and restricts mine to its owner",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL rejects missing, malformed, oversized, unsupported and restricted-source input",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL denies non-Creators, guests and revoked/blocked identities despite forged role claims",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL validates decisions and prohibits self-review",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL approves exactly once, exposes a reusable Locality, and freezes decision history",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL rejects without creating a locality and preserves pending submitted facts",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL blocks normalized names in the same normalized context and country, including inactive records",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL allows identical names in different administrative contexts within one country",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL serializes identical and conflicting concurrent decisions on one proposal",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL serializes different proposals with the same normalized name and context under the country lock",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL rolls back Locality creation when recording the decision fails",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL enforces proposal bounds, decision/FK consistency and history dependencies in PostgreSQL",
+          "status": "passed"
+        },
+        {
+          "name": "Manual locality proposals against PostgreSQL preserves all Template and Hunt history and matches fresh schema constraints/indexes/triggers",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/migrate.test.ts",
+      "status": "passed",
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "PostgreSQL migrations creates migration history and applies the non-destructive baseline",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations round-trips the immutable platform Signal v1 payload through PostgreSQL JSONB",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations round-trips a Creator Signal starter through editing, submission and approval without changing canonical content or Hunts",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations reads only approved Templates and their latest versions for the catalog",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations snapshots the approved latest persisted Template version into each Hunt",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations preserves FinishPoint and a 5 m target through approval and Hunt snapshotting",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations projects only the pinned approved geography, tracks approval changes and leaves selection/content intact",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations uses latest approved platform geography and preserves legacy omissions without Signal fallback",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations owner-scopes Creator reads and returns each latest version across lifecycle states",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations creates sequential immutable Creator versions without changing an existing Hunt snapshot",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations persists Template identities and immutable version content with provenance",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations runs self-registration through approval and normal Creator login with the original password",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations preserves an established identity password through application and approval",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations refuses public credential establishment on an active passwordless identity",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations keeps the real Admin-provisioned Creator activation token flow one-time",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations allows a retired email to be cleared and immediately reused despite a claimed fake address",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations enforces professional activation token purpose and active-token uniqueness",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations defaults Organizer applications to pending and enforces its enum constraints",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations is idempotent and does not execute an already-applied migration again",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations enforces reward constraints, uniqueness, and Hunt cascade deletion",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations enforces Hunt records, same-Hunt team membership, roles, and cascades",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations enforces organization membership uniqueness, foreign keys, and cascades",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations does not record a failed migration",
+          "status": "passed"
+        },
+        {
+          "name": "PostgreSQL migrations fails when applied migration history is missing from the repository",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/organizerLocalTemplate.integration.test.ts",
+      "status": "passed",
+      "passed": 89,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL discovers exact eligible authority, safe preview and server snapshot while preserving all settings",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL keeps the old approved locality through draft/submission/changes-requested then switches only on approval",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL excludes first draft candidates",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL excludes first submitted candidates",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL excludes first changes_requested candidates",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL retains suspension after replacement approval and locality reactivation",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical independent without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical unbound without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical evidenceless without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical self without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical missing without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL resolves historical unresolvable without capturing or rewriting authority",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL handles latitude catalog drift and retains saved labels",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL handles longitude catalog drift and retains saved labels",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL handles country_code catalog drift and retains saved labels",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL handles active catalog drift and retains saved labels",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL handles name catalog drift and retains saved labels",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL filters exact country/UUID and rejects proposal IDs and cross-country inference",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden templateSnapshot",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden content",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden key",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden templateVersion",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden localitySnapshot",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects forged or forbidden name",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery foo=x",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery limit=0",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery limit=51",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery limit=1.5",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery cursor=bad",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery version=1",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery countryCode=ro",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed discovery localityId=bad",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects invalid detail version 0",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects invalid detail version -1",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects invalid detail version 1.1",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects invalid detail version 2147483648",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects invalid detail version word",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL accepts UUID case variants and rejects unsupported body versions without changing the draft",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL paginates opaque filter-scoped cursors without duplicates",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies participant before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies creator before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies admin before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies guest before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies blocked before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies retired before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL denies revoked before artifact lookup",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL permits multi-role and unrelated Creator templates, denies other Hunt/Supervisor and organization-only access",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL protects C7 from legacy replacement, allows settings and explicit whole-source replacement",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL keeps classified local keys out of every legacy path",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL keeps classified universal keys out of every legacy path",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects reselection of published and preserves history after approval/suspension/catalog changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects reselection of active and preserves history after approval/suspension/catalog changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects reselection of paused and preserves history after approval/suspension/catalog changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects reselection of finished and preserves history after approval/suspension/catalog changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects reselection of cancelled and preserves history after approval/suspension/catalog changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first approval serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first suspension serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first deactivation serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first correction serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first rename serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first approval serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first suspension serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first deactivation serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first correction serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first rename serializes exact source and returns prescribed conflicts",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first authorization block protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first authorization retire protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first authorization capability protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL selection-first authorization hunt-role protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first authorization block protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first authorization retire protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first authorization capability protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL writer-first authorization hunt-role protects or rechecks persisted rows",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL serializes selection-first with concurrent selection on the same Hunt",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL serializes selection-first with concurrent legacy on the same Hunt",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL serializes selection-first with concurrent publish on the same Hunt",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL legacy-first PATCH commits before explicit Local selection replaces the whole source",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL publish-first forces selection to recheck draft after waiting",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL locks actor before Template for save against account blocking",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL locks actor before Template for approve against account blocking",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL locks actor before Template for request-changes against account blocking",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL locks actor before Template for suspend against account blocking",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rolls back complete tuple on injected deferred=false database failure and reuses pool",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rolls back complete tuple on injected deferred=true database failure and reuses pool",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL matches migration/rerun/fresh schema, rejects partial/forged SQL sources and restricts source deletion",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL does not apply live eligibility as a new publish/start gate and preserves Participant projection",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL returns an empty active catalog and preserves a selected draft through later source changes",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL rejects malformed immutable locality pairs at the database boundary",
+          "status": "passed"
+        },
+        {
+          "name": "C7 Organizer Local selection against disposable PostgreSQL retains exact saved authority when historical reviewer and Creator are retired",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/templateClassification.integration.test.ts",
+      "status": "passed",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility preserves all legacy bytes, pins, reviews, Signal and Hunt snapshots through migration and rerun",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility binds category on identity and versions and freezes classified owner and content",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility retains exact approved Universal lineage while Local owner/content/history stay independent",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility keeps approved universal out of catalog, geography and direct-key Hunt selection",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility keeps approved local out of catalog, geography and direct-key Hunt selection",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility retires attributed accounts without altering classified ownership, lineage or saved Hunts",
+          "status": "passed"
+        },
+        {
+          "name": "C1 PostgreSQL classification and legacy compatibility accepts a fresh schema baseline with equivalent classification constraints",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/templateLocalityBinding.integration.test.ts",
+      "status": "passed",
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL matches fresh-schema columns, constraints and history-protection functions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL supports unbound scratch creates and exact inheritance, refresh, change and clear",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL inherits inactive facts without catalog refresh, but rejects explicit inactive selection",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rejects malformed, absent, inactive and forbidden metadata without writes",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL does not bind proposal IDs or associate on approval; binds the explicitly returned catalog ID",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL returns saved pairs in Creator save/list/detail/submit and pinned Admin review responses",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL preserves persisted capability checks, nondisclosure, category and lifecycle restrictions",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL enforces SQL pair, shape/type/bounds, FK, category, immutability and deletion protections",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rolls back injected failure after identity and reuses the pooled connection",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rolls back injected failure after version and reuses the pooled connection",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rolls back injected failure after lifecycle and reuses the pooled connection",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rolls back injected failure after commit and reuses the pooled connection",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL rolls back a real deferred PostgreSQL commit failure",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL serializes concurrent complete saves and rejects stale content without a duplicate or mixed pair",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL serializes save versus submit on the Template identity",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL locks Country then Locality against correction and reads coherent committed facts",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL locks Country then Locality against deactivation and reads coherent committed facts",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL locks Country then Locality against country rename and reads coherent committed facts",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL locks Country then Locality against membership change and reads coherent committed facts",
+          "status": "passed"
+        },
+        {
+          "name": "C6b-4 version locality binding against disposable PostgreSQL holds shared catalog locks through commit so corrections wait for an intact old snapshot",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/db/templatePublication.integration.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C5 publication migration on existing C4 data backfills only evidence-backed approved Universals and preserves every historical field",
+          "status": "passed"
+        },
+        {
+          "name": "C5 publication migration on existing C4 data keeps fresh-schema publication constraints equivalent to migrated databases",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/domain/creatorTemplates.test.ts",
+      "status": "passed",
+      "passed": 100,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/huntAccess.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/huntReadiness.test.ts",
+      "status": "passed",
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/huntTemplates.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/middleware/abuseProtection.integration.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "QA-02 enabled protection against disposable PostgreSQL persists 40 shared-IP guests, rejects at the configured boundary and recovers",
+          "status": "passed"
+        },
+        {
+          "name": "QA-02 enabled protection against disposable PostgreSQL preserves registration, all four logins, rotation/replay, authorization and logout",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/middleware/abuseProtection.test.ts",
+      "status": "passed",
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/middleware/auth.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/AdminProvisioning.test.ts",
+      "status": "passed",
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/ApplicationCredentials.integration.test.ts",
+      "status": "passed",
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'invited Admin' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'Organizer' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'Creator' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'mixed roles' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'expired invitation' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'blocked' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'retired' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rejects 'guest' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: registers a new pending applicant without capability or invitation",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: preserves established passwords, roles, invitations and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: rolls back new identity when application insert fails",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: concurrent normalized registrations share one identity and preserve its first password",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: admin activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: admin activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: organizer activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: organizer activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: creator activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL creator: creator activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'invited Admin' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'Organizer' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'Creator' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'mixed roles' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'expired invitation' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'blocked' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'retired' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rejects 'guest' with safe HTTP conflict and zero changes",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: registers a new pending applicant without capability or invitation",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: preserves established passwords, roles, invitations and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: rolls back new identity when application insert fails",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: concurrent normalized registrations share one identity and preserve its first password",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: admin activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: admin activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: organizer activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: organizer activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: creator activation racing with application first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL organizer: creator activation racing with activation first preserves ownership",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL legitimate admin activation survives rejected applications exactly once",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL legitimate organizer activation survives rejected applications exactly once",
+          "status": "passed"
+        },
+        {
+          "name": "public application credentials against PostgreSQL legitimate creator activation survives rejected applications exactly once",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/models/CreatorApplication.test.ts",
+      "status": "passed",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/Hunt.test.ts",
+      "status": "passed",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/HuntContext.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/HuntTemplate.integration.test.ts",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "Creator deletion against real PostgreSQL commits deletion of unused draft and every version",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL commits deletion of unused changes_requested and every version",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL preserves submitted and its versions",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL preserves approved and its versions",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL rejects another owner without changing persisted data",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL preserves a Hunt depending on the Template through its key",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL preserves a Hunt depending on the Template through its snapshot",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL rolls back a protected version FK failure (deferred=false)",
+          "status": "passed"
+        },
+        {
+          "name": "Creator deletion against real PostgreSQL rolls back a protected version FK failure (deferred=true)",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/models/HuntTemplate.test.ts",
+      "status": "passed",
+      "passed": 73,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/Organization.test.ts",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/OrganizerApplication.test.ts",
+      "status": "passed",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/ProfessionalProvisioning.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/RefreshToken.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/TedixAuthentication.integration.test.ts",
+      "status": "passed",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'arbitrary ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'unknown ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'existing linked ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'multi-role linked identity' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'blocked linked account' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL login: rejects 'retired linked account' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'arbitrary ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'unknown ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'existing linked ID' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'multi-role linked identity' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'blocked linked account' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL register: rejects 'retired linked account' and preserves all identities, roles and sessions",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL preserves native linked-account logins, refresh rotation, logout and session invalidation",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL preserves blocked restrictions on native login, refresh and access",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL preserves retired restrictions on native login, refresh and access",
+          "status": "passed"
+        },
+        {
+          "name": "unverified Tedix authentication against PostgreSQL preserves native registration and guest authentication without creating external links",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/models/User.test.ts",
+      "status": "passed",
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/UserDeletion.integration.test.ts",
+      "status": "passed",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "account deletion against real PostgreSQL retires an applicant with only a pending Creator application",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires an applicant with only a approved Creator application",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires an applicant with only a rejected Creator application",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires a reviewer with only review attribution",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires isolated template provenance, including platform content",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires isolated version provenance, including platform content",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires multiple Creator dependencies for an active account and tolerates repeated removal",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL retires multiple Creator dependencies for an blocked account and tolerates repeated removal",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL preserves Organizer/Hunt history with Creator dependencies=false",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL preserves Organizer/Hunt history with Creator dependencies=true",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL hard-deletes a dependency-free active account and onboarding artifacts",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL hard-deletes a dependency-free blocked account and onboarding artifacts",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL protects the last active Admin before considering Creator dependencies",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL rolls back every credential change on failed retired commit",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL rolls back every credential change on failed deleted commit",
+          "status": "passed"
+        },
+        {
+          "name": "account deletion against real PostgreSQL returns HTTP success for retirement/deletion and preserves authorization and retired-state restrictions",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/models/UserRole.test.ts",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/models/UserRoleAdmin.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/adminTemplateReviews.integration.test.ts",
+      "status": "passed",
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "independent Template review against PostgreSQL denies 'Creator-only' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'Participant-only' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'Organizer-only' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'guest with Admin row' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'legacy Admin without capability' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'blocked Admin' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies 'retired Admin' before decision and leaves no partial records",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL denies missing/invalid authentication and rechecks revoked capability with the same token",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL Admin-only approves another Creator and persists exact-version evidence",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL combined-role Admin approves another Creator and persists exact-version evidence",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rejects combined-role self-approval atomically including spoofed actor/version inputs",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL records request-changes provenance (self=false), with no route back to approval",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL records request-changes provenance (self=true), with no route back to approval",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rejects stale draft decisions with no partial record",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rejects stale approved decisions with no partial record",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rejects stale changes_requested decisions with no partial record",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL returns existing not_found errors for unknown and platform keys",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL fails closed for a missing submitted pin in legacy/corrupt state",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL cannot replace the submitted pin through stale save/resubmit attempts",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL fails closed when the pinned version cannot be resolved in corrupt legacy data",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rejects a pin to a missing version at the database boundary without partial changes",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL serializes concurrent approval versus approve into exactly one decision",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL serializes concurrent approval versus request-changes into exactly one decision",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL rolls back the status transition when provenance insertion fails",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL retains approve reviewer attribution after controlled account retirement",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL retains request-changes reviewer attribution after controlled account retirement",
+          "status": "passed"
+        },
+        {
+          "name": "independent Template review against PostgreSQL preserves existing approved Templates, versions and Hunt snapshots through migration and reviews",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/routes/adminTemplateReviews.test.ts",
+      "status": "passed",
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/adminUsers.test.ts",
+      "status": "passed",
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/auth.test.ts",
+      "status": "passed",
+      "passed": 168,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/creatorApplications.test.ts",
+      "status": "passed",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/creatorTemplates.integration.test.ts",
+      "status": "passed",
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL F7-BE-01 distinguishes no publication and retains Local/legacy projections",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL F7-BE-01 denies unauthorized/revoked readers and hides another owner publication",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C5 keeps v1 authoritative through draft, review and changes, then publishes exact v3 without changing existing Locals",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C5 supports Local corrections without relaxing geography or enabling Organizer selection",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C5 serializes copy and republication on the C4 source identity (copy first: true)",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C5 serializes copy and republication on the C4 source identity (copy first: false)",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C4 copies exact published snapshots with independent ownership, immutable lineage and Local review gates",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL C4 preserves optional geography as draft, rejects nonpublished sources, serializes keys and rolls back insert failures",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL creates, saves, pins, reviews and isolates universal",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL creates, saves, pins, reviews and isolates local",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL submits Universal counted gameplay without route geography but keeps gameplay completeness",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL rejects incomplete Local missing-contract without pinning",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL rejects incomplete Local missing-positions without pinning",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL rejects incomplete Local missing-finish without pinning",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL rejects incomplete Local missing-gameplay without pinning",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL rejects metadata injection, invalid category, malformed geography and unsupported gameplay",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL uses persisted active Creator capabilities rather than JWT or primary-role claims",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL keeps omitted-category scratch and Signal starters unclassified",
+          "status": "passed"
+        },
+        {
+          "name": "C2 scratch authoring against disposable PostgreSQL publishes only independently approved Universals, once, at the exact pin",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/routes/creatorTemplates.test.ts",
+      "status": "passed",
+      "passed": 116,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/health.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/huntRewards.test.ts",
+      "status": "passed",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/huntTemplates.integration.test.ts",
+      "status": "passed",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "assertions": [
+        {
+          "name": "hidden Template geography against PostgreSQL rejects unauthenticated catalog and geography",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'guest' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'guest with professional rows' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'Participant-only' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'legacy primary Creator without capabi…' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'blocked professional' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL denies 'retired professional' across catalog and alternative inspection routes",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"creator\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"organizer\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"admin\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"participant\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"participant\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL permits authoritative professional roles \"participant\" with Participant primary role",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL preserves Creator authoring, Admin exact-version review and assigned Hunt preview",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL rechecks professional capability on every request using the same access token",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL preserves legacy/malformed handling and invalid-key behavior",
+          "status": "passed"
+        },
+        {
+          "name": "hidden Template geography against PostgreSQL keeps the approved pin and Hunt snapshot immutable when newer versions exist",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "path": "src/routes/huntTemplates.test.ts",
+      "status": "passed",
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/hunts.test.ts",
+      "status": "passed",
+      "passed": 79,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/me.test.ts",
+      "status": "passed",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/organizations.test.ts",
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/routes/organizerApplications.test.ts",
+      "status": "passed",
+      "passed": 26,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/scripts/bootstrapAdmin.test.ts",
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/build-info.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/jwt.test.ts",
+      "status": "passed",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/password.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/passwordPolicy.test.ts",
+      "status": "passed",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/readiness.test.ts",
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/shutdown.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/lib/swagger.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/templates/signalClujNapocaStarter.test.ts",
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/templates/signalClujNapocaV1.test.ts",
+      "status": "passed",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/templates/signalClujRouteProposal.test.ts",
+      "status": "passed",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/templates/signalOverloadClujNapocaV1.test.ts",
+      "status": "passed",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "path": "src/domain/templates/starterCatalog.test.ts",
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    }
+  ]
+}
