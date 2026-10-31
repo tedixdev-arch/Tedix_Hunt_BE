@@ -30,6 +30,7 @@ import { templateClassificationMigration } from './migrations/022_template_class
 import localityProposalsMigration from './migrations/025_locality_proposals.js';
 import huntLocalSourceMigration from './migrations/028_hunt_local_template_source.js';
 import customExercisesMigration from './migrations/029_template_custom_exercises.js';
+import participantAccessMigration from './migrations/030_participant_checkpoint_access.js';
 import localTemplateApprovalMigration from './migrations/027_local_template_approval.js';
 import templateLocalityBindingMigration from './migrations/026_template_locality_binding.js';
 import countryLocalityMigration from './migrations/024_country_locality.js';
@@ -61,6 +62,7 @@ const migrations = [
   localTemplateApprovalMigration,
   huntLocalSourceMigration,
   customExercisesMigration,
+  participantAccessMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -165,6 +167,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '027_local_template_approval',
       '028_hunt_local_template_source',
       '029_template_custom_exercises',
+      '030_participant_checkpoint_access',
     ]);
     try {
       await expect(client.query(
@@ -247,6 +250,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '027_local_template_approval' },
       { id: '028_hunt_local_template_source' },
       { id: '029_template_custom_exercises' },
+      { id: '030_participant_checkpoint_access' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id
