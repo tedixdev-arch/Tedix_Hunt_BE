@@ -1,0 +1,4637 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TedixHunt Participant gameplay — PROPOSAL ONLY",
+    "version": "0.0.0-proposal",
+    "description": "Task 5 contract-only Draft PR. No operations below are implemented or served by /api/docs.json. All 22 custom mechanics remain blocked from Hunt publication. See Participant_Gameplay_Contract.md for unresolved policies, invariants, existing endpoints and acceptance gates."
+  },
+  "x-implementation-status": "proposed-not-implemented",
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/hunts/{id}/checkpoints/{checkpointId}/challenges/{classification}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "in": "path",
+          "name": "checkpointId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "in": "path",
+          "name": "classification",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
+          }
+        }
+      ],
+      "get": {
+        "operationId": "proposedGetParticipantChallenge",
+        "summary": "Proposed safe current challenge delivery",
+        "description": "Only allowlisted interaction data and caller-specific private information; no answers, hints, feedback or solutions. Team private allocation and memory-card phase policy remain blocked on product decisions. Every request checks access and exact Hunt snapshot.",
+        "responses": {
+          "200": {
+            "description": "Safe per-mechanic projection",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Private gameplay responses must not be cached"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Challenge"
+                },
+                "examples": {
+                  "singleChoice": {
+                    "value": {
+                      "challengeId": "22222222-2222-4222-8222-222222222222",
+                      "templateVersion": 1,
+                      "type": "single-choice",
+                      "classification": "personal",
+                      "schemaVersion": 1,
+                      "title": "Recover the relay",
+                      "instructions": "Combine the available information and submit your choice.",
+                      "interaction": {
+                        "options": [
+                          {
+                            "id": "north",
+                            "text": "North"
+                          },
+                          {
+                            "id": "south",
+                            "text": "South"
+                          }
+                        ]
+                      },
+                      "playerInformation": {},
+                      "completion": {
+                        "challengeCompleted": false,
+                        "checkpointCompleted": false,
+                        "huntCompleted": false
+                      }
+                    }
+                  },
+                  "numberLine": {
+                    "value": {
+                      "challengeId": "22222222-2222-4222-8222-222222222222",
+                      "templateVersion": 1,
+                      "type": "number-line",
+                      "classification": "personal",
+                      "schemaVersion": 1,
+                      "title": "Recover the relay",
+                      "instructions": "Combine the available information and submit your choice.",
+                      "interaction": {
+                        "min": 0,
+                        "max": 20,
+                        "step": 1
+                      },
+                      "playerInformation": {},
+                      "completion": {
+                        "challengeCompleted": false,
+                        "checkpointCompleted": false,
+                        "huntCompleted": false
+                      }
+                    }
+                  },
+                  "distributedInformation": {
+                    "value": {
+                      "challengeId": "22222222-2222-4222-8222-222222222222",
+                      "templateVersion": 1,
+                      "type": "distributed-information",
+                      "classification": "team",
+                      "schemaVersion": 1,
+                      "title": "Recover the relay",
+                      "instructions": "Combine the available information and submit your choice.",
+                      "interaction": {
+                        "options": [
+                          {
+                            "id": "east",
+                            "text": "East"
+                          },
+                          {
+                            "id": "west",
+                            "text": "West"
+                          }
+                        ]
+                      },
+                      "playerInformation": {
+                        "facts": [
+                          {
+                            "id": "fact2",
+                            "text": "The fountain is east of the gate."
+                          }
+                        ]
+                      },
+                      "completion": {
+                        "challengeCompleted": false,
+                        "checkpointCompleted": false,
+                        "huntCompleted": false
+                      }
+                    }
+                  },
+                  "sharedFinalKey": {
+                    "value": {
+                      "challengeId": "22222222-2222-4222-8222-222222222222",
+                      "templateVersion": 1,
+                      "type": "shared-final-key",
+                      "classification": "team",
+                      "schemaVersion": 1,
+                      "title": "Recover the relay",
+                      "instructions": "Combine the available information and submit your choice.",
+                      "interaction": {
+                        "orderingInstructions": "Order the fragments using the route clues."
+                      },
+                      "playerInformation": {
+                        "contributions": [
+                          {
+                            "id": "fragment2",
+                            "digits": "07"
+                          }
+                        ]
+                      },
+                      "completion": {
+                        "challengeCompleted": false,
+                        "checkpointCompleted": false,
+                        "huntCompleted": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_input: malformed/unknown fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized: invalid bearer or inactive account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: absent or inaccessible resource/membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: invalid_hunt_state, checkpoint_locked, checkpoint_suspended, version_conflict, idempotency_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "gameplay_unavailable: mechanic or product policy unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: attempt budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds until retry"
+              }
+            }
+          },
+          "500": {
+            "description": "internal_server_error: no sensitive details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hunts/{id}/checkpoints/{checkpointId}/challenges/{classification}/attempts": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "in": "path",
+          "name": "checkpointId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "in": "path",
+          "name": "classification",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
+          }
+        }
+      ],
+      "post": {
+        "operationId": "proposedSubmitParticipantAttempt",
+        "summary": "Proposed server-authoritative attempt",
+        "x-implementation-status": "proposed-not-implemented",
+        "description": "Requires membership, pinned snapshot, active Hunt, checkpoint access/GPS grant, progression, suspension and stage authorization. Atomic attempt/assistance, score and completion mutation with idempotency. Product policies in Participant_Gameplay_Contract.md are blockers.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "description": "UUID generated for one deliberate operation. Reuse same key/body for transport retries. Scoped to authenticated Participant, Hunt, operation and challenge; conflicting body is 409. Authorization is rechecked on replay.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Submission"
+              },
+              "examples": {
+                "singleChoice": {
+                  "summary": "Player guess; does not assert expected correctness",
+                  "value": {
+                    "challengeId": "22222222-2222-4222-8222-222222222222",
+                    "templateVersion": 1,
+                    "type": "single-choice",
+                    "response": {
+                      "optionId": "north"
+                    }
+                  }
+                },
+                "numberLine": {
+                  "value": {
+                    "challengeId": "22222222-2222-4222-8222-222222222222",
+                    "templateVersion": 1,
+                    "type": "number-line",
+                    "response": {
+                      "value": 8
+                    }
+                  }
+                },
+                "distributedInformation": {
+                  "value": {
+                    "challengeId": "22222222-2222-4222-8222-222222222222",
+                    "templateVersion": 1,
+                    "type": "distributed-information",
+                    "response": {
+                      "optionId": "east"
+                    }
+                  }
+                },
+                "sharedFinalKey": {
+                  "summary": "Player-combined guess; stored expected order/code are never delivered",
+                  "value": {
+                    "challengeId": "22222222-2222-4222-8222-222222222222",
+                    "templateVersion": 1,
+                    "type": "shared-final-key",
+                    "response": {
+                      "order": [
+                        "fragment2",
+                        "fragment1"
+                      ],
+                      "code": "0712"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative scoped result; valid incorrect attempts also return 200",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Private gameplay responses must not be cached"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_input: malformed/unknown fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized: invalid bearer or inactive account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: absent or inaccessible resource/membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: invalid_hunt_state, checkpoint_locked, checkpoint_suspended, version_conflict, idempotency_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "gameplay_unavailable: mechanic or product policy unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: attempt budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds until retry"
+              }
+            }
+          },
+          "500": {
+            "description": "internal_server_error: no sensitive details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hunts/{id}/checkpoints/{checkpointId}/challenges/{classification}/hints": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "in": "path",
+          "name": "checkpointId",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        {
+          "in": "path",
+          "name": "classification",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
+          }
+        }
+      ],
+      "post": {
+        "operationId": "proposedReleaseParticipantHint",
+        "summary": "Proposed next authorized hint (policy unresolved)",
+        "x-implementation-status": "proposed-not-implemented",
+        "description": "Requires membership, pinned snapshot, active Hunt, checkpoint access/GPS grant, progression, suspension and stage authorization. Atomic attempt/assistance, score and completion mutation with idempotency. Product policies in Participant_Gameplay_Contract.md are blockers.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "description": "UUID generated for one deliberate operation. Reuse same key/body for transport retries. Scoped to authenticated Participant, Hunt, operation and challenge; conflicting body is 409. Authorization is rechecked on replay.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HintRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative scoped result; valid incorrect attempts also return 200",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Private gameplay responses must not be cached"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HintResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_input: malformed/unknown fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized: invalid bearer or inactive account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: absent or inaccessible resource/membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: invalid_hunt_state, checkpoint_locked, checkpoint_suspended, version_conflict, idempotency_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "gameplay_unavailable: mechanic or product policy unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: attempt budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds until retry"
+              }
+            }
+          },
+          "500": {
+            "description": "internal_server_error: no sensitive details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hunts/{id}/progress": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "proposedGetParticipantProgress",
+        "summary": "Proposed authenticated persisted progress/resume",
+        "description": "Caller Personal and shared Team completion/score only, no other player responses or clues. Score beneficiary and stage policies require review.",
+        "responses": {
+          "200": {
+            "description": "Committed caller-scoped state",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                },
+                "description": "Private gameplay responses must not be cached"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Progress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_input: malformed/unknown fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized: invalid bearer or inactive account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: absent or inaccessible resource/membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: invalid_hunt_state, checkpoint_locked, checkpoint_suspended, version_conflict, idempotency_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "gameplay_unavailable: mechanic or product policy unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: attempt budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds until retry"
+              }
+            }
+          },
+          "500": {
+            "description": "internal_server_error: no sensitive details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Completion": {
+        "type": "object",
+        "properties": {
+          "challengeCompleted": {
+            "type": "boolean"
+          },
+          "checkpointCompleted": {
+            "type": "boolean"
+          },
+          "huntCompleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "challengeCompleted",
+          "checkpointCompleted",
+          "huntCompleted"
+        ],
+        "additionalProperties": false
+      },
+      "SubmissionResult": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "correct": {
+            "type": "boolean"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          },
+          "score": {
+            "type": "object",
+            "properties": {
+              "delta": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              },
+              "total": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "delta",
+              "total"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "correct",
+          "completion",
+          "score"
+        ],
+        "additionalProperties": false
+      },
+      "HintResult": {
+        "type": "object",
+        "properties": {
+          "hint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "hint",
+          "ordinal"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_tap-pair": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "tap-pair"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "leftId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "rightId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    }
+                  },
+                  "required": [
+                    "leftId",
+                    "rightId"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "pairs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_tap-pair": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "tap-pair"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "left": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "right": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "left",
+              "right"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_single-choice": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "single-choice"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "optionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "optionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_single-choice": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "single-choice"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_true-false": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "true-false"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_true-false": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "true-false"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_memory-card": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory-card"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_memory-card": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory-card"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "card": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              },
+              "revealDelayMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 60000
+              }
+            },
+            "required": [
+              "card",
+              "revealDelayMs"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_number-line": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "number-line"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_number-line": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "number-line"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              },
+              "max": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              },
+              "step": {
+                "type": "number",
+                "minimum": 0.000001,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "min",
+              "max",
+              "step"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_multiple-choice": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "multiple-choice"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "optionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "optionIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_multiple-choice": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "multiple-choice"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_match-columns": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "match-columns"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "leftId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "rightId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    }
+                  },
+                  "required": [
+                    "leftId",
+                    "rightId"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "pairs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_match-columns": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "match-columns"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "left": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "right": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "left",
+              "right"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_drag-drop": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "drag-drop"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "assignments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "itemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "targetId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    }
+                  },
+                  "required": [
+                    "itemId",
+                    "targetId"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "assignments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_drag-drop": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "drag-drop"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "targets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "items",
+              "targets"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_fill-blank": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "fill-blank"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "blankId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "value": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "blankId",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "values"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_fill-blank": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "fill-blank"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "blanks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "prompt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "prompt"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "blanks"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_sequence": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sequence"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "order"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_sequence": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sequence"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "elements"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_find-mistake": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "find-mistake"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "stepId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "explanationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "stepId",
+              "explanationId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_find-mistake": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "find-mistake"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "explanations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "steps",
+              "explanations"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_build-problem": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "build-problem"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "construction": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "construction"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_build-problem": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "build-problem"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "pieces": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "slots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "pieces",
+              "slots"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_number-pattern": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "number-pattern"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_number-pattern": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "number-pattern"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "terms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": -1000000000,
+                      "maximum": 1000000000
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 40
+              },
+              "missingId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "terms",
+              "missingId"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_shape-pattern": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "shape-pattern"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "shapeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "shapeId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_shape-pattern": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "shape-pattern"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "terms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "shapeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 40
+              },
+              "missingId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "shapes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "terms",
+              "missingId",
+              "shapes"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_rule-discovery": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "rule-discovery"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "ruleId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "predictedOutput": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "ruleId",
+              "predictedOutput"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_rule-discovery": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "rule-discovery"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "personal"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "examples": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "number",
+                      "minimum": -1000000000,
+                      "maximum": 1000000000
+                    },
+                    "output": {
+                      "type": "number",
+                      "minimum": -1000000000,
+                      "maximum": 1000000000
+                    }
+                  },
+                  "required": [
+                    "input",
+                    "output"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              },
+              "predictionInput": {
+                "type": "number",
+                "minimum": -1000000000,
+                "maximum": 1000000000
+              }
+            },
+            "required": [
+              "examples",
+              "rules",
+              "predictionInput"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_scrambled-word": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "scrambled-word"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "word": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "word"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_scrambled-word": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "scrambled-word"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "contributions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "contributions"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_distributed-information": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "distributed-information"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "optionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "optionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_distributed-information": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "distributed-information"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "facts"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_hypothesis": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "hypothesis"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_hypothesis": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "hypothesis"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "decoderKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "decoderKey"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "packets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "packets"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_assemble-machine": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "assemble-machine"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "frequencyId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              }
+            },
+            "required": [
+              "frequencyId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_assemble-machine": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "assemble-machine"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "frequencies": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1000000000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 2,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "frequencies"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "contributions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "contributions"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_clue-synthesis": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "clue-synthesis"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_clue-synthesis": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "clue-synthesis"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "answerPattern": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "answerPattern"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "clues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "clues"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_filter-noise": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "filter-noise"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "trustedSignalIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "minItems": 1,
+                "maxItems": 40
+              }
+            },
+            "required": [
+              "trustedSignalIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_filter-noise": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "filter-noise"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "signals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "signals"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Submission_shared-final-key": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "shared-final-key"
+            ]
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "minItems": 2,
+                "maxItems": 16
+              },
+              "code": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 256,
+                "pattern": "^[0-9]+$"
+              }
+            },
+            "required": [
+              "order",
+              "code"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "response"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge_shared-final-key": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "shared-final-key"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "team"
+            ]
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+          },
+          "interaction": {
+            "type": "object",
+            "properties": {
+              "orderingInstructions": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "pattern": "^(?![\\s\\S]*<[/!a-zA-Z])(?![\\s\\S]*[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f])[\\s\\S]*\\S[\\s\\S]*$"
+              }
+            },
+            "required": [
+              "orderingInstructions"
+            ],
+            "additionalProperties": false
+          },
+          "playerInformation": {
+            "type": "object",
+            "properties": {
+              "contributions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "digits": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16,
+                      "pattern": "^[0-9]+$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "digits"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "contributions"
+            ],
+            "additionalProperties": false
+          },
+          "completion": {
+            "$ref": "#/components/schemas/Completion"
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion",
+          "type",
+          "classification",
+          "schemaVersion",
+          "title",
+          "instructions",
+          "interaction",
+          "playerInformation",
+          "completion"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Challenge_tap-pair"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_single-choice"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_true-false"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_memory-card"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_number-line"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_multiple-choice"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_match-columns"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_drag-drop"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_fill-blank"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_sequence"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_find-mistake"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_build-problem"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_number-pattern"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_shape-pattern"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_rule-discovery"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_scrambled-word"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_distributed-information"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_hypothesis"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_assemble-machine"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_clue-synthesis"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_filter-noise"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge_shared-final-key"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "tap-pair": "#/components/schemas/Challenge_tap-pair",
+            "single-choice": "#/components/schemas/Challenge_single-choice",
+            "true-false": "#/components/schemas/Challenge_true-false",
+            "memory-card": "#/components/schemas/Challenge_memory-card",
+            "number-line": "#/components/schemas/Challenge_number-line",
+            "multiple-choice": "#/components/schemas/Challenge_multiple-choice",
+            "match-columns": "#/components/schemas/Challenge_match-columns",
+            "drag-drop": "#/components/schemas/Challenge_drag-drop",
+            "fill-blank": "#/components/schemas/Challenge_fill-blank",
+            "sequence": "#/components/schemas/Challenge_sequence",
+            "find-mistake": "#/components/schemas/Challenge_find-mistake",
+            "build-problem": "#/components/schemas/Challenge_build-problem",
+            "number-pattern": "#/components/schemas/Challenge_number-pattern",
+            "shape-pattern": "#/components/schemas/Challenge_shape-pattern",
+            "rule-discovery": "#/components/schemas/Challenge_rule-discovery",
+            "scrambled-word": "#/components/schemas/Challenge_scrambled-word",
+            "distributed-information": "#/components/schemas/Challenge_distributed-information",
+            "hypothesis": "#/components/schemas/Challenge_hypothesis",
+            "assemble-machine": "#/components/schemas/Challenge_assemble-machine",
+            "clue-synthesis": "#/components/schemas/Challenge_clue-synthesis",
+            "filter-noise": "#/components/schemas/Challenge_filter-noise",
+            "shared-final-key": "#/components/schemas/Challenge_shared-final-key"
+          }
+        }
+      },
+      "Submission": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Submission_tap-pair"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_single-choice"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_true-false"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_memory-card"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_number-line"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_multiple-choice"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_match-columns"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_drag-drop"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_fill-blank"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_sequence"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_find-mistake"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_build-problem"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_number-pattern"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_shape-pattern"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_rule-discovery"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_scrambled-word"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_distributed-information"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_hypothesis"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_assemble-machine"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_clue-synthesis"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_filter-noise"
+          },
+          {
+            "$ref": "#/components/schemas/Submission_shared-final-key"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "tap-pair": "#/components/schemas/Submission_tap-pair",
+            "single-choice": "#/components/schemas/Submission_single-choice",
+            "true-false": "#/components/schemas/Submission_true-false",
+            "memory-card": "#/components/schemas/Submission_memory-card",
+            "number-line": "#/components/schemas/Submission_number-line",
+            "multiple-choice": "#/components/schemas/Submission_multiple-choice",
+            "match-columns": "#/components/schemas/Submission_match-columns",
+            "drag-drop": "#/components/schemas/Submission_drag-drop",
+            "fill-blank": "#/components/schemas/Submission_fill-blank",
+            "sequence": "#/components/schemas/Submission_sequence",
+            "find-mistake": "#/components/schemas/Submission_find-mistake",
+            "build-problem": "#/components/schemas/Submission_build-problem",
+            "number-pattern": "#/components/schemas/Submission_number-pattern",
+            "shape-pattern": "#/components/schemas/Submission_shape-pattern",
+            "rule-discovery": "#/components/schemas/Submission_rule-discovery",
+            "scrambled-word": "#/components/schemas/Submission_scrambled-word",
+            "distributed-information": "#/components/schemas/Submission_distributed-information",
+            "hypothesis": "#/components/schemas/Submission_hypothesis",
+            "assemble-machine": "#/components/schemas/Submission_assemble-machine",
+            "clue-synthesis": "#/components/schemas/Submission_clue-synthesis",
+            "filter-noise": "#/components/schemas/Submission_filter-noise",
+            "shared-final-key": "#/components/schemas/Submission_shared-final-key"
+          }
+        }
+      },
+      "HintRequest": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "challengeId",
+          "templateVersion"
+        ],
+        "additionalProperties": false
+      },
+      "Progress": {
+        "type": "object",
+        "properties": {
+          "templateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "huntCompleted": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number",
+            "minimum": -1000000000,
+            "maximum": 1000000000
+          },
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "checkpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "terminal"
+                  ]
+                },
+                "accessible": {
+                  "type": "boolean"
+                },
+                "personalCompleted": {
+                  "type": "boolean"
+                },
+                "teamCompleted": {
+                  "type": "boolean"
+                },
+                "checkpointCompleted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "checkpointId",
+                "role",
+                "accessible",
+                "personalCompleted",
+                "teamCompleted",
+                "checkpointCompleted"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 21
+          }
+        },
+        "required": [
+          "templateVersion",
+          "huntCompleted",
+          "score",
+          "checkpoints"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
