@@ -255,7 +255,7 @@ describe.each([5, 30])('Creator Hunt Template persistence with %i m radius', (ra
       .toMatchObject({ version: { version: 2, content: v2, createdByUserId: creatorId } });
     expect(client.query.mock.calls[2][0]).toContain('FOR UPDATE');
     expect(client.query.mock.calls[2][0]).toContain("origin = 'creator'");
-    expect(client.query.mock.calls[2][1]).toEqual([templateRow.key, creatorId]);
+    expect(client.query.mock.calls[2][1]).toEqual([templateRow.key, creatorId, false]);
     expect(client.query.mock.calls[4][1]).toEqual([templateRow.id, 2, v2, creatorId, null, null, null]);
     expect(client.query.mock.calls.map(([sql]) => String(sql).trim().split(/\s/)[0])).toEqual([
       'BEGIN', 'SELECT', 'SELECT', 'SELECT', 'INSERT', 'COMMIT',

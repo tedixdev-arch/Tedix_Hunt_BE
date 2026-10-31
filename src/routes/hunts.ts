@@ -1,3 +1,6 @@
+import { configureHuntRadii } from '../models/HuntCheckpointRadius.js';
+import { LocalSelectionError } from '../models/OrganizerLocalTemplate.js';
+import { validRadiusPatch } from '../domain/checkpointRadius.js';
 import { projectHuntForReader } from '../domain/customExercises.js';
 import express from 'express';
 import { requireAnyRole, requireAuth, type AuthRequest } from '../middleware/auth.js';
@@ -421,6 +424,77 @@ router.post('/:id/:action', requireAuth, async (req: AuthRequest, res) => {
   const updated = await Hunt.transitionStatus({ id, ...action });
   if (!updated) return res.status(409).json({ error: 'invalid_hunt_state' });
   return res.json(updated);
+});
+
+
+/**
+ * @openapi
+ * /api/hunts/{id}/checkpoint-radii:
+ *   patch:
+ *     tags: [Hunts]
+ *     summary: Override saved checkpoint radii in a Hunt draft
+ *     description: Hunt-specific Organizer only. Sparse atomic updates to execution configuration, never the source Template. Requires the selected key/version; all non-draft states are frozen. Existing 5–500 m compatibility bounds retained; proposed 10–100 m is unapproved. FinishPoint uses integer metres. No GPS grants.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [templateKey, templateVersion, radii]
+ *             properties:
+ *               templateKey: { type: string }
+ *               templateVersion: { type: integer, minimum: 1 }
+ *               radii:
+ *                 $ref: '#/components/schemas/CheckpointRadiiPatch'
+ *     responses:
+ *       200: { description: Hunt with effective checkpointRadiusConfiguration, content: { application/json: { schema: { $ref: '#/components/schemas/Hunt' } } } }
+ *       400: { description: invalid_radius_configuration }
+ *       401: { description: Authentication required }
+ *       403: { description: Hunt Organizer role required }
+ *       404: { description: Hunt not found }
+ *       409: { description: invalid_hunt_state, template_selection_stale or execution_configuration_pinned }
+ *       422: { description: checkpoint_geography_unavailable }
+ * components:
+ *   schemas:
+ *     CheckpointRadiiPatch:
+ *       type: object
+ *       additionalProperties: false
+ *       minProperties: 1
+ *       properties:
+ *         checkpointPositions:
+ *           type: array
+ *           minItems: 1
+ *           maxItems: 20
+ *           items:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [checkpointNumber, radiusMeters]
+ *             properties:
+ *               checkpointNumber: { type: integer, minimum: 1, maximum: 20 }
+ *               radiusMeters: { type: number, minimum: 5, maximum: 500 }
+ *         finishPoint:
+ *           type: object
+ *           additionalProperties: false
+ *           required: [radiusMeters]
+ *           properties:
+ *             radiusMeters: { type: integer, minimum: 5, maximum: 500 }
+ */
+router.patch('/:id/checkpoint-radii', requireAuth, async (req: AuthRequest, res, next) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).sort().join(',') !== 'radii,templateKey,templateVersion'
+    || typeof body.templateKey !== 'string' || !body.templateKey
+    || !Number.isSafeInteger(body.templateVersion) || body.templateVersion < 1 || !validRadiusPatch(body.radii))
+    return res.status(400).json({ error: 'invalid_radius_configuration' });
+  try {
+    return res.json(await configureHuntRadii(String(req.params.id), req.user!.id, body.templateKey, body.templateVersion, body.radii));
+  } catch (error) {
+    if (error instanceof LocalSelectionError) return res.status(error.status).json({ error: error.code });
+    next(error);
+  }
 });
 
 export const huntsRouter = router;

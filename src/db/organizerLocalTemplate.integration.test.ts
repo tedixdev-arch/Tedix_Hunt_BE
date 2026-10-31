@@ -124,7 +124,7 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect(JSON.stringify(preview.body)).not.toMatch(/private|answer|review|provenance|suspension/);
     await select(h,a).expect(200);const after=await state(h);
     expect(after).toMatchObject({template_id:a.templateId,template_key:a.key,template_version:1,template_snapshot:content(a.key),template_locality_id:place});
-    for(const key of Object.keys(before).filter(k=>!['template_id','template_key','template_version','template_snapshot','template_locality_id','template_locality_snapshot','updated_at'].includes(k)))expect(after[key]).toEqual(before[key]);
+    for(const key of Object.keys(before).filter(k=>!['template_id','template_key','template_version','template_snapshot','template_locality_id','template_locality_snapshot','checkpoint_radius_configuration','updated_at'].includes(k)))expect(after[key]).toEqual(before[key]);
     await get('/api/geography/countries').expect(200);
     expect((await get('/api/geography/localities?countryCode=RO&q=Same').expect(200)).body.localities.some((l:any)=>l.id===place)).toBe(true);
     await get(`/api/geography/localities/${place}`).expect(200);

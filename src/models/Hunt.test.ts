@@ -103,7 +103,7 @@ describe('core Hunt persistence', () => {
       status: 'paused', createdAt: older, updatedAt: createdAt,
       country: null, region: null, city: null, startDate: null, startTime: null, timezone: null,
       durationMinutes: null, capacity: null, contactName: null,
-      templateKey: null, templateVersion: null, templateSnapshot: null,
+      templateKey: null, templateVersion: null, templateSnapshot: null, checkpointRadiusConfiguration: null,
       templateId: null, templateLocalityId: null, templateLocalitySnapshot: null,
       format: null, teamSize: null, accessMode: null, difficulty: null, checkpointOrder: null,
       accessCode: null,
@@ -160,7 +160,7 @@ describe('core Hunt persistence', () => {
     });
     expect(query).toHaveBeenCalledWith(
       expect.stringMatching(/template_key = \$2, template_version = \$3, template_snapshot = \$4[\s\S]*status = 'draft'/),
-      ['hunt-1', snapshot.key, 1, snapshot],
+      ['hunt-1', snapshot.key, 1, snapshot, { checkpointPositions: [] }],
     );
   });
 

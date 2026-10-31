@@ -90,7 +90,7 @@ describe('Creator Template geographic content', () => {
 
   it.each([
     -1, 0, 4, 4.999, 500.001, 501, Number.NaN,
-    Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, '5', null, undefined, {}, [],
+    Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, '5', null, {}, [],
   ])('rejects invalid radius %s in drafts and submissions', (radiusMeters) => {
     const value = content({
       normalCheckpointCount: 1,
@@ -158,7 +158,7 @@ describe('FinishPoint geography', () => {
     { latitude: -91 }, { latitude: 91 }, { latitude: Number.NaN }, { latitude: Infinity },
     { longitude: -181 }, { longitude: 181 }, { longitude: -Infinity }, { longitude: '23' },
     { radiusMeters: 4 }, { radiusMeters: 501 }, { radiusMeters: 5.5 }, { radiusMeters: '5' },
-    { radiusMeters: undefined }, { name: '' }, { name: '  ' }, { name: 'x'.repeat(101) },
+    { name: '' }, { name: '  ' }, { name: 'x'.repeat(101) },
     { checkpointNumber: 2 },
   ])('rejects invalid or incomplete FinishPoint %# in drafts and submissions', (override) => {
     const value = geographic({ ...finishPoint, ...override });

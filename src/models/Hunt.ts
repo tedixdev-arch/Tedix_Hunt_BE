@@ -1,3 +1,4 @@
+import { inheritedRadii, type CheckpointRadii } from '../domain/checkpointRadius.js';
 import type { PoolClient } from 'pg';
 import { validateHuntForPublish } from '../domain/huntReadiness.js';
 import { pool } from '../lib/postgres.js';
@@ -31,6 +32,7 @@ export interface IHunt {
   templateKey: string | null;
   templateVersion: number | null;
   templateSnapshot: HuntTemplateSnapshot | null;
+  checkpointRadiusConfiguration?: CheckpointRadii | null;
   format: 'team' | null;
   teamSize: number | null;
   accessMode: 'invitation_only' | null;
@@ -72,6 +74,7 @@ export interface UpdateHuntGeneralSetupInput {
   templateKey?: string;
   templateVersion?: number;
   templateSnapshot?: HuntTemplateSnapshot;
+  checkpointRadiusConfiguration?: CheckpointRadii;
   format?: 'team';
   teamSize?: 4;
   accessMode?: 'invitation_only';
@@ -102,6 +105,7 @@ export const mapHuntRow = (row: any): IHunt => ({
   templateKey: row.template_key ?? null,
   templateVersion: row.template_version ?? null,
   templateSnapshot: row.template_snapshot ?? null,
+  checkpointRadiusConfiguration: row.checkpoint_radius_configuration ?? null,
   format: row.hunt_format ?? null,
   teamSize: row.team_size ?? null,
   accessMode: row.access_mode ?? null,
@@ -200,10 +204,11 @@ export const Hunt = {
       startTime: 'start_time', timezone: 'timezone', durationMinutes: 'duration_minutes',
       capacity: 'capacity', contactName: 'contact_name',
       templateKey: 'template_key', templateVersion: 'template_version',
-      templateSnapshot: 'template_snapshot',
+      templateSnapshot: 'template_snapshot', checkpointRadiusConfiguration: 'checkpoint_radius_configuration',
       format: 'hunt_format', teamSize: 'team_size', accessMode: 'access_mode',
       difficulty: 'difficulty', checkpointOrder: 'checkpoint_order',
     };
+    if (input.templateSnapshot) input = { ...input, checkpointRadiusConfiguration: inheritedRadii(input.templateSnapshot) };
     const entries = Object.entries(input) as [keyof UpdateHuntGeneralSetupInput, unknown][];
     const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);
     const { rows } = await client.query(

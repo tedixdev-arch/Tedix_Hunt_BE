@@ -146,6 +146,7 @@ const options: swaggerJsdoc.Options = {
             contactName: { type: 'string', nullable: true },
             templateKey: { type: 'string', nullable: true },
             templateVersion: { type: 'integer', minimum: 1, nullable: true },
+            checkpointRadiusConfiguration: { type: 'object', nullable: true, description: 'Pinned effective execution radii. Null for historical Hunts; read templateSnapshot radii without defaulting history.', properties: { checkpointPositions: { type: 'array', items: { type: 'object', properties: { checkpointNumber: { type: 'integer' }, radiusMeters: { type: 'number' } } } }, finishPoint: { type: 'object', properties: { radiusMeters: { type: 'integer' } } } } },
             templateSnapshot: {
               type: 'object',
               nullable: true,
@@ -279,8 +280,8 @@ const options: swaggerJsdoc.Options = {
                 },
                 finishPoint: {
                   type: 'object', additionalProperties: false,
-                  description: 'Exactly one FinishPoint, separate from checkpointPositions and normalCheckpointCount, with no checkpointNumber. Optional in drafts and Universal submissions; required for Local and legacy geographic submissions. Supplied objects must be complete. Legacy content without geographic normal checkpoints remains submittable. Values are preserved exactly; the backend never inserts the FE authoring default radius of 5 m.',
-                  required: ['name', 'latitude', 'longitude', 'radiusMeters'],
+                  description: 'Exactly one FinishPoint, separate from checkpointPositions and normalCheckpointCount, with no checkpointNumber. Optional in drafts and Universal submissions; required for Local and legacy geographic submissions. Supplied objects must be complete. Legacy content without geographic normal checkpoints remains submittable. Explicit values are preserved; omitted radii inherit the previous checkpoint radius on revision, otherwise default to 25 m at new-version persistence. Existing immutable versions are never rewritten.',
+                  required: ['name', 'latitude', 'longitude'],
                   properties: {
                     name: { type: 'string', minLength: 1, maxLength: 100, description: 'Must contain a non-whitespace character.' },
                     latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Finite number.' },
@@ -293,7 +294,7 @@ const options: swaggerJsdoc.Options = {
                   description: 'Geographic positions for normal checkpoints only; complete at Local and legacy geographic submission; optional for Universal.',
                   items: {
                     type: 'object', additionalProperties: false,
-                    required: ['checkpointNumber', 'name', 'latitude', 'longitude', 'radiusMeters'],
+                    required: ['checkpointNumber', 'name', 'latitude', 'longitude'],
                     properties: {
                       checkpointNumber: { type: 'integer', minimum: 1, maximum: 20 },
                       name: { type: 'string', minLength: 1, maxLength: 100 },

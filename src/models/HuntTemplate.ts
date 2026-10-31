@@ -1,3 +1,4 @@
+import { inheritedRadii, type CheckpointRadii, withRadiusDefaults } from '../domain/checkpointRadius.js';
 import { allocateCustomExercises, validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
 import type { PoolClient } from 'pg';
 import type { Locality } from './Geography.js';
@@ -353,21 +354,26 @@ export const HuntTemplates = {
     content: unknown,
     creatorUserId: string,
     localityId?: unknown,
+    adminRadiusEdit?: { version: number; radii: Partial<CheckpointRadii> },
   ): Promise<{ template: PersistedHuntTemplate; version: PersistedHuntTemplateVersion }> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       // Account before Template: agrees with selection and account retirement writers.
       await client.query('SELECT id FROM users WHERE id=$1 FOR SHARE', [creatorUserId]);
+      if (adminRadiusEdit && !(await client.query("SELECT 1 FROM user_roles WHERE user_id=$1 AND role='admin' AND EXISTS(SELECT 1 FROM users WHERE id=$1 AND account_status='active' AND NOT is_guest) FOR SHARE", [creatorUserId])).rowCount)
+        throw new HuntTemplateNotFoundError();
       // The identity lock serializes version allocation across application instances.
       const templateResult = await client.query(
         `SELECT * FROM hunt_templates
-         WHERE key = $1 AND origin = 'creator' AND created_by_user_id = $2
+         WHERE key = $1 AND origin = 'creator' AND (created_by_user_id = $2 OR $3)
          FOR UPDATE`,
-        [key, creatorUserId],
+        [key, creatorUserId, !!adminRadiusEdit],
       );
       if (!templateResult.rows[0]) throw new HuntTemplateNotFoundError();
       const template = mapTemplate(templateResult.rows[0]);
+      if (adminRadiusEdit && (template.category !== 'local' || template.status !== 'draft')) throw new HuntTemplateNotEditableError();
+      const ownerId = template.createdByUserId;
       // Classified owners may correct a reviewed candidate or revise an approved product.
       if (template.status !== 'draft'
         && !(template.category != null && template.status === 'changes_requested')
@@ -379,13 +385,30 @@ export const HuntTemplates = {
         `SELECT * FROM hunt_template_versions WHERE template_id = $1 ORDER BY version DESC LIMIT 1`,
         [template.id],
       );
+      if (adminRadiusEdit) {
+        const latest = versionResult.rows[0];
+        if (!latest || latest.version !== adminRadiusEdit.version) throw new HuntTemplateVersionNotLatestError();
+        const candidate = structuredClone(latest.content);
+        const radii = inheritedRadii(candidate);
+        for (const point of adminRadiusEdit.radii.checkpointPositions ?? []) {
+          if (!radii.checkpointPositions.some(p => p.checkpointNumber === point.checkpointNumber)) throw new InvalidHuntTemplateContentError();
+          const saved = candidate.configuration.checkpointPositions.find((p: any) => p.checkpointNumber === point.checkpointNumber);
+          saved.radiusMeters = point.radiusMeters;
+        }
+        if (adminRadiusEdit.radii.finishPoint) {
+          if (!candidate.configuration.finishPoint) throw new InvalidHuntTemplateContentError();
+          candidate.configuration.finishPoint.radiusMeters = adminRadiusEdit.radii.finishPoint.radiusMeters;
+        }
+        candidate.version = latest.version + 1;
+        content = candidate;
+      }
       const nextVersion = (versionResult.rows[0]?.version ?? 0) + 1;
       const customIssues = validateCustomExercises(content);
       if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
       if (!isTemplateContent(content, key, nextVersion)) {
         throw new InvalidHuntTemplateContentError();
       }
-      content = allocateCustomExercises(content, key, nextVersion, versionResult.rows[0]?.content);
+      content = allocateCustomExercises(withRadiusDefaults(content, versionResult.rows[0]?.content), key, nextVersion, versionResult.rows[0]?.content);
       if (template.category === 'local' && template.status === 'approved' && template.localApprovedVersion == null) {
         const evidence = await client.query(`SELECT v.version FROM hunt_template_versions v
           JOIN hunt_template_reviews r ON r.template_id=v.template_id AND r.version=v.version
@@ -402,7 +425,7 @@ export const HuntTemplates = {
         `INSERT INTO hunt_template_versions
            (template_id, version, content, origin, created_by_user_id, category, locality_id, locality_snapshot)
          VALUES ($1, $2, $3, 'creator', $4, $5, $6, $7) RETURNING *`,
-        [template.id, nextVersion, content, creatorUserId, template.category, binding.localityId, binding.localitySnapshot],
+        [template.id, nextVersion, content, ownerId, template.category, binding.localityId, binding.localitySnapshot],
       );
       // Keep publication/history intact; drafts have no active submission pin.
       if (template.status !== 'draft') {
@@ -432,7 +455,7 @@ export const HuntTemplates = {
     if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
     if ((category !== undefined && category !== 'universal' && category !== 'local')
       || !isTemplateContent(content, key, 1)) throw new InvalidHuntTemplateContentError();
-    content = allocateCustomExercises(content, key, 1);
+    content = allocateCustomExercises(withRadiusDefaults(content), key, 1);
     const client = await pool.connect();
     try {
       // Identity and immutable version 1 are one persistence operation: neither may exist alone.
