@@ -24,6 +24,8 @@ function walk(value) {
   for (const v of Object.values(value)) walk(v);
 }
 walk(swaggerSpec);
+for (const [path,method] of [['/api/geography/cities','get'],['/api/geography/cities/{id}','get'],['/api/geography/cities/{id}/resolve','post'],['/api/geography/cities/{id}/registration','post']]) assert.ok(swaggerSpec.paths[path]?.[method]);
+assert.ok(swaggerSpec.components.schemas.GeographicCity.properties.geographicId);
 console.log(`Runtime Swagger: ${Object.keys(swaggerSpec.paths).length} paths; four access operations, two radius operations, resolved references; no proposed gameplay endpoints.`);
 const { discoverMigrations } = await import('../dist/db/migrations/index.js');
 const { runMigrations } = await import('../dist/db/migrate.js');
@@ -38,12 +40,13 @@ try {
       if (i===0) {
         await client.query(await readFile(new URL('../src/db/pre_migration_baseline.sql',import.meta.url),'utf8'));
         const migrations=await discoverMigrations(new URL('../dist/db/migrations',import.meta.url).pathname);
-        assert.equal((await runMigrations(client,migrations)).length,31);
+        assert.equal((await runMigrations(client,migrations)).length,32);
         assert.deepEqual(await runMigrations(client,migrations),[]);
-        console.log('Compiled migrations: 31 applied; repeat 0.');
+        console.log('Compiled migrations: 32 applied; repeat 0.');
       } else {
         await client.query(await readFile(new URL('../src/db/schema.sql',import.meta.url),'utf8'));
         assert.ok((await client.query("SELECT to_regclass('participant_checkpoint_access') AS t")).rows[0].t);
+        assert.ok((await client.query("SELECT to_regclass('geographic_city_names') AS t")).rows[0].t);
         console.log('Full schema bootstrap: passed, including Participant access tables/trigger.');
       }
     } finally { client.release(); await pool.end(); }
