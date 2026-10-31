@@ -1,3 +1,4 @@
+import { inheritedRadii } from '../domain/checkpointRadius.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../lib/postgres.js';
 import { isTemplateContent } from '../domain/creatorTemplates.js';
@@ -103,8 +104,8 @@ export async function selectLocalTemplate(huntId: string, actorId: string, expec
     if (artifact.localityId !== expected.localityId.toLowerCase() || artifact.localitySnapshot.countryCode !== expected.countryCode)
       throw new LocalSelectionError('template_not_eligible');
     const result = await client.query(`UPDATE hunts SET template_id=$2,template_key=$3,template_version=$4,
-      template_snapshot=$5,template_locality_id=$6,template_locality_snapshot=$7,updated_at=now()
-      WHERE id=$1 RETURNING *`,[huntId,artifact.templateId,artifact.key,artifact.version,artifact.content,artifact.localityId,artifact.localitySnapshot]);
+      template_snapshot=$5,template_locality_id=$6,template_locality_snapshot=$7,checkpoint_radius_configuration=$8,updated_at=now()
+      WHERE id=$1 RETURNING *`,[huntId,artifact.templateId,artifact.key,artifact.version,artifact.content,artifact.localityId,artifact.localitySnapshot,inheritedRadii(artifact.content)]);
     await client.query('COMMIT');
     return mapHuntRow(result.rows[0]);
   } catch (error) { await client.query('ROLLBACK'); throw error; }

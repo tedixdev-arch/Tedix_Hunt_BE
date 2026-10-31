@@ -1,3 +1,5 @@
+import { validRadiusPatch } from '../domain/checkpointRadius.js';
+import { HuntTemplateNotEditableError, HuntTemplateNotFoundError, HuntTemplateVersionNotLatestError } from '../models/HuntTemplate.js';
 import express from 'express';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError, HuntTemplates, TemplateLocalityError, InvalidHuntTemplateContentError, TemplateEligibilityConflictError } from '../models/HuntTemplate.js';
@@ -149,6 +151,50 @@ router.get('/:key', requireAuth, requireRole('admin'), async (request, response,
   } catch (error) {
     if (error instanceof TemplateEligibilityConflictError) return response.status(409).json({ error: 'template_eligibility_conflict' });
     return next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/templates/review/{key}/checkpoint-radii:
+ *   patch:
+ *     tags: [Admin Template Review]
+ *     summary: Append a radius-only revision to an eligible Local draft
+ *     description: Admin-only; preserves owner and all immutable versions. Only Local draft status is eligible. No approval, submitted/approved edits or active Hunt mutations.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: key, required: true, schema: { type: string } }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [version, radii]
+ *             properties:
+ *               version: { type: integer, minimum: 1 }
+ *               radii: { $ref: '#/components/schemas/CheckpointRadiiPatch' }
+ *     responses:
+ *       200: { description: New immutable draft version with original owner }
+ *       400: { description: invalid_radius_configuration or invalid_template_content }
+ *       401: { description: Authentication required }
+ *       403: { description: Admin capability required }
+ *       404: { description: Template not found }
+ *       409: { description: Template not editable or version not latest }
+ */
+router.patch('/:key/checkpoint-radii', requireAuth, requireRole('admin'), async (req: AuthRequest, res, next) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).sort().join(',') !== 'radii,version' || !Number.isSafeInteger(body.version)
+    || body.version < 1 || !validRadiusPatch(body.radii)) return res.status(400).json({ error: 'invalid_radius_configuration' });
+  try {
+    return res.json(await HuntTemplates.createCreatorVersion(String(req.params.key), null, req.user!.id, undefined, body));
+  } catch (error) {
+    if (error instanceof HuntTemplateNotFoundError) return res.status(404).json({ error: 'not_found' });
+    if (error instanceof HuntTemplateNotEditableError) return res.status(409).json({ error: 'template_not_editable' });
+    if (error instanceof HuntTemplateVersionNotLatestError) return res.status(409).json({ error: 'template_version_not_latest' });
+    if (error instanceof InvalidHuntTemplateContentError) return res.status(400).json({ error: 'invalid_template_content' });
+    next(error);
   }
 });
 

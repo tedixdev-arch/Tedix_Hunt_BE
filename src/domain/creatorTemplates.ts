@@ -1,3 +1,4 @@
+import { validRadius } from './checkpointRadius.js';
 import { validateCustomExercises, hasValidPersistedCustomOwnership } from './customExercises.js';
 import { checkpointGameplayTypes } from './checkpointGameplay.js';
 
@@ -12,8 +13,6 @@ export type TemplateContent = Record<string, unknown> & { key: string; version: 
 
 const MIN_NORMAL_CHECKPOINTS = 1;
 const MAX_NORMAL_CHECKPOINTS = 20;
-const MIN_RADIUS_METERS = 5;
-const MAX_RADIUS_METERS = 500;
 const MAX_CHECKPOINT_NAME_LENGTH = 100;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -22,7 +21,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-// A supplied FinishPoint is one complete object. Never default or normalize persisted values.
+// Omitted radius is resolved only when persisting a new immutable version.
 const hasValidFinishPoint = (value: unknown): boolean =>
   isObject(value) && Object.keys(value).every((key) =>
     ['name', 'latitude', 'longitude', 'radiusMeters'].includes(key))
@@ -30,8 +29,7 @@ const hasValidFinishPoint = (value: unknown): boolean =>
   && value.name.length <= MAX_CHECKPOINT_NAME_LENGTH
   && isFiniteNumber(value.latitude) && value.latitude >= -90 && value.latitude <= 90
   && isFiniteNumber(value.longitude) && value.longitude >= -180 && value.longitude <= 180
-  && Number.isInteger(value.radiusMeters) && (value.radiusMeters as number) >= MIN_RADIUS_METERS
-  && (value.radiusMeters as number) <= MAX_RADIUS_METERS;
+  && (value.radiusMeters === undefined || (Number.isInteger(value.radiusMeters) && validRadius(value.radiusMeters)));
 
 const hasValidGeographicDraft = (configuration: Record<string, unknown>): boolean => {
   if (configuration.finishPoint !== undefined && !hasValidFinishPoint(configuration.finishPoint)) {
@@ -57,8 +55,7 @@ const hasValidGeographicDraft = (configuration: Record<string, unknown>): boolea
       && position.name.length <= MAX_CHECKPOINT_NAME_LENGTH
       && isFiniteNumber(position.latitude) && position.latitude >= -90 && position.latitude <= 90
       && isFiniteNumber(position.longitude) && position.longitude >= -180 && position.longitude <= 180
-      && isFiniteNumber(position.radiusMeters) && position.radiusMeters >= MIN_RADIUS_METERS
-      && position.radiusMeters <= MAX_RADIUS_METERS;
+      && (position.radiusMeters === undefined || validRadius(position.radiusMeters));
   });
 };
 

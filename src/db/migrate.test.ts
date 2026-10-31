@@ -1,3 +1,4 @@
+import radiusMigration from './migrations/031_checkpoint_radius_configuration.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Pool, type PoolClient } from 'pg';
@@ -63,6 +64,7 @@ const migrations = [
   huntLocalSourceMigration,
   customExercisesMigration,
   participantAccessMigration,
+  radiusMigration,
 ];
 const trackedMigration: Migration = {
   id: '006_test_tracking',
@@ -168,6 +170,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       '028_hunt_local_template_source',
       '029_template_custom_exercises',
       '030_participant_checkpoint_access',
+      '031_checkpoint_radius_configuration',
     ]);
     try {
       await expect(client.query(
@@ -251,6 +254,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { id: '028_hunt_local_template_source' },
       { id: '029_template_custom_exercises' },
       { id: '030_participant_checkpoint_access' },
+      { id: '031_checkpoint_radius_configuration' },
     ]);
     const users = await client.query<{ id: string; email: string; role: string; account_status: string }>(
       `SELECT u.id, u.email, ur.role, u.account_status FROM users u JOIN user_roles ur ON ur.user_id = u.id

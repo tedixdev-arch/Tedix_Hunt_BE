@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../lib/postgres.js';
-import { fail, snapshotCheckpoints, type SnapshotCheckpoint } from '../domain/participantAccess.js';
+import { fail, record, snapshotCheckpoints, type SnapshotCheckpoint } from '../domain/participantAccess.js';
 
 export interface ParticipantCheckpointStatus {
   checkpointId: string;
@@ -24,7 +24,7 @@ async function withContext<T>(huntId: string, userId: string, code: string | und
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows: hunts } = await client.query(`SELECT *, encode(digest(template_snapshot::text,'sha256'),'hex') AS snapshot_digest
+    const { rows: hunts } = await client.query(`SELECT *, encode(digest(CASE WHEN checkpoint_radius_configuration IS NULL THEN template_snapshot::text ELSE template_snapshot::text || checkpoint_radius_configuration::text END,'sha256'),'hex') AS snapshot_digest
       FROM hunts WHERE id=$1 FOR UPDATE`, [huntId]);
     const hunt = hunts[0];
     if (!hunt) return fail(404, 'not_found');
@@ -37,7 +37,19 @@ async function withContext<T>(huntId: string, userId: string, code: string | und
     if (!participant) return fail(422, 'enrollment_policy_unresolved');
     if (!hunt.template_key || !Number.isInteger(hunt.template_version) || !hunt.snapshot_digest) return fail(409, 'snapshot_unavailable');
     if (participant.access_snapshot_digest !== null && participant.access_snapshot_digest !== hunt.snapshot_digest) return fail(409, 'snapshot_conflict');
-    const definitions = snapshotCheckpoints(hunt.template_snapshot, hunt.template_key, hunt.template_version);
+    // Resolve an in-memory execution view; never rewrite the approved source snapshot.
+    const execution = structuredClone(hunt.template_snapshot);
+    const radii = hunt.checkpoint_radius_configuration;
+    if (radii && record(execution) && record(execution.configuration)) {
+      for (const point of Array.isArray(execution.configuration.checkpointPositions) ? execution.configuration.checkpointPositions : []) {
+        if (!record(point)) continue;
+        const radius = radii.checkpointPositions.find((p: any) => p.checkpointNumber === point.checkpointNumber)?.radiusMeters;
+        if (typeof radius === 'number') point.radiusMeters = radius;
+      }
+      if (execution.configuration.finishPoint && radii.finishPoint)
+        execution.configuration.finishPoint.radiusMeters = radii.finishPoint.radiusMeters;
+    }
+    const definitions = snapshotCheckpoints(execution, hunt.template_key, hunt.template_version);
     await client.query('UPDATE hunt_participants SET access_snapshot_digest=$2 WHERE id=$1 AND access_snapshot_digest IS NULL', [participant.id, hunt.snapshot_digest]);
     for (const point of definitions) {
       await client.query(`INSERT INTO hunt_checkpoint_identities(hunt_id,snapshot_digest,ordinal,kind) VALUES($1,$2,$3,$4)

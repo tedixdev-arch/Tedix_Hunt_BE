@@ -176,7 +176,7 @@ suite('C1 PostgreSQL classification and legacy compatibility', () => {
     const { User } = await import('../models/User.js');
     expect(await User.deleteControlled(sourceOwner)).toBe('retired');
     expect(await User.deleteControlled(destinationOwner)).toBe('retired');
-    expect(await historical()).toEqual({ ...saved, hunts: saved.hunts.map(h => ({ ...h, template_id: null, template_locality_id: null, template_locality_snapshot: null })) });
+    expect(await historical()).toEqual({ ...saved, hunts: saved.hunts.map(h => ({ ...h, template_id: null, template_locality_id: null, template_locality_snapshot: null, checkpoint_radius_configuration: null })) });
     expect((await db.query('SELECT account_status, email FROM users WHERE id=ANY($1::uuid[])', [[sourceOwner, destinationOwner]])).rows)
       .toEqual([{ account_status: 'retired', email: null }, { account_status: 'retired', email: null }]);
   });
