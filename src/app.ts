@@ -13,6 +13,7 @@ import { organizationsRouter } from './routes/organizations.js';
 import { huntsRouter } from './routes/hunts.js';
 import { huntTemplatesRouter } from './routes/huntTemplates.js';
 import { huntOptionsRouter } from './routes/huntOptions.js';
+import { participantAccessRouter } from './routes/participantAccess.js';
 import { huntAccessRouter } from './routes/huntAccess.js';
 import { rewardOptionsRouter } from './routes/rewardOptions.js';
 import { huntRewardsRouter } from './routes/huntRewards.js';
@@ -84,6 +85,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/organizer/local-templates', organizerLocalTemplatesRouter);
   app.use('/api/hunts/:id/local-template', huntLocalTemplateRouter);
   app.use('/api/hunts', huntsRouter);
+  app.use('/api/hunts/:id', participantAccessRouter);
 
   app.get('/api/docs.json', (_request, response) => {
     response.json(swaggerSpec);
