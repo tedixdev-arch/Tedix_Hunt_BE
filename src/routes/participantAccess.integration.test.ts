@@ -40,7 +40,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
       const directory = new URL('../db/migrations/', import.meta.url);
       const migrations = [];
       for (const f of (await readdir(directory)).filter(f => /^\d{3}_.*\.ts$/.test(f)).sort()) migrations.push((await import(new URL(f, directory).href)).default);
-      expect(await runMigrations(client, migrations)).toHaveLength(31);
+      expect(await runMigrations(client, migrations)).toHaveLength(33);
       expect(await runMigrations(client, migrations)).toEqual([]);
     } finally { client.release(); }
     for (const who of ['participant', 'second', 'racer', 'outsider', 'organizer', 'admin', 'supervisor', 'blocked', 'retired', 'guest']) {

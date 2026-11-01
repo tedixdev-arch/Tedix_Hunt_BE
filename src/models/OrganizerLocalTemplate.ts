@@ -19,7 +19,7 @@ export interface LocalArtifact {
 }
 
 // Identity, exact authority, retained evidence and live geography share a statement snapshot.
-const artifactSelect = `SELECT t.id AS "templateId",t.key,v.version,v.content,
+export const artifactSelect = `SELECT t.id AS "templateId",t.key,v.version,v.content,
  t.origin,t.category,t.created_by_user_id,v.origin AS version_origin,v.category AS version_category,
  v.created_by_user_id AS version_owner,t.local_suspended_at,
  r.decision,r.reviewer_user_id,v.locality_id AS "localityId",v.locality_snapshot AS "localitySnapshot",
