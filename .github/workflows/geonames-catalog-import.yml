@@ -1,0 +1,98 @@
+name: GeoNames Catalog Import
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: geonames_ci
+          POSTGRES_PASSWORD: ${{ github.token }}
+          POSTGRES_DB: geonames_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geonames_ci -d geonames_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: geonames_ci
+      PGDATABASE: geonames_ci
+      PGPASSWORD: ${{ github.token }}
+      GEONAMES_DIR: ${{ runner.temp }}/geonames
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Configure masked disposable connection
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { randomBytes } from 'node:crypto';
+          const url = new URL('postgresql://127.0.0.1:5432/geonames_ci');
+          url.username = process.env.PGUSER;
+          url.password = process.env.PGPASSWORD;
+          console.log('::add-mask::' + url.href);
+          const jwt = randomBytes(32).toString('hex');
+          console.log('::add-mask::' + jwt);
+          appendFileSync(process.env.GITHUB_ENV, 'DATABASE_URL=' + url.href + '\nJWT_SECRET=' + jwt + '\n');
+          NODE
+      - run: npm ci
+      - run: npm run build
+      - name: Download official sources and record provenance
+        id: download
+        run: bash scripts/ci/download-geonames.sh
+      - name: Prepare disposable database baseline
+        id: baseline
+        run: psql -X -v ON_ERROR_STOP=1 -f src/db/pre_migration_baseline.sql
+      - name: Run database migrations
+        id: migrations
+        run: npm run migrate
+      - name: Verify initial catalog state
+        id: initial
+        run: node scripts/ci/accept-geonames.mjs initial
+      - name: Import official catalog
+        id: import
+        run: |
+          npm run import-geonames -- "$GEONAMES_DIR/cities500.txt" "$GEONAMES_DIR/countryInfo.txt" "$GEONAMES_DIR/admin1CodesASCII.txt" "$GEONAMES_DIR/admin2Codes.txt"
+      - name: Verify official catalog and save fingerprint
+        id: acceptance
+        run: node scripts/ci/accept-geonames.mjs first
+      - name: Reimport the exact same official files
+        id: reimport
+        run: |
+          npm run import-geonames -- "$GEONAMES_DIR/cities500.txt" "$GEONAMES_DIR/countryInfo.txt" "$GEONAMES_DIR/admin1CodesASCII.txt" "$GEONAMES_DIR/admin2Codes.txt"
+      - name: Verify idempotency
+        id: idempotency
+        run: node scripts/ci/accept-geonames.mjs repeat
+      - name: Report results and provenance
+        if: always()
+        env:
+          RESULTS: ${{ toJSON(steps) }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+          const steps = JSON.parse(process.env.RESULTS);
+          let text = '# GeoNames Catalog Import\n\nDisposable PostgreSQL 17 only. GeoNames (CC BY 4.0): https://www.geonames.org/\n\n';
+          text += 'Commit: ' + process.env.GITHUB_SHA + '\n\n| Check | Outcome |\n| --- | --- |\n';
+          for (const id of ['download','baseline','migrations','initial','import','acceptance','reimport','idempotency'])
+            text += '| ' + id + ' | ' + (steps[id]?.outcome ?? 'not run') + ' |\n';
+          const dir = process.env.GEONAMES_DIR;
+          for (const name of ['provenance.md','acceptance.md'])
+            if (existsSync(dir + '/' + name)) text += '\n' + readFileSync(dir + '/' + name, 'utf8');
+          text += '\nA failed or skipped acceptance step does not establish real-data acceptance. No deployment or persistent database is involved.\n';
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
+          NODE
