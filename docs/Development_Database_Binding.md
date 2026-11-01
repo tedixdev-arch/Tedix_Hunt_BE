@@ -1,31 +1,94 @@
 # G4c-2 development database binding
 
-Prepared for ChatGPT re-review only. Do not dispatch until review is complete.
-The manual workflow uses only the existing development SSH host/account/key,
-shares `dev-deploy` concurrency, and never deploys, imports, migrates, restarts,
-changes database permissions or escalates privileges. No production inputs exist.
+Prepared for ChatGPT review only. Do not dispatch until review is complete.
+This manual workflow uses the existing development SSH host/account/key and
+`dev-deploy` concurrency. It never deploys, imports, migrates, restarts, modifies
+database permissions, escalates privileges or targets production.
+The owner reports all three `DEV_PG_*` repository variables are configured; this
+correction neither reads nor replaces their values.
 
-## Independent identity evidence
+## Configuration behavior established from the repository
 
-The administrator designated pgAdmin connection `tedixhunt_dev`. The owner verified
-`tedix_hunt`, `tedix_app`, migrations 001–034, zero cities and no import history.
-Database/user names and a connectivity probe do not establish server identity.
-The supplied evidence does not contain a numeric server identity. Independently
-obtained values from that designated connection must be recorded as repository
-variables `DEV_PG_SYSTEM_IDENTIFIER`, `DEV_PG_SERVER_ADDR`, `DEV_PG_SERVER_PORT`.
-The administrator can obtain them with read-only SQL:
+- `src/server.ts` loads `dotenv/config` before constructing the application.
+- Reviewed dotenv 17 defaults read `.env` in the process working directory and
+  fill missing process environment keys, without overriding launch values,
+  including launch values that are empty. Custom dotenv options/Node loaders
+  are outside the supported contract and remain BLOCKED.
+- `src/config/environment.ts` captures `process.env.DATABASE_URL` at module load.
+  `src/lib/postgres.ts` constructs its Pool from that captured value. pg also
+  uses PG environment fallbacks for options not supplied by the URL.
+- `src/scripts/importGeonames.ts` independently loads `dotenv/config` and uses
+  `new Pool({connectionString:process.env.DATABASE_URL})`. It is never imported
+  or executed by this verifier.
+- `.github/workflows/backend.yml` runs development deployments in
+  `/var/www/Tedix_Hunt_BE`, explicitly excludes `.env` from rsync, builds, then
+  restarts `tedixhunt-api`. It does not define a systemd unit or prove that the
+  unit supplies an EnvironmentFile. The installed unit, launch environment and
+  its permissions have not been inspected live. A direct Node MainPID and the
+  deployment working directory are checked on an eventual approved run.
+
+Thus the preserved `.env` can be the real source of DATABASE_URL even when it
+is absent from `/proc/<MainPID>/environ`. Linux exposes launch environment, not
+later dotenv mutations. File existence or timestamps cannot establish the
+historical values loaded by the running service. The old unconditional `.env`
+block is removed; it is replaced with independent evidence of the live target.
+
+## Supported read-only proof with preserved .env
+
+1. Read launch environment privately and parse current `.env` with the reviewed
+   dotenv parser. Launch keys take precedence exactly as they do by default in
+   the service and importer. This is a **candidate for a future importer run**,
+   never a substitute for the backend's historical effective environment. The
+   importer scope is invocation from the deployment directory with those same
+   captured launch values and preserved .env, not an arbitrary SSH shell's
+   defaults. The workflow never launches it or transfers environment contents.
+2. Before connecting, check the candidate's actual pg user/database and resolve
+   its host against the independently configured development address/port.
+   A different endpoint is rejected without opening a database connection. DNS
+   and the existing development host's filesystem are trusted infrastructure.
+   All resolved addresses must match; ambiguous/multi-address hosts may block.
+3. Connect using the candidate, without running importer/application entrypoints.
+   Open one bounded repeatable-read READ ONLY transaction. Verify current/session
+   role `tedix_app`, database `tedix_hunt`, cluster system identifier and server
+   address/port against the independent pgAdmin evidence.
+4. Read socket inode links in `/proc/<MainPID>/fd`. Intersect these **owned**
+   inodes with established TCP records in `/proc/<MainPID>/net/tcp` and `tcp6`.
+   The network tables alone contain other processes and are insufficient.
+5. Match the socket's remote endpoint to the verified PostgreSQL listener and
+   its local address/port to an existing own-role `pg_stat_activity` session for
+   `tedix_app` in `tedix_hunt`. The verifier's own PostgreSQL PID is excluded;
+   its socket belongs to a different OS process. Require the same socket inode,
+   endpoint tuple, PostgreSQL PID and backend start time across repeated reads.
+   IPv4, IPv6 and IPv4-mapped IPv6 are compared as bytes using native proc word order.
+6. Confirm migrations 032–034, public catalog/reference tables, zero cities and
+   zero import records. Refresh PostgreSQL's statistics snapshot and repeat the
+   socket/session match. Recheck MainPID/start time and ensure current `.env`
+   bytes did not change during verification, without printing them or their hash.
+7. Roll back and close before reporting final PASS.
+
+This proves the **live backend connection's database/role/server binding** and
+that the current importer candidate can connect to that same independently
+identified target. It does not claim to recover the backend's historical password,
+TLS options or exact environment bytes. A current `.env` edited after startup can
+pass only if its target is independently corroborated by the existing backend
+socket/session. A candidate connection by itself never establishes runtime binding.
+No API request is made to induce a connection, and no account or application data
+is read. Migrations 001–031 are not reverified.
+
+## Independent cluster identity and permissions
+
+The administrator-designated pgAdmin connection remains `tedixhunt_dev`.
+`DEV_PG_SYSTEM_IDENTIFIER`, `DEV_PG_SERVER_ADDR` and `DEV_PG_SERVER_PORT` are the
+owner-configured independent comparison values. Never populate them from the
+backend under test or copy a connection string into diagnostics.
+The administrator's independent read-only evidence queries are:
 
 ```sql
 SELECT system_identifier::text FROM pg_catalog.pg_control_system();
 SELECT inet_server_addr()::text, inet_server_port();
 ```
 
-Never populate these from the backend under test or copy a connection string.
-A Unix socket/null address or a proxy/replica endpoint requires independent review;
-this verifier supports a directly comparable TCP endpoint. Values are withheld
-from all diagnostics and compared privately without weakening the comparison.
-
-The probe first confirms current/session user `tedix_app`, then evaluates:
+On the candidate connection the verifier first checks:
 
 ```sql
 SELECT has_function_privilege(
@@ -33,76 +96,71 @@ SELECT has_function_privilege(
 );
 ```
 
-Only a true result permits the identity query. False or SQLSTATE 42501 reports
-`BLOCKED: missing permission: EXECUTE on function pg_catalog.pg_control_system()`.
-There is no fallback to names alone, alternate role, grant, sudo or escalation.
-The query is valid on PostgreSQL 17; EXECUTE is restricted by default and must
-not be assumed for `tedix_app`. Existing development role permissions have **not**
-been confirmed live: this correction does not execute the workflow or contact the
-development database. The actual role ACL is checked on an eventual approved run;
-a grant is never proposed or applied automatically. Synthetic tests cover both
-false ACL and permission-denied execution, including cleanup.
+False or SQLSTATE 42501 is BLOCKED with the missing EXECUTE permission. The probe
+never grants it, changes role, uses sudo or weakens comparison to database/user
+names. Existing `tedix_app` permissions and the configured independent values
+have not been tested live. Own-role `pg_stat_activity` endpoint metadata normally
+requires no pg_monitor grant; if restricted, verification blocks and names the
+required read operation. SQL uses SELECT only plus transaction BEGIN/ROLLBACK;
+`pg_stat_clear_snapshot()` clears the session's statistics cache, not database data.
+All identity/session/address values are withheld from diagnostics.
 
-## Versioned configuration verification
+## Limits and the smallest safe alternatives
 
-Contract version 1 in `verify-dev-db.cjs` records SHA-256 fingerprints of reviewed
-server/configuration/pool artifacts, importer source, lockfile and relevant pg,
-connection-string and dotenv implementation files. The artifacts were produced
+The automatic check remains BLOCKED if the deployment account cannot read the
+backend's launch environment, `.env`, fd links or network tables, if the pool
+has no open connection, if a connection races closed, or if the installed unit
+uses an unsupported launch. Unix sockets, NAT, connection proxies, distinct
+listener addresses or namespaces that prevent an exact direct TCP correlation
+are not inferred to match. Extra PG credential/TLS files and custom loaders
+require separate configuration review. Unknown builds remain BLOCKED.
+
+The smallest alternative for a permission-only gap is an operator-assisted run
+of this same reviewed read-only probe in an **already authorized** service/operator
+session, with the same independent identity inputs. No new grants, sudo commands,
+service environment edits or restarts are part of this PR. Its sanitized output
+is separate operator evidence, not an automatic workflow PASS or permission bypass.
+
+If no stable observable backend connection exists, the current repository has no
+way to extract historical dotenv values or prove pool identity remotely. Existing
+`/api/health/ready` only runs SELECT 1 and cannot close that gap. The smallest future
+instrumentation would execute the identity/role SELECTs through a checked-out
+client from the **running backend's existing Pool**, under a read-only transaction,
+and return fixed diagnostic codes against the independent expected identity via
+an authenticated internal operator channel. It must never return credentials or
+raw environment values and must release/rollback in finally. Such instrumentation
+requires a separately reviewed application change and later authorized deployment;
+it is **not implemented, deployed or activated here**. Until then, leave BLOCKED;
+do not assume current `.env` matches the process or restart it to manufacture proof.
+
+## Artifact contract, cleanup and output protection
+
+Versioned fingerprints cover reviewed server/configuration/pool/importer artifacts,
+lockfile, pg configuration and dotenv parser/entry/options implementations, built
 from main `1cc79aaebfffa3f477dd967ed2727f7675c9c212` with TypeScript 5.9.3.
-This replaces substring/formatting checks on compiled JavaScript with an explicit
-version-aware allowlist. A different artifact is BLOCKED, not heuristically accepted.
-A new build/toolchain requires reviewing the configuration path, updating the
-contract and its tests, and reviewing the PR before use. The verifier never
-imports backend, importer or migration entrypoints. Build hashes are tested against
-the checkout. Trusted deployment files and normal filesystem metadata are assumed;
-this does not attest against a malicious server administrator rewriting history.
+New builds require review and contract updates. Backend artifacts modified since
+startup block verification. Trusted deployment files/metadata are assumed; this
+is not attestation against a malicious server administrator rewriting history.
 
-The supported reviewed configuration binds backend and importer to launch
-DATABASE_URL using the same pg implementation. The probe requires a direct Node
-MainPID in the deployment directory and a complete launch URL with host, user,
-password and database. Only the service's launch PG variables supply pg fallbacks;
-the SSH account's defaults are removed. Configuration artifacts modified since
-process start, custom Node/dotenv loaders and external credentials/TLS files block
-verification. Existing credential/TLS security behavior is never relaxed.
+All failure paths reach finally: rollback after any BEGIN attempt, then close even
+if connect or rollback fails. Connection errors mark failure rather than exiting.
+Final PASS requires cleanup success. Remote stdout uses finite `DEV_DB_V1` codes;
+only locally defined messages reach logs/summary. Arbitrary status text, unknown
+codes, control bytes, oversized output, invalid ordering and inconsistent SSH exit
+status are rejected. Runtime socket proof is mandatory in a success record sequence.
+Raw output is never printed and is removed on exit. FAIL means observed mismatch;
+BLOCKED means missing evidence/permissions or failed cleanup. SSH key discovery
+retains the existing deployment's ssh-keyscan trust-on-first-use limitation.
 
-Permission denial while reading `/proc/<MainPID>/environ` is explicitly BLOCKED,
-with that exact missing read permission. No privilege escalation is attempted.
-Linux exposes the launch environment, not later dotenv mutations. A missing launch
-DATABASE_URL blocks; the probe never substitutes current `.env` contents. Because
-historical dotenv pg fallback values cannot be recovered, **the presence of a
-server .env file also blocks**, even if DATABASE_URL is in the launch environment.
-Unreadable .env metadata blocks too. This conservative supported scope is deliberate;
-a service outside it requires a separately reviewed runtime configuration contract,
-not environment changes by this workflow. No live effective-configuration PASS is
-claimed. Process identity is rechecked before final success.
+## Validation
 
-## Read-only operation and safe reporting
-
-Queries run in one bounded repeatable-read READ ONLY transaction, followed by
-ROLLBACK. Checks cover database/current/session roles, independent cluster and
-endpoint identity, exact migration IDs 032–034, catalog/reference tables, zero
-cities and zero import records. Migrations 001–031 are not reverified.
-All exceptions and mismatches reach `finally`: rollback is attempted after any
-BEGIN attempt, and close is attempted even if connect or rollback fails. Async
-connection errors set failure state instead of terminating the process. Final PASS
-is emitted only after successful rollback and close. Cleanup errors report BLOCKED.
-
-Remote stdout uses only `DEV_DB_V1 <fixed-code>` records. The local renderer rejects
-unknown codes, arbitrary PASS/BLOCKED/FAIL text, banners, annotations, control bytes,
-oversized output, invalid ordering and exit-status inconsistencies. It maps accepted
-codes to locally defined messages; no remote-provided free text reaches logs or
-Markdown. Raw stdout and stderr are not printed, and raw stdout is removed on exit.
-The summary contains only the local report. FAIL indicates an observed mismatch;
-BLOCKED indicates insufficient evidence/permission/connectivity or failed cleanup.
-Both cause a non-success job. SSH host-key discovery retains the existing deployment's
-ssh-keyscan trust-on-first-use limitation.
-
-## Local validation
-
-Run `npm run build`, `node scripts/ci/verify-dev-db.test.cjs`, and `npm test`.
-The dedicated tests use synthetic process/database fixtures only. They cover the
-supported artifact contract, inaccessible process environment, unknown builds,
-configuration ambiguity, restricted identity access, mismatches and rollback/close
-on failure, plus protocol injection and exit-status filtering. Workflow YAML and
-embedded Bash syntax are checked separately. No workflow dispatch or live SSH/SQL
-is part of these tests.
+Run `npm run build` and `node scripts/ci/verify-dev-db.test.cjs`.
+Fixtures cover the actual dotenv-only DATABASE_URL case with preserved `.env`,
+launch overrides, a file edited after process start with a corroborated target,
+wrong candidate endpoints, private read permission failures, socket ownership,
+IPv4/IPv6 mapping, missing/mismatched/changing sessions, configuration races,
+independent cluster mismatch, query permissions, cleanup and diagnostic injection.
+Tests do not open live SSH/database connections. YAML, dispatch/concurrency
+assertions, embedded Bash and Node syntax are checked separately.
+The previously attempted broader backend suite hit environment EPERM restrictions
+on socket listeners and subprocesses; no full-suite success is claimed here.
