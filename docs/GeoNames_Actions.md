@@ -20,9 +20,15 @@ The job has only read permission and checkout does not persist credentials.
 
 The existing `npm run import-geonames` runs twice against identical files.
 Acceptance checks the initial unavailable state, ready state, Cluj-Napoca (681290),
-RO/HU filtering, German/Hungarian aliases including diacritics, exact four-input
+RO/HU filtering, normalized aliases taken from the downloaded Cluj record (raw, normalized and uppercase
+search variants), exact four-input
 import provenance, completed positive row counts, no application locality creation,
 and identical full city/alias content and mappings after the second import.
+Klausenburg and Kolozsvár presence in the official alternate-name field is reported;
+absence is not a failure. Every source name is checked in normalized storage;
+names meeting the two-character search minimum must also be searchable, with
+keyset pagination to avoid first-page assumptions. Imported coordinates must
+match the official record as well as the expected Cluj geographic center.
 Only import IDs/timestamps may change. Acceptance calls existing catalog model reads;
 it does not bypass or change API authorization. Existing API/authorization tests remain unchanged.
 

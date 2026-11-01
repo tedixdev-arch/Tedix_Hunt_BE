@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createInterface } from 'node:readline';
 import { createHash } from 'node:crypto';
 import { createReadStream, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 
@@ -12,9 +13,76 @@ assert.equal(decodeURIComponent(url.username), 'geonames_ci');
 const phase = process.argv[2];
 assert.ok(['initial', 'first', 'repeat'].includes(phase));
 const { GeographicCatalog } = await import('../../dist/models/GeographicCatalog.js');
+const { normalizeCityName } = await import('../../dist/domain/geographicNames.js');
 const { pool } = await import('../../dist/lib/postgres.js');
 const dir = process.env.GEONAMES_DIR;
 const report = text => appendFileSync(dir + '/acceptance.md', '- ' + text + '\n');
+
+async function verifyClujSource(cluj) {
+  // Read the unmodified official record, never a hand-maintained alias fixture.
+  let source;
+  const lines = createInterface({
+    input: createReadStream(dir + '/cities500.txt', { encoding: 'utf8' }), crlfDelay: Infinity,
+  });
+  for await (const line of lines) {
+    const fields = line.split('\t');
+    if (fields[0] !== '681290') continue;
+    assert.equal(fields.length, 19);
+    assert.equal(source, undefined, 'Duplicate Cluj source ID');
+    source = fields;
+  }
+  assert.ok(source, 'Cluj stable ID missing from official snapshot');
+  assert.equal(source[1], 'Cluj-Napoca');
+  assert.equal(source[8], 'RO');
+  assert.ok(source[4].trim() && source[5].trim());
+  assert.ok(Math.abs(cluj.latitude - Number(source[4])) < 1e-7);
+  assert.ok(Math.abs(cluj.longitude - Number(source[5])) < 1e-7);
+  const alternateNames = source[3].split(',').filter(Boolean);
+  for (const name of ['Klausenburg', 'Kolozsvár']) {
+    const present = alternateNames.includes(name);
+    report('SOURCE (' + phase + '): ' + name + ' ' + (present ? 'present' : 'absent')
+      + ' in official Cluj alternate-name field; absence is not an importer defect.');
+  }
+  // Check all normalized input names, including the ASCII field. One-character
+  // names are valid stored aliases but are below the API search minimum.
+  const aliases = [source[2], ...alternateNames].filter(Boolean);
+  const expected = [...new Set([source[1], ...aliases].map(normalizeCityName).filter(Boolean))].sort();
+  const actual = (await pool.query(
+    'SELECT normalized_name FROM geographic_city_names WHERE geoname_id=$1', ['681290'],
+  )).rows.map(row => row.normalized_name).sort();
+  assert.deepEqual(actual, expected, 'Imported names differ from official record');
+
+  async function search(country, query, requireCluj) {
+    let after = '0';
+    do {
+      const page = await GeographicCatalog.search(country, query, 50, after);
+      assert.ok(page.cities.every(city => city.countryCode === country));
+      const found = page.cities.some(city => city.geographicId === '681290');
+      if (requireCluj && found) return;
+      if (!requireCluj) assert.equal(found, false, 'Cluj leaked across country filter');
+      if (page.nextAfter === null) break;
+      assert.ok(BigInt(page.nextAfter) > BigInt(after), 'Search cursor must advance');
+      after = page.nextAfter;
+    } while (true);
+    assert.equal(requireCluj, false, 'Source name not searchable');
+  }
+  // Primary-name discovery remains mandatory regardless of source alias coverage.
+  const queries = new Set(['cluj', source[1]]);
+  for (const alias of aliases) {
+    if (normalizeCityName(alias).length < 2) continue;
+    queries.add(alias);
+    queries.add(normalizeCityName(alias));
+    queries.add(alias.toUpperCase());
+  }
+  for (const query of queries) {
+    await search('RO', query, true);
+    await search('HU', query, false);
+  }
+  report('PASS (' + phase + '): exact source coordinates and normalized names; '
+    + alternateNames.length + ' official alternate names; ' + queries.size
+    + ' primary/alias query variants with RO/HU filtering. Names shorter than the search minimum verified in storage.');
+}
+
 try {
   const version = (await pool.query('SHOW server_version_num')).rows[0].server_version_num;
   assert.equal(Math.floor(Number(version) / 10000), 17);
@@ -29,13 +97,8 @@ try {
     assert.equal(cluj.name, 'Cluj-Napoca');
     assert.equal(cluj.countryCode, 'RO');
     assert.ok(Math.abs(cluj.latitude - 46.77) < 0.1 && Math.abs(cluj.longitude - 23.59) < 0.1);
-    for (const query of ['cluj', 'Klausenburg', 'Kolozsvár']) {
-      const page = await GeographicCatalog.search('RO', query, 50, '0');
-      assert.ok(page.cities.some(c => c.geographicId === '681290'), 'Cluj missing for ' + query);
-      assert.ok(page.cities.every(c => c.countryCode === 'RO'));
-      const excluded = await GeographicCatalog.search('HU', query, 50, '0');
-      assert.ok(excluded.cities.every(c => c.countryCode === 'HU' && c.geographicId !== '681290'));
-    }
+    assert.equal(cluj.geographicId, '681290');
+    await verifyClujSource(cluj);
     // Verify exact importer provenance, including the importer's file-boundary hash.
     const hash = createHash('sha256');
     for (const [i, name] of ['cities500.txt', 'countryInfo.txt', 'admin1CodesASCII.txt', 'admin2Codes.txt'].entries()) {
@@ -72,7 +135,7 @@ try {
     assert.equal(snapshot.localities.length, 0);
     if (phase === 'first') writeFileSync(dir + '/fingerprint.json', JSON.stringify(snapshot));
     else assert.deepEqual(snapshot, JSON.parse(readFileSync(dir + '/fingerprint.json', 'utf8')));
-    report('PASS (' + phase + '): ready; Cluj-Napoca 681290; RO/HU filtering; Klausenburg and Kolozsvár aliases; provenance; ' + count + ' cities; no locality creation' + (phase === 'repeat' ? '; identical full catalog/alias fingerprint after reimport.' : '.'));
+    report('PASS (' + phase + '): ready; Cluj-Napoca 681290; RO/HU filtering; official-source aliases; provenance; ' + count + ' cities; no locality creation' + (phase === 'repeat' ? '; identical full catalog/alias fingerprint after reimport.' : '.'));
   }
 } catch (error) {
   report('FAIL (' + phase + '): acceptance assertion or database operation failed; see failing step.');
