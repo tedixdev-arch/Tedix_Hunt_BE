@@ -27,7 +27,7 @@ jobs:
         run: |
           set -eu
           report="$RUNNER_TEMP/dev-db-report.txt"
-          trap 'rm -f "$RUNNER_TEMP/dev-db-key"' EXIT
+          trap 'rm -f "$RUNNER_TEMP/dev-db-key" "$RUNNER_TEMP/dev-db-raw.txt"' EXIT
           if [[ ! "$EXPECTED_ID" =~ ^[0-9]{1,20}$ || ! "$EXPECTED_ADDR" =~ ^[0-9a-fA-F.:]+$ || ! "$EXPECTED_PORT" =~ ^[0-9]{1,5}$ ]]; then
             echo 'BLOCKED: independently recorded tedixhunt_dev server identity is missing or invalid; configure DEV_PG_SYSTEM_IDENTIFIER, DEV_PG_SERVER_ADDR and DEV_PG_SERVER_PORT' | tee "$report"
             exit 2
@@ -53,27 +53,9 @@ jobs:
             < scripts/ci/verify-dev-db.cjs > "$RUNNER_TEMP/dev-db-raw.txt" 2>/dev/null
           result=$?
           set -e
-          # Never forward SSH banners, runtime diagnostics, SQL errors or environment contents.
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          root = Path(os.environ['RUNNER_TEMP'])
-          lines = (root / 'dev-db-raw.txt').read_text(errors='replace').splitlines()
-          safe = [line for line in lines if line.startswith(('PASS: ', 'BLOCKED: ', 'FAIL: '))]
-          (root / 'dev-db-report.txt').write_text('\n'.join(safe) + '\n')
-          PY
-          cat "$report"
-          if [[ "$result" == 1 ]] && grep -q '^FAIL: ' "$report"; then
-            exit 1
-          fi
-          if [[ "$result" != 0 ]]; then
-            echo 'BLOCKED: verification incomplete; see sanitized checks above. SSH/session failures require development SSH login and permission to execute node; no escalation attempted.' | tee -a "$report"
-            exit "$result"
-          fi
-          if ! grep -qx 'PASS: development database binding verified; read-only transaction rolled back' "$report"; then
-            echo 'BLOCKED: final verification evidence missing' | tee -a "$report"
-            exit 2
-          fi
+          # Local renderer accepts only a finite, ordered diagnostic-code protocol.
+          # No remote-provided text reaches logs or summaries.
+          node scripts/ci/render-dev-db-report.cjs "$RUNNER_TEMP/dev-db-raw.txt" "$report" "$result"
       - name: Publish sanitized evidence
         if: always()
         shell: bash
