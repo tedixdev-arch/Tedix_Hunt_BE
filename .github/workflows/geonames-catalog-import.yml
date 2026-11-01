@@ -28,8 +28,9 @@ jobs:
       PGUSER: geonames_ci
       PGDATABASE: geonames_ci
       PGPASSWORD: ${{ github.token }}
-      GEONAMES_DIR: ${{ runner.temp }}/geonames
     steps:
+      - name: Initialize GeoNames directory
+        run: printf 'GEONAMES_DIR=%s/geonames\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
