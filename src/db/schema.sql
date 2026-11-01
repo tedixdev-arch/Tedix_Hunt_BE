@@ -419,7 +419,8 @@ CREATE TRIGGER hunt_template_reviews_immutable_classified
   BEFORE UPDATE OR DELETE ON hunt_template_reviews
   FOR EACH ROW EXECUTE FUNCTION preserve_classified_template_review();
 
--- Initial reviewed reference: ISO 3166-1 alpha-2 RO / Romania. No locality import.
+-- Initial reviewed reference: RO / Romania. No locality import.
+-- Country codes: assigned ISO 3166-1 alpha-2 plus GeoNames XK / Kosovo.
 CREATE TABLE countries (
   code TEXT PRIMARY KEY CHECK (code IN (
     'AD', 'AE', 'AF', 'AG', 'AI', 'AL', 'AM', 'AO', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AW', 'AX',
@@ -438,7 +439,7 @@ CREATE TABLE countries (
     'SD', 'SE', 'SG', 'SH', 'SI', 'SJ', 'SK', 'SL', 'SM', 'SN', 'SO', 'SR', 'SS', 'ST', 'SV',
     'SX', 'SY', 'SZ', 'TC', 'TD', 'TF', 'TG', 'TH', 'TJ', 'TK', 'TL', 'TM', 'TN', 'TO', 'TR',
     'TT', 'TV', 'TW', 'TZ', 'UA', 'UG', 'UM', 'US', 'UY', 'UZ', 'VA', 'VC', 'VE', 'VG', 'VI',
-    'VN', 'VU', 'WF', 'WS', 'YE', 'YT', 'ZA', 'ZM', 'ZW'
+    'VN', 'VU', 'WF', 'WS', 'XK', 'YE', 'YT', 'ZA', 'ZM', 'ZW'
   )),
   display_name TEXT NOT NULL CHECK ((length(display_name) BETWEEN 1 AND 100 AND btrim(display_name) <> ''))
 );
