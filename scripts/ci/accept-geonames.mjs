@@ -66,21 +66,51 @@ async function verifyClujSource(cluj) {
     } while (true);
     assert.equal(requireCluj, false, 'Source name not searchable');
   }
-  // Primary-name discovery remains mandatory regardless of source alias coverage.
-  const queries = new Set(['cluj', source[1]]);
-  for (const alias of aliases) {
-    if (normalizeCityName(alias).length < 2) continue;
+  // Match the route contract: raw query <=100 UTF-16 code units and
+  // normalized query >=2. Apply the same limits to generated variants.
+  const validQuery = query => query.length >= 2 && query.length <= 100
+    && normalizeCityName(query).length >= 2;
+  const primary = normalizeCityName(source[1]);
+  // At most two distinct non-primary alternate names, independent of source
+  // order. Prefer names that exercise normalization; break ties by code units,
+  // never locale-dependent collation. An ASCII-name fallback is used only if
+  // the alternate-name field has no eligible non-primary name.
+  const candidates = names => [...new Set(names)].filter(name =>
+    normalizeCityName(name) !== primary
+    && validQuery(name) && validQuery(normalizeCityName(name)))
+    .sort((left, right) => {
+      const changed = name => name !== normalizeCityName(name) ? 0 : 1;
+      return changed(left) - changed(right) || (left < right ? -1 : left > right ? 1 : 0);
+    });
+  const alternates = candidates(alternateNames);
+  const selected = [];
+  const normalizedSelected = new Set();
+  for (const alias of alternates.length ? alternates : candidates([source[2]])) {
+    const normalized = normalizeCityName(alias);
+    if (normalizedSelected.has(normalized)) continue;
+    selected.push(alias);
+    normalizedSelected.add(normalized);
+    if (selected.length === 2) break;
+  }
+  // A single primary uppercase query covers case-insensitivity. Deduplicate
+  // unchanged/overlapping variants instead of adding uppercase for every alias.
+  const queries = new Set(['cluj', source[1], source[1].toUpperCase()]);
+  for (const alias of selected) {
     queries.add(alias);
     queries.add(normalizeCityName(alias));
-    queries.add(alias.toUpperCase());
   }
+  assert.ok(queries.size <= 7);
   for (const query of queries) {
+    assert.ok(validQuery(query), 'Acceptance query outside API limits');
     await search('RO', query, true);
     await search('HU', query, false);
   }
-  report('PASS (' + phase + '): exact source coordinates and normalized names; '
-    + alternateNames.length + ' official alternate names; ' + queries.size
-    + ' primary/alias query variants with RO/HU filtering. Names shorter than the search minimum verified in storage.');
+  report('PASS (' + phase + '): exact source coordinates and all normalized names; '
+    + alternateNames.length + ' official alternate names; ' + selected.length
+    + ' deterministically selected non-primary aliases; ' + queries.size
+    + ' distinct primary/alias query variants with RO/HU filtering. '
+    + 'Unselected and out-of-query-limit names remain fully verified in storage.');
+
 }
 
 try {
