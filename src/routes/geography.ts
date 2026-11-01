@@ -79,7 +79,7 @@ router.get('/localities/:id', async (req, res, next) => {
 
 // Dedicated autocomplete budget; independent of disabled-by-default authentication budgets.
 const catalogBuckets = new TokenBuckets(10000);
-router.use('/cities', (req: AuthRequest, res, next) => {
+router.use(['/cities','/catalog-status'], (req: AuthRequest, res, next) => {
   res.setHeader('Cache-Control','private, no-store');
   const retry = catalogBuckets.consume(req.user!.id, { capacity: 120, windowMs: 60000 });
   if (retry) return res.setHeader('Retry-After',retry).status(429).json({error:'rate_limited'});
@@ -88,7 +88,37 @@ router.use('/cities', (req: AuthRequest, res, next) => {
 const geographicId = (id: unknown): id is string => typeof id === 'string' && /^[1-9]\d{0,14}$/.test(id);
 const uuid = (id: unknown): id is string => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const catalogFailure = (error: unknown, res: any, next: any) => error instanceof CatalogError
-  ? res.status(error.status).json({error:error.code}) : next(error);
+  ? res.status(error.status).json(error.code === 'catalog_not_imported'
+    ? {error:error.code,catalogStatus:'not_imported',nextAction:'import_catalog'} : {error:error.code}) : next(error);
+
+/**
+ * @openapi
+ * /api/geography/catalog-status:
+ *   get:
+ *     tags: [Geography]
+ *     summary: Report committed catalog import readiness; never implies worldwide coverage or Template approval
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Ready only after a nonempty completed import and searchable city rows are committed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [source, status, nextAction]
+ *               properties:
+ *                 source: { type: string, enum: [geonames] }
+ *                 status: { type: string, enum: [not_imported, ready] }
+ *                 nextAction: { type: string, nullable: true, enum: [import_catalog, null] }
+ *       400: { description: invalid_input }
+ *       401: { description: Authentication required }
+ *       403: { description: Professional capability required }
+ *       429: { description: rate_limited }
+ */
+router.get('/catalog-status', async (req,res,next) => {
+  if(Object.keys(req.query).length)return res.status(400).json({error:'invalid_input'});
+  try{return res.json(await GeographicCatalog.status());}catch(error){return next(error);}
+});
 
 /**
  * @openapi
@@ -118,6 +148,7 @@ const catalogFailure = (error: unknown, res: any, next: any) => error instanceof
  *       401: { description: Authentication required }
  *       403: { description: Creator, Organizer or Admin required }
  *       429: { description: rate_limited; Retry-After seconds }
+ *       503: { description: catalog_not_imported; catalogStatus not_imported and nextAction import_catalog }
  * /api/geography/cities/{id}:
  *   get:
  *     tags: [Geography]
@@ -131,6 +162,7 @@ const catalogFailure = (error: unknown, res: any, next: any) => error instanceof
  *       403: { description: Professional capability required }
  *       404: { description: not_found }
  *       429: { description: rate_limited }
+ *       503: { description: catalog_not_imported; catalogStatus not_imported and nextAction import_catalog }
  * /api/geography/cities/{id}/resolve:
  *   post:
  *     tags: [Geography]
@@ -146,6 +178,7 @@ const catalogFailure = (error: unknown, res: any, next: any) => error instanceof
  *       404: { description: not_found }
  *       409: { description: catalog_changed or reconciliation_required }
  *       429: { description: rate_limited }
+ *       503: { description: catalog_not_imported; catalogStatus not_imported and nextAction import_catalog }
  * /api/geography/cities/{id}/registration:
  *   post:
  *     tags: [Geography]
@@ -176,6 +209,7 @@ const catalogFailure = (error: unknown, res: any, next: any) => error instanceof
  *       404: { description: not_found }
  *       409: { description: reconciliation_required, already_registered, country_locality_mismatch or catalog_changed }
  *       429: { description: rate_limited }
+ *       503: { description: catalog_not_imported; catalogStatus not_imported and nextAction import_catalog }
  * components:
  *   schemas:
  *     GeographicCity:
@@ -206,7 +240,7 @@ router.get('/cities', async (req, res, next) => {
   try {
     if(!(await Geography.countries()).some(c=>c.code===countryCode))return res.status(400).json({error:'invalid_input'});
     return res.json(await GeographicCatalog.search(countryCode,q,Number(limit),after));
-  }catch(error){return next(error);}
+  }catch(error){return catalogFailure(error,res,next);}
 });
 router.get('/cities/:id', async(req,res,next)=>{
   if(!geographicId(req.params.id) || Object.keys(req.query).length)return res.status(400).json({error:'invalid_input'});

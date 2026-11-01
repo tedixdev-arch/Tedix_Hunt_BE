@@ -913,3 +913,13 @@ CREATE TABLE geographic_city_names (
 );
 CREATE INDEX geographic_city_names_prefix_idx ON geographic_city_names(country_code,normalized_name text_pattern_ops,geoname_id);
 CREATE INDEX geographic_cities_country_idx ON geographic_cities(country_code,geoname_id);
+
+
+-- An old manifest alone is not evidence of a completed import. No readiness backfill.
+ALTER TABLE geographic_imports
+ ADD COLUMN completed_at TIMESTAMPTZ,
+ ADD COLUMN row_count BIGINT,
+ ADD CONSTRAINT geographic_imports_completion_check CHECK (
+  (completed_at IS NULL AND row_count IS NULL) OR
+  (completed_at IS NOT NULL AND row_count IS NOT NULL AND row_count > 0)
+ );

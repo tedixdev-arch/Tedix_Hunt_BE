@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, readdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { importCities, readGeonames, type CityImport } from '../scripts/importGeonames.js';
 import catalogMigration from '../db/migrations/032_geographic_catalog.js';
+import completionMigration from '../db/migrations/033_geographic_import_completion.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
 const city=(id: string,name='Cluj-Napoca',extra: Partial<CityImport>={}): CityImport=>({id,country:'RO',countryName:'Romania',name,
@@ -30,7 +31,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);expect(await history()).toEqual(before);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;
@@ -39,9 +40,38 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   canonical=(await db.query("INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance) VALUES('RO','Cluj-Napoca','Cluj County',46.7667,23.6,'independent canonical test fixture') RETURNING id")).rows[0].id;
   const environment=(await import('../config/environment.js')).environment;environment.databaseUrl=u.toString();appPool=(await import('../lib/postgres.js')).pool;
   app=(await import('../app.js')).createApp();sign=(await import('../lib/jwt.js')).signJwt;
-  await ingest([city('681290'),city('100','Șimleu Silvaniei',{aliases:['Szilágysomlyó'],context:'Sălaj County'}),city('101','Springfield',{aliases:[],context:'Region One'}),city('102','Springfield',{aliases:[],context:'Region Two'}),city('103','Springfield',{country:'US',countryName:'United States',aliases:[],context:'Illinois'})]);
+
  },30000);
  afterAll(async()=>{app?.locals.stopAbuseProtection();await appPool?.end();await db?.end();await admin.query(`DROP DATABASE IF EXISTS "${dbName}"`);await admin.end();});
+ it('reports unavailable until a nonempty import commits successfully',async()=>{
+  const unavailable={error:'catalog_not_imported',catalogStatus:'not_imported',nextAction:'import_catalog'};
+  await get('/api/geography/catalog-status').expect(200,{source:'geonames',status:'not_imported',nextAction:'import_catalog'});
+  await request(app).get('/api/geography/catalog-status').expect(401);
+  await get('/api/geography/catalog-status','participant').expect(403);
+  await search('cluj').expect(503,unavailable);
+  await get('/api/geography/cities/681290').expect(503,unavailable);
+  await post('/api/geography/cities/681290/resolve').expect(503,unavailable);
+  await post('/api/geography/cities/681290/registration',{create:true,reason:'not imported'},'admin').expect(503,unavailable);
+  const client=await db.connect();
+  try {
+   await client.query('BEGIN');
+   await expect(importCities(client,[],provenance)).rejects.toThrow('Empty import');
+   await client.query('ROLLBACK');
+   await get('/api/geography/catalog-status').expect(200,{source:'geonames',status:'not_imported',nextAction:'import_catalog'});
+   // An incomplete old manifest and even city rows cannot declare the catalog operational.
+   await client.query('BEGIN');
+   const run=await importCities(client,[city('999','Incomplete')],provenance);
+   await client.query('UPDATE geographic_imports SET completed_at=NULL,row_count=NULL WHERE id=$1',[run.importId]);
+   await client.query('COMMIT');
+   await get('/api/geography/catalog-status').expect(200,{source:'geonames',status:'not_imported',nextAction:'import_catalog'});
+   await client.query('DELETE FROM geographic_cities WHERE geoname_id=999');
+   await client.query('BEGIN');
+   await importCities(client,[city('681290'),city('100','Șimleu Silvaniei',{aliases:['Szilágysomlyó'],context:'Sălaj County'}),city('101','Springfield',{aliases:[],context:'Region One'}),city('102','Springfield',{aliases:[],context:'Region Two'}),city('103','Springfield',{country:'US',countryName:'United States',aliases:[],context:'Illinois'})],provenance);
+   await get('/api/geography/catalog-status').expect(200,{source:'geonames',status:'not_imported',nextAction:'import_catalog'});
+   await client.query('COMMIT');
+   await get('/api/geography/catalog-status').expect(200,{source:'geonames',status:'ready',nextAction:null});
+  } finally {await client.query('ROLLBACK');client.release();}
+ });
  it('filters by country without depending on Local Templates',async()=>{
   expect((await search('spring').expect(200)).body.cities.map((c:any)=>c.geographicId)).toEqual(['101','102']);
   const r=await get('/api/geography/cities?countryCode=US&q=spring').expect(200);expect(r.body.cities).toHaveLength(1);expect(r.body.cities[0].hasApprovedLocalTemplate).toBe(false);
@@ -92,12 +122,35 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await post('/api/geography/cities/101/registration',{create:true,reason:'x'}).expect(403);
   await post('/api/geography/cities/101/resolve',{},'organizer').expect(403);
   await get('/api/geography/cities?countryCode=RO&q=cluj','organizer').expect(200);
+  await post('/api/geography/cities/101/registration',{create:true,reason:'not admin'},'organizer').expect(403);
+  const catalog=(await import('../models/GeographicCatalog.js')).GeographicCatalog;
+  await expect(catalog.resolve('101',users.creator,{create:true,reason:'direct call'})).rejects.toMatchObject({code:'forbidden',status:403});
+  await expect(catalog.resolve('101',users.organizer)).rejects.toMatchObject({code:'forbidden',status:403});
+  await expect(catalog.resolve('101',users.revoked)).rejects.toMatchObject({code:'forbidden',status:403});
+  await expect(catalog.resolve('101',users.blocked)).rejects.toMatchObject({code:'unauthorized',status:401});
  });
  it('keeps unregistered cities explicit and uses no Creator coordinate or evidence input',async()=>{
   expect((await post('/api/geography/cities/101/resolve').expect(200)).body).toMatchObject({localityId:null,registrationState:'registration_required',nextAction:'request_registration'});
   const r=await post('/api/geography/cities/101/registration',{create:true,reason:'Reviewed official catalog'},'admin').expect(200);
   expect(r.body.registrationState).toBe('registered');expect(r.body.hasApprovedLocalTemplate).toBe(false);
   const l=(await db.query('SELECT * FROM localities WHERE id=$1',[r.body.localityId])).rows[0];expect(l.provider_id).toBe('101');expect(l.provenance).toContain('CC BY 4.0');
+ });
+ it('keeps catalog registration separate from Creator binding and C7 approval authority',async()=>{
+  const registered=(await get('/api/geography/cities/101').expect(200)).body;
+  const list=await get(`/api/organizer/local-templates?countryCode=RO&localityId=${registered.localityId}`,'organizer').expect(200);
+  expect(list.body.templates).toEqual([]);
+  const key=`catalog-binding-${randomUUID()}`;
+  const content={key,version:1,displayName:'Catalog draft',theme:'Explore',mission:{name:'Find'},scoring:{startingScore:100},configuration:{normalCheckpointCount:1},checkpoints:[{checkpoint:1},{role:'terminal',navigationMode:'none'}]};
+  await post('/api/creator/templates',{key,content,category:'local',localityId:registered.geographicId}).expect(400);
+  await db.query('UPDATE localities SET active=false WHERE id=$1',[registered.localityId]);
+  const r=await post('/api/geography/cities/101/resolve').expect(200);
+  expect(r.body).toMatchObject({registrationState:'registered_inactive',nextAction:'contact_admin',hasApprovedLocalTemplate:false});
+  await post('/api/creator/templates',{key,content,category:'local',localityId:registered.localityId}).expect(409);
+  await db.query('UPDATE localities SET active=true WHERE id=$1',[registered.localityId]);
+  await post('/api/creator/templates',{key,content,category:'local',localityId:registered.localityId}).expect(201);
+  await post('/api/creator/templates',{key:`admin-${key}`,content:{...content,key:`admin-${key}`},category:'local',localityId:registered.localityId},'admin').expect(403);
+  await post(`/api/admin/templates/review/${key}/approve`,{version:1},'creator').expect(403);
+  expect((await get('/api/geography/cities/101').expect(200)).body.hasApprovedLocalTemplate).toBe(false);
  });
  it('preserves Cluj canonical UUID without competing records or Signal changes',async()=>{
   const before=await history();const r=await post('/api/geography/cities/681290/resolve').expect(200);
@@ -141,6 +194,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   const eligible=await get(`/api/organizer/local-templates?countryCode=RO&localityId=${canonical}`,'organizer').expect(200);expect(eligible.body.templates.some((t:any)=>t.templateId===template)).toBe(true);
  });
  it('parses official TSV metadata and imports through the same PostgreSQL interface',async()=>{
+  await mkdir('work', {recursive:true});
   const dir=await mkdtemp('work/geonames-');
   try {
    const files=['cities500.txt','countryInfo.txt','admin1CodesASCII.txt','admin2Codes.txt'].map(f=>`${dir}/${f}`);

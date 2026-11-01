@@ -62,6 +62,7 @@ export async function importCities(client: PoolClient, cities: AsyncIterable<Cit
  for await (const city of cities) { batch.push(validateCity(city)); if(batch.length===500) await flush(); }
  if(batch.length) await flush();
  if(!count) throw new Error('Empty import');
+ await client.query('UPDATE geographic_imports SET completed_at=clock_timestamp(),row_count=$2 WHERE id=$1',[run,count]);
  return { importId:run, rows:count };
 }
 

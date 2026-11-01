@@ -12,6 +12,18 @@ const projection = `g.geoname_id::text AS "geographicId",g.country_code AS "coun
  g.locality_id AS "localityId",COALESCE(l.active AND l.country_code=g.country_code,false) AS "registeredActive"`;
 const joins = `FROM geographic_cities g JOIN countries c ON c.code=g.country_code LEFT JOIN localities l ON l.id=g.locality_id`;
 
+// Completion and catalog rows must both be committed before reads can claim availability.
+async function catalogReady(db: Pick<PoolClient, 'query'> = pool): Promise<boolean> {
+  return (await db.query(`SELECT EXISTS(
+    SELECT 1 FROM geographic_imports i WHERE i.completed_at IS NOT NULL AND i.row_count>0
+    AND EXISTS(SELECT 1 FROM geographic_cities g JOIN geographic_city_names n USING(geoname_id)
+      WHERE g.import_id=i.id)
+  ) AS ready`)).rows[0].ready;
+}
+async function requireCatalogReady(db: Pick<PoolClient, 'query'> = pool) {
+  if (!await catalogReady(db)) throw new CatalogError('catalog_not_imported',503);
+}
+
 async function present(rows: any[]) {
   const ids = rows.flatMap(r => r.localityId ? [r.localityId] : []);
   const available = new Set<string>();
@@ -43,7 +55,12 @@ function exactMatch(l: any, city: any) {
 }
 
 export const GeographicCatalog = {
+  async status() {
+    const ready = await catalogReady();
+    return {source:'geonames',status:ready ? 'ready' : 'not_imported',nextAction:ready ? null : 'import_catalog'};
+  },
   async search(country: string, query: string, limit: number, after: string) {
+    await requireCatalogReady();
     const pattern = normalizeCityName(query).replace(/[\\%_]/g, '\\$&') + '%';
     // Ordered source-ID keyset paging is stable across label/population updates. Prefix index filters aliases first.
     const rows = (await pool.query(`WITH matches AS MATERIALIZED (SELECT DISTINCT n.geoname_id FROM geographic_city_names n
@@ -54,6 +71,7 @@ export const GeographicCatalog = {
     return { cities: await present(rows), nextAfter: more ? rows.at(-1).geographicId : null };
   },
   async get(id: string) {
+    await requireCatalogReady();
     const rows = (await pool.query(`SELECT ${projection} ${joins} WHERE g.geoname_id=$1`, [id])).rows;
     if (!rows.length) throw new CatalogError('not_found',404);
     return (await present(rows))[0];
@@ -66,6 +84,7 @@ export const GeographicCatalog = {
       if (!actor || actor.account_status !== 'active') throw new CatalogError('unauthorized',401);
       const roles = (await client.query('SELECT role FROM user_roles WHERE user_id=$1 FOR SHARE',[actorId])).rows.map(r=>r.role);
       if (actor.is_guest || !roles.some(r=>['creator','admin'].includes(r)) || (registration && !roles.includes('admin'))) throw new CatalogError('forbidden',403);
+      await requireCatalogReady(client);
       // Country -> catalog -> Locality agrees with existing registry writers. Imports take the same country lock.
       const initial = (await client.query('SELECT country_code FROM geographic_cities WHERE geoname_id=$1',[id])).rows[0];
       if (!initial) throw new CatalogError('not_found',404);
