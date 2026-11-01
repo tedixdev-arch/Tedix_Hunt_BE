@@ -121,3 +121,5 @@ routes. Enforcement defaults **disabled**, including production. See
 and `.env.example`. Confirm actual ingress/trusted proxies, instance counts,
 classroom traffic and approved limits before enabling; no production activation
 or automatic guest cleanup is included.
+
+GeoNames catalog: [pgAdmin SQL package and import guide](docs/GeoNames_pgAdmin_Import.md) (draft; compatibility gates apply).

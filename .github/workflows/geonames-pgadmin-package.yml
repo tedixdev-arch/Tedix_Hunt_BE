@@ -1,0 +1,132 @@
+name: GeoNames pgAdmin Import Package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: geonames_ci
+          POSTGRES_PASSWORD: ${{ github.token }}
+          POSTGRES_DB: geonames_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geonames_ci -d geonames_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: geonames_ci
+      PGDATABASE: geonames_ci
+      PGPASSWORD: ${{ github.token }}
+    steps:
+      - name: Initialize GeoNames directory
+        run: printf 'GEONAMES_DIR=%s/geonames\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Configure masked disposable connection
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { randomBytes } from 'node:crypto';
+          const url = new URL('postgresql://127.0.0.1:5432/geonames_ci');
+          url.username = process.env.PGUSER;
+          url.password = process.env.PGPASSWORD;
+          console.log('::add-mask::' + url.href);
+          const jwt = randomBytes(32).toString('hex');
+          console.log('::add-mask::' + jwt);
+          appendFileSync(process.env.GITHUB_ENV, 'DATABASE_URL=' + url.href + '\nJWT_SECRET=' + jwt + '\n');
+          NODE
+      - run: npm ci
+      - run: npm run build
+      - name: Test SQL semantics on fresh migrations 001-034
+        id: semantics
+        env:
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npx vitest run src/scripts/packageGeonames.integration.test.ts src/scripts/importGeonames.test.ts src/routes/geographicCatalog.integration.test.ts
+      - name: Download official sources and record provenance
+        id: download
+        run: bash scripts/ci/download-geonames.sh
+      - name: Generate atomic SQL using the existing importer
+        id: package
+        run: |
+          mkdir -p "$GEONAMES_DIR/package"
+          node dist/scripts/packageGeonames.js "$GEONAMES_DIR/package/import.sql" \
+            "$GEONAMES_DIR/cities500.txt" "$GEONAMES_DIR/countryInfo.txt" \
+            "$GEONAMES_DIR/admin1CodesASCII.txt" "$GEONAMES_DIR/admin2Codes.txt" \
+            > "$GEONAMES_DIR/package/manifest.json"
+          cp docs/GeoNames_pgAdmin_Import.md "$GEONAMES_DIR/package/README.md"
+          cp "$GEONAMES_DIR/provenance.md" "$GEONAMES_DIR/package/"
+          sha256sum "$GEONAMES_DIR/package/import.sql" > "$GEONAMES_DIR/package/import.sql.sha256"
+      - name: Prepare disposable database baseline
+        id: baseline
+        run: psql -X -v ON_ERROR_STOP=1 -f src/db/pre_migration_baseline.sql
+      - name: Run database migrations
+        id: migrations
+        run: npm run migrate
+      - name: Set up restricted disposable import role
+        run: |
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE geonames_package_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE ON SCHEMA public TO geonames_package_app;
+          GRANT SELECT ON schema_migrations TO geonames_package_app;
+          GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names TO geonames_package_app;
+          SQL
+      - name: Verify initial catalog state
+        id: initial
+        run: node scripts/ci/accept-geonames.mjs initial
+      - name: Execute official SQL package as restricted role
+        id: import
+        run: node scripts/ci/execute-geonames-package.mjs
+      - name: Verify official catalog and save fingerprint
+        id: acceptance
+        run: node scripts/ci/accept-geonames.mjs first
+      - name: Execute the same SQL package again
+        id: reimport
+        run: node scripts/ci/execute-geonames-package.mjs
+      - name: Verify idempotency
+        id: idempotency
+        run: node scripts/ci/accept-geonames.mjs repeat
+      - name: Include acceptance evidence
+        run: cp "$GEONAMES_DIR/acceptance.md" "$GEONAMES_DIR/package/"
+      - name: Publish tested package
+        id: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: geonames-pgadmin-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.GEONAMES_DIR }}/package/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Report results and provenance
+        if: always()
+        env:
+          RESULTS: ${{ toJSON(steps) }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+          const steps = JSON.parse(process.env.RESULTS);
+          let text = '# GeoNames pgAdmin Import Package\n\nDisposable PostgreSQL 17 only. GeoNames (CC BY 4.0): https://www.geonames.org/\n\n';
+          text += 'Commit: ' + process.env.GITHUB_SHA + '\n\n| Check | Outcome |\n| --- | --- |\n';
+          for (const id of ['semantics','download','package','baseline','migrations','initial','import','acceptance','reimport','idempotency','artifact'])
+            text += '| ' + id + ' | ' + (steps[id]?.outcome ?? 'not run') + ' |\n';
+          const dir = process.env.GEONAMES_DIR;
+          for (const name of ['provenance.md','acceptance.md'])
+            if (existsSync(dir + '/' + name)) text += '\n' + readFileSync(dir + '/' + name, 'utf8');
+          text += '\npgAdmin Web UI and actual tedix_app ACLs are NOT established by this PostgreSQL test. A failed or skipped acceptance step does not establish real-data acceptance. No deployment or persistent database is involved.\n';
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
+          NODE
