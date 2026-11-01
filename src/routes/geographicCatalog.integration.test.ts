@@ -7,6 +7,7 @@ import { runMigrations } from '../db/migrate.js';
 import { importCities, readGeonames, type CityImport } from '../scripts/importGeonames.js';
 import catalogMigration from '../db/migrations/032_geographic_catalog.js';
 import completionMigration from '../db/migrations/033_geographic_import_completion.js';
+import kosovoMigration from '../db/migrations/034_geonames_kosovo_country.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
 const city=(id: string,name='Cluj-Napoca',extra: Partial<CityImport>={}): CityImport=>({id,country:'RO',countryName:'Romania',name,
@@ -31,7 +32,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);expect(await history()).toEqual(before);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;
@@ -220,6 +221,28 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    await writeFile(files[1],'');
    await expect((async()=>{for await(const row of readGeonames(files[0],files[1],files[2],files[3]))void row;})()).rejects.toThrow('Missing country metadata');
   } finally {await rm(dir,{recursive:true,force:true});}
+ });
+ it('imports XK unchanged, exposes Kosovo, and preserves canonical locality identity on reconciliation and reimport',async()=>{
+  const before=await history();
+  const row=city('786714','Pristina',{country:'XK',countryName:'Kosovo',aliases:['Prishtina'],context:'Pristina District',latitude:42.67272,longitude:21.16688});
+  expect((await ingest([row])).rows).toBe(1);
+  expect((await get('/api/geography/countries').expect(200)).body.countries).toContainEqual({code:'XK',displayName:'Kosovo'});
+  const found=(await get('/api/geography/cities?countryCode=XK&q=prishtina').expect(200)).body.cities;
+  expect(found).toHaveLength(1);
+  expect(found[0]).toMatchObject({geographicId:row.id,countryCode:'XK',countryDisplayName:'Kosovo'});
+  expect((await post(`/api/geography/cities/${row.id}/resolve`).expect(200)).body.registrationState).toBe('registration_required');
+  const registered=(await post(`/api/geography/cities/${row.id}/registration`,{create:true,reason:'Reviewed synthetic Kosovo fixture'},'admin').expect(200)).body;
+  const locality=(await db.query('SELECT * FROM localities WHERE id=$1',[registered.localityId])).rows[0];
+  expect(locality.country_code).toBe('XK');
+  await ingest([row]);
+  expect((await post(`/api/geography/cities/${row.id}/resolve`).expect(200)).body).toMatchObject({localityId:locality.id,countryCode:'XK',registrationState:'registered'});
+  expect((await get('/api/geography/localities?countryCode=XK&q=Pristina').expect(200)).body.localities).toContainEqual(expect.objectContaining({id:locality.id,countryCode:'XK'}));
+  expect((await db.query('SELECT * FROM localities WHERE id=$1',[locality.id])).rows[0]).toEqual(locality);
+  expect(await history()).toEqual(before);
+  for(const country of ['ZZ','XX','xk','XKK']) {
+    await expect(ingest([city('999999','Invalid',{country})])).rejects.toBeDefined();
+    await get(`/api/geography/cities?countryCode=${country}&q=pristina`).expect(400);
+  }
  });
  it('uses the prefix index and enforces bounded authenticated query budgets',async()=>{
   await db.query('SET enable_seqscan=off');const plan=(await db.query("EXPLAIN SELECT geoname_id FROM geographic_city_names WHERE country_code='RO' AND normalized_name LIKE 'cluj%'")).rows.map(r=>r['QUERY PLAN']).join('\n');expect(plan).toContain('geographic_city_names_prefix_idx');await db.query('RESET enable_seqscan');

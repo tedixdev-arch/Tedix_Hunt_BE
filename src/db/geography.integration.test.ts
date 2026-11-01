@@ -5,6 +5,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrate.js';
 import foundation from './migrations/024_country_locality.js';
+import kosovo from './migrations/034_geonames_kosovo_country.js';
 import type { Migration } from './migrations/types.js';
 
 const testUrl = process.env.TEST_DATABASE_URL;
@@ -55,6 +56,14 @@ suite('Country/Locality foundation', () => {
       const before = await history();
       migrations.push(foundation);
       expect(await runMigrations(client, migrations)).toEqual(['024_country_locality']);
+      await expect(client.query("INSERT INTO countries VALUES ('XK','Kosovo')")).rejects.toMatchObject({code:'23514',constraint:'countries_code_check'});
+      const countriesBefore = (await client.query('SELECT * FROM countries ORDER BY code')).rows;
+      const existingLocality = (await client.query("INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance) VALUES ('RO','Migration fixture','County',46,23,'Preservation fixture') RETURNING *")).rows[0];
+      migrations.push(kosovo);
+      expect(await runMigrations(client, migrations)).toEqual(['034_geonames_kosovo_country']);
+      expect((await client.query('SELECT * FROM countries ORDER BY code')).rows).toEqual(countriesBefore);
+      expect((await client.query('SELECT * FROM localities WHERE id=$1',[existingLocality.id])).rows).toEqual([existingLocality]);
+      await client.query('DELETE FROM localities WHERE id=$1',[existingLocality.id]);
       expect(await runMigrations(client, migrations)).toEqual([]);
       expect(await history()).toEqual(before);
     } finally { client.release(); }
@@ -150,6 +159,29 @@ suite('Country/Locality foundation', () => {
     await db.query(insert, [...valid.slice(0, 6), 'fixture-provider', 'same-id']);
     await expect(db.query(insert, [...valid.slice(0, 6), 'fixture-provider', 'same-id'])).rejects.toMatchObject({ code: '23505' });
     await expect(db.query("DELETE FROM countries WHERE code='RO'")).rejects.toMatchObject({ code: '23503' });
+  });
+  it('accepts every original ISO code plus only XK and rejects all other two-letter codes', async () => {
+    const original = await readFile(new URL('./migrations/024_country_locality.ts', import.meta.url), 'utf8');
+    const iso = new Set([...original.matchAll(/'([A-Z]{2})'/g)].map(match => match[1]));
+    expect(iso.size).toBe(249);
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      for (const a of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') for (const b of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+        const code = a + b;
+        await client.query('SAVEPOINT country_case');
+        const insert = client.query('INSERT INTO countries VALUES ($1,$2) ON CONFLICT DO NOTHING', [code, 'Fixture']);
+        if (iso.has(code) || code === 'XK') await insert;
+        else await expect(insert).rejects.toMatchObject({code:'23514',constraint:'countries_code_check'});
+        await client.query('ROLLBACK TO SAVEPOINT country_case');
+      }
+      for (const code of ['xk','ro','X','XKK',' XK','XK ','12','', 'ÅK']) {
+        await client.query('SAVEPOINT country_case');
+        await expect(client.query('INSERT INTO countries VALUES ($1,$2)',[code,'Invalid']))
+          .rejects.toMatchObject({code:'23514',constraint:'countries_code_check'});
+        await client.query('ROLLBACK TO SAVEPOINT country_case');
+      }
+    } finally { await client.query('ROLLBACK'); client.release(); }
   });
   it('matches fresh-schema constraints and indexes with the upgraded schema', async () => {
     const client = await db.connect();

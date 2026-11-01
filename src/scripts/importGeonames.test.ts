@@ -72,6 +72,11 @@ describe('GeoNames optional administrative labels',()=>{
  ] as const)('still rejects %s with missing labels',async(_name,options,message)=>{
   await expect(parse({...options,admin1:'',admin2:''})).rejects.toThrow(message);
  });
+ it.each(['XK','RO','US','DE'])('preserves %s from official-format country metadata',async code=>{
+  const name=code==='XK'?'Kosovo':'Fixture country';
+  const [row]=await parse({fields:{8:code,10:'',11:''},country:`${code}\t\t\t\t${name}\n`,admin1:'',admin2:''});
+  expect(row).toMatchObject({country:code,countryName:name,context:name,id:'900',latitude:46,longitude:23});
+ });
  it('still rejects malformed official rows',async()=>{
   await expect(parse({rows:[source.slice(0,18)]})).rejects.toThrow('19-column');
  });
