@@ -2,17 +2,22 @@ import 'dotenv/config';
 import { createApp } from './app.js';
 import { environment } from './config/environment.js';
 import { connectPostgres, disconnectPostgres } from './lib/postgres.js';
+import { startDevelopmentDiagnostic } from './lib/developmentDiagnosticSocket.js';
 import { createGracefulShutdown } from './lib/shutdown.js';
 
 const start = async () => {
   await connectPostgres();
 
+  const stopDiagnostic = await startDevelopmentDiagnostic();
   const app = createApp();
   const server = app.listen(environment.port, environment.host, () => {
     console.log(`TedixHunt API listening on ${environment.host}:${environment.port}`);
   });
 
-  const shutdown = createGracefulShutdown(server, disconnectPostgres);
+  const shutdown = createGracefulShutdown(server, async () => {
+    await stopDiagnostic();
+    await disconnectPostgres();
+  });
   const handleSignal = (signal: NodeJS.Signals) => {
     console.log(`${signal} received. Shutting down TedixHunt API.`);
     void shutdown().catch((error: unknown) => {

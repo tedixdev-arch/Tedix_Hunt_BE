@@ -1,4 +1,3 @@
-import { developmentDatabaseBindingRouter } from './routes/developmentDatabaseBinding.js';
 import { organizerLocalTemplatesRouter, huntLocalTemplateRouter } from './routes/organizerLocalTemplates.js';
 import { localityProposalsRouter, adminLocalityProposalsRouter } from './routes/localityProposals.js';
 import { geographyRouter } from './routes/geography.js';
@@ -47,10 +46,6 @@ export const createApp = (options: CreateAppOptions = {}) => {
   }
 
   app.use(abuse.middleware);
-  if (environment.nodeEnv === 'development' && process.env.NODE_ENV === 'development') {
-    app.use('/api/admin/diagnostics/database-binding', developmentDatabaseBindingRouter);
-  }
-
   app.use(express.json());
   app.use(abuse.accountMiddleware);
 
