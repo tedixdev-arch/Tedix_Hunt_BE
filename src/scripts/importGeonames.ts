@@ -83,10 +83,11 @@ export async function* readGeonames(citiesPath: string, countriesPath: string, a
   if(!f[4].trim() || !f[5].trim())throw new Error('Missing GeoNames coordinates');
   const countryName=countries.get(f[8]); if(!countryName)throw new Error(`Missing country metadata: ${f[8]}`);
   const a1=f[10]?admin1.get(`${f[8]}.${f[10]}`):undefined;
-  const a2=f[11]?admin2.get(`${f[8]}.${f[10]}.${f[11]}`):undefined;
-  if((f[10]&&!a1)||(f[11]&&!a2))throw new Error(`Missing administrative metadata for GeoNames ${f[0]}`);
+  // Administrative dictionaries supply optional display labels, not city identity.
+  // Never infer an omitted parent code or join admin2 without its full source key.
+  const a2=f[10]&&f[11]?admin2.get(`${f[8]}.${f[10]}.${f[11]}`):undefined;
   yield validateCity({id:f[0],country:f[8],countryName,name:f[1],aliases:[f[2],...f[3].split(',')].filter(Boolean),
-   context:[a2,a1].filter(Boolean).join(', ') || countryName,admin1:f[10],admin2:f[11],latitude:Number(f[4]),longitude:Number(f[5]),population:Number(f[14]),modified:f[18]});
+   context:[a2,a1].filter(label=>label?.trim()).join(', ') || countryName,admin1:f[10],admin2:f[11],latitude:Number(f[4]),longitude:Number(f[5]),population:Number(f[14]),modified:f[18]});
  }
 }
 async function main() {
