@@ -40,7 +40,11 @@ export class SqlImportTarget implements ImportTarget {
  }
 }
 
-export async function packageGeonames(paths: string[], output: string) {
+export async function packageGeonames(paths: string[], output: string, scope: 'romania' | 'worldwide' = 'worldwide') {
+ if (!['romania', 'worldwide'].includes(scope)) throw new Error('Unsupported package scope');
+ const countryCode = scope === 'romania' ? 'RO' : undefined;
+ const label = countryCode ? 'Romania only (RO); subset of cities500, not a worldwide catalog' : 'Worldwide cities500 populated-place catalog';
+ const dataset = 'GeoNames cities500 + countryInfo + admin1CodesASCII + admin2Codes' + (countryCode ? ' — Romania only (country_code = RO)' : '');
  if (paths.length !== 4) throw new Error('Four official input files required');
  const sha256 = await hashGeonames(paths);
  const partial = output + '.part';
@@ -53,14 +57,14 @@ export async function packageGeonames(paths: string[], output: string) {
   writeFileSync(fd, sql);
  };
  try {
-  write(`-- GeoNames (CC BY 4.0): https://www.geonames.org/\n-- Execute the entire file once. One statement; invoker permissions; atomic on error.\nDO $tedix_geonames_package$\nDECLARE _tedix_import_run uuid;\nBEGIN\nPERFORM pg_catalog.set_config('search_path','pg_catalog,public,pg_temp',true);\nIF (SELECT count(*) FROM public.schema_migrations WHERE id IN ('032_geographic_catalog','033_geographic_import_completion','034_geonames_kosovo_country')) <> 3 THEN\n RAISE EXCEPTION 'Required geographic migrations 032-034 missing';\nEND IF;\n`);
-  const result = await importCities(new SqlImportTarget(write), readGeonames(paths[0], paths[1], paths[2], paths[3]), {
-   dataset: 'GeoNames cities500 + countryInfo + admin1CodesASCII + admin2Codes', sha256,
+  write(`-- GeoNames (CC BY 4.0): https://www.geonames.org/\n-- Scope: ${label}\n-- Execute the entire file once. One statement; invoker permissions; atomic on error.\nDO $tedix_geonames_package$\nDECLARE _tedix_import_run uuid;\nBEGIN\nPERFORM pg_catalog.set_config('search_path','pg_catalog,public,pg_temp',true);\nIF (SELECT count(*) FROM public.schema_migrations WHERE id IN ('032_geographic_catalog','033_geographic_import_completion','034_geonames_kosovo_country')) <> 3 THEN\n RAISE EXCEPTION 'Required geographic migrations 032-034 missing';\nEND IF;\n`);
+  const result = await importCities(new SqlImportTarget(write), readGeonames(paths[0], paths[1], paths[2], paths[3], countryCode), {
+   dataset, sha256,
   });
   write('END;\n$tedix_geonames_package$ LANGUAGE plpgsql;\n');
   closeSync(fd);
   renameSync(partial, output);
-  return { rows: result.rows, sha256, bytes };
+  return { scope, countryCode: countryCode ?? null, dataset, rows: result.rows, sha256, bytes };
  } catch (error) {
   try { closeSync(fd); } catch { /* already closed before rename failure */ }
   rmSync(partial, { force: true });
@@ -68,7 +72,9 @@ export async function packageGeonames(paths: string[], output: string) {
  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
- const [output, ...paths] = process.argv.slice(2);
- if (!output) throw new Error('Usage: packageGeonames output.sql cities500.txt countryInfo.txt admin1CodesASCII.txt admin2Codes.txt');
- packageGeonames(paths, output).then(result => console.log(JSON.stringify(result))).catch(error => { console.error(error); process.exitCode = 1; });
+ const args = process.argv.slice(2);
+ const scope = args[0] === '--romania-only' ? (args.shift(), 'romania' as const) : 'worldwide' as const;
+ const [output, ...paths] = args;
+ if (!output) throw new Error('Usage: packageGeonames [--romania-only] output.sql cities500.txt countryInfo.txt admin1CodesASCII.txt admin2Codes.txt');
+ packageGeonames(paths, output, scope).then(result => console.log(JSON.stringify(result))).catch(error => { console.error(error); process.exitCode = 1; });
 }

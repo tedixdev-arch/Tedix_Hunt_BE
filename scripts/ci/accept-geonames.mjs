@@ -10,11 +10,14 @@ assert.equal(url.hostname, '127.0.0.1');
 assert.equal(url.port, '5432');
 assert.equal(url.pathname, '/geonames_ci');
 assert.equal(decodeURIComponent(url.username), 'geonames_ci');
+const romaniaOnly = process.env.GEONAMES_SCOPE === 'Romania only';
+if (process.env.GEONAMES_SCOPE) assert.ok(['Romania only', 'Worldwide'].includes(process.env.GEONAMES_SCOPE));
 const phase = process.argv[2];
 assert.ok(['initial', 'first', 'repeat'].includes(phase));
 const { GeographicCatalog } = await import('../../dist/models/GeographicCatalog.js');
 const { normalizeCityName } = await import('../../dist/domain/geographicNames.js');
 const { pool } = await import('../../dist/lib/postgres.js');
+const { readGeonames } = await import('../../dist/scripts/importGeonames.js');
 const dir = process.env.GEONAMES_DIR;
 const report = text => appendFileSync(dir + '/acceptance.md', '- ' + text + '\n');
 
@@ -137,10 +140,11 @@ try {
       hash.update('\0');
     }
     const sourceHash = hash.digest('hex');
-    const imports = (await pool.query('SELECT sha256, completed_at, row_count FROM geographic_imports ORDER BY imported_at')).rows;
+    const imports = (await pool.query('SELECT dataset, sha256, completed_at, row_count FROM geographic_imports ORDER BY imported_at')).rows;
     assert.equal(imports.length, phase === 'first' ? 1 : 2);
     for (const item of imports) {
       assert.equal(item.sha256, sourceHash);
+      if (romaniaOnly) assert.ok(item.dataset.endsWith('Romania only (country_code = RO)'));
       assert.ok(item.completed_at && Number(item.row_count) > 0);
       assert.equal(item.row_count, imports[0].row_count);
     }
@@ -159,6 +163,29 @@ try {
       count += rows.length; after = rows.at(-1).id;
     }
     assert.equal(count, Number(imports[0].row_count));
+    if (romaniaOnly) {
+      assert.equal((await pool.query("SELECT count(*) FROM geographic_cities WHERE country_code <> 'RO'")).rows[0].count, '0');
+      assert.equal((await pool.query("SELECT count(*) FROM geographic_city_names WHERE country_code <> 'RO'")).rows[0].count, '0');
+      let sourceCount = 0;
+      // Check every Romanian source record, including admin labels and all aliases.
+      for await (const city of readGeonames(dir + '/cities500.txt', dir + '/countryInfo.txt', dir + '/admin1CodesASCII.txt', dir + '/admin2Codes.txt', 'RO')) {
+        const actual = (await pool.query(`SELECT geoname_id::text AS id, country_code AS country,
+          name, administrative_context AS context, admin1_code AS admin1, admin2_code AS admin2,
+          latitude, longitude, population::text, source_modified::text AS modified
+          FROM geographic_cities WHERE geoname_id=$1`, [city.id])).rows[0];
+        const { countryName, aliases, ...expected } = city;
+        assert.deepEqual(actual, { ...expected, population: String(city.population) });
+        const names = (await pool.query('SELECT normalized_name FROM geographic_city_names WHERE geoname_id=$1', [city.id])).rows.map(row => row.normalized_name).sort();
+        assert.deepEqual(names, [...new Set([city.name, ...aliases].map(normalizeCityName).filter(Boolean))].sort());
+        sourceCount++;
+      }
+      assert.equal(count, sourceCount);
+      const manifest = JSON.parse(readFileSync(dir + '/package/manifest.json', 'utf8'));
+      assert.equal(manifest.scope, 'romania');
+      assert.equal(manifest.countryCode, 'RO');
+      assert.equal(manifest.rows, count);
+      report('PASS (' + phase + '): Romania only; ' + count + ' Romanian cities; zero non-RO cities/aliases; all source IDs, coordinates, administrative labels, revisions and normalized aliases match. SQL size: ' + manifest.bytes + ' bytes. This is not a worldwide catalog.');
+    }
     const snapshot = { count, sha256: fingerprint.digest('hex'),
       localities: (await pool.query('SELECT * FROM localities ORDER BY id')).rows };
     // Imports must never create application localities.

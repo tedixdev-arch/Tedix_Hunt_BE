@@ -1,4 +1,4 @@
-# GeoNames SQL package for pgAdmin Web
+# GeoNames SQL package for pgAdmin Web — Romania only by default
 
 **Draft — STOP for ChatGPT review.** No persistent database import is authorized
 by generating or testing this package. No deployment, SSH, production connection
@@ -18,12 +18,16 @@ country-change rejection, preserved reconciliation, SQL quoting and rollback.
 version, browser, hosting proxy, upload limit or timeout has been tested in this
 PR. The actual `tedix_app` grants have not been inspected or changed. Therefore
 persistent use is **BLOCKED pending review and an isolated pgAdmin Web trial**.
-A successful workflow establishes full official-data SQL execution twice on its
+A successful workflow establishes SQL execution twice for its selected scope on its
 disposable service, not browser compatibility. Check that run's acceptance.md;
 this draft does not claim that an unexecuted workflow has passed.
-Local validation: TypeScript build and 50 parser/package/catalog tests passed.
-Full official downloads returned HTTP 403 in the task environment; no full-data
-artifact has been generated or published during this draft preparation.
+G4c-5 local validation: build and 51 parser/package/catalog tests passed on disposable
+PostgreSQL 17, including mixed-country Romania-only first/repeat execution,
+exact direct-importer equivalence, zero non-RO cities and rollback. Official-data
+size and Romanian city count are not yet measured: the task environment's proxy
+blocks official downloads (HTTP 403), and GitHub CLI workflow dispatch returns
+Forbidden. No tested official-data artifact has been published during preparation.
+See `GeoNames_Romania_Package.md` for task evidence and remaining blockers.
 
 Before persistent use, test the exact artifact through the owner's pgAdmin Web
 version against an isolated database with migrations 001–034 and the same ACLs.
@@ -38,15 +42,17 @@ provide an approved one-off client route. Never replace this with a plain dump.
 ## Generate and download (after review)
 
 1. In GitHub, open **Actions → GeoNames pgAdmin Import Package → Run workflow**.
-   Choose the reviewed branch. This manual-only workflow downloads the four
+   Choose the reviewed branch and **Romania only** (the default). **Worldwide**
+   remains an explicit option. This manual-only workflow downloads the four
    official files from https://download.geonames.org/export/dump/ and records
    their hashes and timestamps. It only connects to a disposable service.
 2. Wait for every check to pass. Open that run and download the
-   **geonames-pgadmin-…** artifact before its seven-day expiry. Unzip it locally.
+   **geonames-pgadmin-romania-only-…** (or **…-worldwide-…**) artifact before its seven-day expiry. Unzip it locally.
    A failed package/acceptance step publishes no import artifact.
 3. Keep `import.sql`, `manifest.json`, `provenance.md`, `acceptance.md`,
    `execution.md` and `import.sql.sha256` together. The manifest contains accepted
-   row count, combined source hash and uncompressed SQL bytes. The SHA-256 file
+   scope, country code, dataset label, accepted row count, combined source hash
+   and uncompressed SQL bytes. The SHA-256 file
    verifies `import.sql`; its path prefix is the CI directory, not your computer.
    GeoNames attribution: **GeoNames (CC BY 4.0)**, https://www.geonames.org/.
 
@@ -78,6 +84,24 @@ provide an approved one-off client route. Never replace this with a plain dump.
    ```
    Compare row_count/hash with the manifest, completed_at must be non-null, and
    Cluj-Napoca must be in RO. Retain the artifact and successful Messages output.
+
+## Coverage
+
+**Romania only** selects `country_code = RO` in the existing source reader before
+SQL batches are generated. It retains the same populated-place feature rules as
+the validated cities500 importer, so it is a Romanian subset of cities500, not
+all Romanian settlements and not a complete worldwide GeoNames catalog. The SQL
+header, dataset metadata, manifest, artifact name and workflow summary identify
+coverage. All four original source files remain hashed in full for provenance;
+filtering does not rewrite them. The manifest's `rows` and `bytes` are actual
+accepted source rows and generated SQL bytes, not worldwide estimates.
+
+The workflow checks every Romanian source city and normalized alias, admin
+label, coordinate, GeoNames ID and revision, plus zero non-RO cities/aliases on
+the disposable database after both executions. On a pre-populated destination,
+this package updates its Romanian rows and preserves existing non-RO rows; it
+does not turn an existing worldwide catalog into a Romania-only catalog. The
+existing API's `ready` status describes a completed import, not worldwide coverage.
 
 ## Transactions, retry and rollback
 

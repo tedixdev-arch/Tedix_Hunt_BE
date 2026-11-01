@@ -118,4 +118,44 @@ suite('SQL package with migrations 001-034 and restricted invoker', () => {
   expect(await readFile(join(dir,'import.sql'),'utf8')).toEqual(sql);
   await expect(readFile(join(dir,'import.sql.part'))).rejects.toMatchObject({code:'ENOENT'});
  });
+ it('filters mixed-country input before SQL generation, preserving RO semantics on first/repeat import', async () => {
+  await db.query(`GRANT DELETE ON geographic_city_names TO "${role}"`);
+  await db.query('TRUNCATE geographic_city_names,geographic_cities,geographic_imports');
+  const foreign = [...source]; foreign[0]='901'; foreign[8]='HU'; foreign[1]='Foreign city';
+  // Missing foreign-country metadata/coordinates cannot prevent an RO package.
+  const excluded = [...foreign]; excluded[0]='902'; excluded[8]='ZZ'; excluded[4]='';
+  await writeFile(paths[0], [foreign, source, excluded].map(row => row.join('\t')).join('\n') + '\n');
+  const result = await packageGeonames(paths, join(dir,'romania.sql'), 'romania');
+  const sql = await readFile(join(dir,'romania.sql'), 'utf8');
+  expect(result).toMatchObject({scope:'romania',countryCode:'RO',rows:1,bytes:Buffer.byteLength(sql),sha256:await hashGeonames(paths)});
+  expect(sql).toContain('Romania only (RO)');
+  const c = await db.connect();
+  try {
+   await c.query('BEGIN');
+   await importCities(c, readGeonames(paths[0],paths[1],paths[2],paths[3],'RO'), {dataset:result.dataset,sha256:result.sha256});
+   await c.query('COMMIT');
+  } finally { c.release(); }
+  const direct = await snapshot();
+  await db.query('TRUNCATE geographic_city_names,geographic_cities,geographic_imports');
+  await execute(sql);
+  expect(await snapshot()).toEqual(direct);
+  await execute(sql);
+  expect(await snapshot()).toEqual(direct);
+  expect((await db.query("SELECT count(*) FROM geographic_cities WHERE country_code <> 'RO'")).rows[0].count).toBe('0');
+  expect((await db.query('SELECT count(*) FROM geographic_cities')).rows[0].count).toBe('1');
+  const imports = (await db.query('SELECT dataset,sha256,row_count,completed_at FROM geographic_imports')).rows;
+  expect(imports).toHaveLength(2);
+  for (const item of imports) {
+   expect(item).toMatchObject({dataset:result.dataset,sha256:result.sha256,row_count:'1'});
+   expect(item.completed_at).not.toBeNull();
+  }
+  const before = await snapshot();
+  await expect(execute(sql.replace('END;\n$tedix_geonames_package$', "RAISE EXCEPTION 'RO rollback';\nEND;\n$tedix_geonames_package$"))).rejects.toThrow('RO rollback');
+  expect(await snapshot()).toEqual(before);
+  expect((await db.query('SELECT count(*) FROM geographic_imports')).rows[0].count).toBe('2');
+  await writeFile(paths[0], foreign.join('\t') + '\n');
+  await expect(packageGeonames(paths, join(dir,'empty.sql'), 'romania')).rejects.toThrow('Empty import');
+  await expect(readFile(join(dir,'empty.sql'))).rejects.toMatchObject({code:'ENOENT'});
+ });
+
 });

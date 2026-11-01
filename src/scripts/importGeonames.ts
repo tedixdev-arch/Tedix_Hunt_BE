@@ -90,11 +90,13 @@ async function metadata(path: string, country=false) {
  for await(const line of await lines(path)) { if(!line || line.startsWith('#'))continue; const f=line.split('\t'); result.set(f[0],f[country?4:1]); }
  return result;
 }
-export async function* readGeonames(citiesPath: string, countriesPath: string, admin1Path: string, admin2Path: string): AsyncGenerator<CityImport> {
+export async function* readGeonames(citiesPath: string, countriesPath: string, admin1Path: string, admin2Path: string, countryCode?: 'RO'): AsyncGenerator<CityImport> {
+ if (countryCode !== undefined && countryCode !== 'RO') throw new Error('Unsupported country filter');
  const countries=await metadata(countriesPath,true), admin1=await metadata(admin1Path), admin2=await metadata(admin2Path);
  for await(const line of await lines(citiesPath)) {
   if(!line || line.startsWith('#'))continue;
   const f=line.split('\t'); if(f.length!==19)throw new Error('Expected official 19-column GeoNames TSV');
+  if(countryCode && f[8]!==countryCode)continue;
   if(f[6]!=='P' || !/^(PPL|PPLA[2-5]?|PPLC|PPLG|PPLL|PPLR|STLMT)$/.test(f[7]))continue;
   if(!f[4].trim() || !f[5].trim())throw new Error('Missing GeoNames coordinates');
   const countryName=countries.get(f[8]); if(!countryName)throw new Error(`Missing country metadata: ${f[8]}`);
