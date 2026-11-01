@@ -204,7 +204,21 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    expect(rows[0].context).toBe('Municipality, Cluj County');await ingest(rows);
    expect((await search('test alias').expect(200)).body.cities[0].geographicId).toBe('900');
    await writeFile(files[2],'');
-   await expect((async()=>{for await(const row of readGeonames(files[0],files[1],files[2],files[3]))void row;})()).rejects.toThrow('Missing administrative metadata');
+   const partial=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))partial.push(row);
+   expect(partial).toEqual([{...rows[0],context:'Municipality'}]);await ingest(partial);
+   expect((await db.query('SELECT administrative_context,admin1_code,admin2_code FROM geographic_cities WHERE geoname_id=900')).rows[0])
+    .toEqual({administrative_context:'Municipality',admin1_code:'13',admin2_code:'54975'});
+   await writeFile(files[3],'');
+   const fallback=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))fallback.push(row);
+   expect(fallback).toEqual([{...rows[0],context:'Romania'}]);const run=await ingest(fallback);
+   expect(run.rows).toBe(1);
+   expect((await db.query('SELECT country_code,admin1_code,admin2_code,latitude,longitude,import_id FROM geographic_cities WHERE geoname_id=900')).rows[0])
+    .toEqual({country_code:'RO',admin1_code:'13',admin2_code:'54975',latitude:46,longitude:23,import_id:run.importId});
+   expect((await db.query('SELECT source,dataset,sha256,row_count FROM geographic_imports WHERE id=$1',[run.importId])).rows[0])
+    .toEqual({source:'geonames',...provenance,row_count:'1'});
+   expect((await search('test alias').expect(200)).body.cities[0]).toMatchObject({geographicId:'900',administrativeContext:'Romania'});
+   await writeFile(files[1],'');
+   await expect((async()=>{for await(const row of readGeonames(files[0],files[1],files[2],files[3]))void row;})()).rejects.toThrow('Missing country metadata');
   } finally {await rm(dir,{recursive:true,force:true});}
  });
  it('uses the prefix index and enforces bounded authenticated query budgets',async()=>{
