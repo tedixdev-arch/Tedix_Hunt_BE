@@ -1,6 +1,14 @@
 name: GeoNames pgAdmin Import Package
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: City coverage for the SQL package
+        type: choice
+        default: Romania only
+        options:
+          - Romania only
+          - Worldwide
 permissions:
   contents: read
 jobs:
@@ -22,6 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      GEONAMES_SCOPE: ${{ inputs.scope }}
       NODE_ENV: test
       PGHOST: 127.0.0.1
       PGPORT: 5432
@@ -65,7 +74,13 @@ jobs:
         id: package
         run: |
           mkdir -p "$GEONAMES_DIR/package"
-          node dist/scripts/packageGeonames.js "$GEONAMES_DIR/package/import.sql" \
+          case "$GEONAMES_SCOPE" in
+            'Romania only') scope_flag=--romania-only; scope_slug=romania-only ;;
+            'Worldwide') scope_flag=; scope_slug=worldwide ;;
+            *) exit 1 ;;
+          esac
+          printf 'PACKAGE_SCOPE_SLUG=%s\n' "$scope_slug" >> "$GITHUB_ENV"
+          node dist/scripts/packageGeonames.js $scope_flag "$GEONAMES_DIR/package/import.sql" \
             "$GEONAMES_DIR/cities500.txt" "$GEONAMES_DIR/countryInfo.txt" \
             "$GEONAMES_DIR/admin1CodesASCII.txt" "$GEONAMES_DIR/admin2Codes.txt" \
             > "$GEONAMES_DIR/package/manifest.json"
@@ -108,7 +123,7 @@ jobs:
         id: artifact
         uses: actions/upload-artifact@v4
         with:
-          name: geonames-pgadmin-${{ github.run_id }}-${{ github.run_attempt }}
+          name: geonames-pgadmin-${{ env.PACKAGE_SCOPE_SLUG }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.GEONAMES_DIR }}/package/
           if-no-files-found: error
           retention-days: 7
@@ -125,6 +140,11 @@ jobs:
           for (const id of ['semantics','download','package','baseline','migrations','initial','import','acceptance','reimport','idempotency','artifact'])
             text += '| ' + id + ' | ' + (steps[id]?.outcome ?? 'not run') + ' |\n';
           const dir = process.env.GEONAMES_DIR;
+          text += '\nSelected coverage: ' + process.env.GEONAMES_SCOPE + '. Romania only is a subset, not a worldwide catalog.\n';
+          if (existsSync(dir + '/package/manifest.json')) {
+            const manifest = JSON.parse(readFileSync(dir + '/package/manifest.json', 'utf8'));
+            text += '\nGenerated SQL: ' + manifest.bytes + ' bytes; ' + manifest.rows + ' accepted cities; scope: ' + manifest.scope + '.\n';
+          }
           for (const name of ['provenance.md','acceptance.md'])
             if (existsSync(dir + '/' + name)) text += '\n' + readFileSync(dir + '/' + name, 'utf8');
           text += '\npgAdmin Web UI and actual tedix_app ACLs are NOT established by this PostgreSQL test. A failed or skipped acceptance step does not establish real-data acceptance. No deployment or persistent database is involved.\n';
