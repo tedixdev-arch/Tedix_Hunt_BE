@@ -1,0 +1,86 @@
+name: Verify development database binding
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: dev-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: tedixhunt-be-dev.anainfo.ai
+      DEPLOY_USER: deploy
+      EXPECTED_ID: ${{ vars.DEV_PG_SYSTEM_IDENTIFIER }}
+      EXPECTED_ADDR: ${{ vars.DEV_PG_SERVER_ADDR }}
+      EXPECTED_PORT: ${{ vars.DEV_PG_SERVER_PORT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify over existing development SSH connection
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        shell: bash
+        run: |
+          set -eu
+          report="$RUNNER_TEMP/dev-db-report.txt"
+          trap 'rm -f "$RUNNER_TEMP/dev-db-key"' EXIT
+          if [[ ! "$EXPECTED_ID" =~ ^[0-9]{1,20}$ || ! "$EXPECTED_ADDR" =~ ^[0-9a-fA-F.:]+$ || ! "$EXPECTED_PORT" =~ ^[0-9]{1,5}$ ]]; then
+            echo 'BLOCKED: independently recorded tedixhunt_dev server identity is missing or invalid; configure DEV_PG_SYSTEM_IDENTIFIER, DEV_PG_SERVER_ADDR and DEV_PG_SERVER_PORT' | tee "$report"
+            exit 2
+          fi
+          if [[ -z "$DEPLOY_SSH_KEY" ]]; then
+            echo 'BLOCKED: development DEPLOY_SSH_KEY unavailable' | tee "$report"
+            exit 2
+          fi
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/dev-db-key"
+          mkdir -p ~/.ssh
+          if ! ssh-keyscan -T 10 -H "$DEPLOY_HOST" > "$RUNNER_TEMP/dev-db-known-hosts" 2>/dev/null; then
+            echo 'BLOCKED: development SSH host key discovery unavailable' | tee "$report"
+            exit 2
+          fi
+          # Fixed SSH destination. Identity inputs are validated numeric/address data, never SQL.
+          set +e
+          ssh -T -i "$RUNNER_TEMP/dev-db-key" \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/dev-db-known-hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /var/www/Tedix_Hunt_BE && node - '$EXPECTED_ID' '$EXPECTED_ADDR' '$EXPECTED_PORT'" \
+            < scripts/ci/verify-dev-db.cjs > "$RUNNER_TEMP/dev-db-raw.txt" 2>/dev/null
+          result=$?
+          set -e
+          # Never forward SSH banners, runtime diagnostics, SQL errors or environment contents.
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          lines = (root / 'dev-db-raw.txt').read_text(errors='replace').splitlines()
+          safe = [line for line in lines if line.startswith(('PASS: ', 'BLOCKED: ', 'FAIL: '))]
+          (root / 'dev-db-report.txt').write_text('\n'.join(safe) + '\n')
+          PY
+          cat "$report"
+          if [[ "$result" == 1 ]] && grep -q '^FAIL: ' "$report"; then
+            exit 1
+          fi
+          if [[ "$result" != 0 ]]; then
+            echo 'BLOCKED: verification incomplete; see sanitized checks above. SSH/session failures require development SSH login and permission to execute node; no escalation attempted.' | tee -a "$report"
+            exit "$result"
+          fi
+          if ! grep -qx 'PASS: development database binding verified; read-only transaction rolled back' "$report"; then
+            echo 'BLOCKED: final verification evidence missing' | tee -a "$report"
+            exit 2
+          fi
+      - name: Publish sanitized evidence
+        if: always()
+        shell: bash
+        run: |
+          printf '## Development database binding\n\n' >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$RUNNER_TEMP/dev-db-report.txt" ]]; then
+            cat "$RUNNER_TEMP/dev-db-report.txt" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'BLOCKED: verification did not complete' >> "$GITHUB_STEP_SUMMARY"
+          fi
