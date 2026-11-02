@@ -368,6 +368,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
     });
   } catch (error) {
     if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
+    if (error instanceof InvalidHuntTemplateContentError) return res.status(400).json({ error: 'invalid_input' });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
     if (error instanceof HuntTemplateKeyConflictError) {
       return res.status(409).json({ error: 'template_key_conflict' });

@@ -118,6 +118,33 @@ type Actor = { id: string; auth: string };
       FROM hunt_templates t WHERE t.id=v.template_id AND t.key=$1 AND v.version=$2`, [key, version])).rejects.toMatchObject({ code: '23514' });
     expect(await artifact(destination, 1)).toEqual(copied);
   });
+  it.each([undefined, { curriculum: 'mixed', grade: 'mixed' },
+    ...['9', '10', '11', '12'].map(grade => ({ curriculum: 'math', grade }))])(
+    'retains optional learning %j through Universal publication, copy and revision', async learning => {
+      const key = `universal-learning-${randomUUID()}`;
+      const initial = customTemplateFixture(key);
+      delete initial.checkpoints[0].customExercises;
+      const input = { ...initial, configuration: { ...initial.configuration, ...learning } };
+      const saved = (await post(root, { key, category: 'universal', content: input }).expect(201)).body.content;
+      expect(saved).toEqual(input);
+      expect((await get(`${root}/${key}`).expect(200)).body.content).toEqual(input);
+      await post(`${root}/${key}/submit`, { version: 1 }).expect(200);
+      await post(`/api/admin/templates/review/${key}/approve`, { version: 1 }, reviewer).expect(200);
+      const published = await get(`/api/creator/universal-library/${key}`).expect(200);
+      expect(published.body.content).toEqual(input);
+      const template = await model.HuntTemplates.findByKey(key);
+      const destination = `learning-copy-${randomUUID()}`;
+      const copied = await post(`${root}/from-universal/${key}`, { key: destination,
+        publishedReference: { templateId: template!.id, version: 1 } }).expect(201);
+      expect(copied.body.content.configuration).toEqual(input.configuration);
+      const revision = { ...input, version: 2, configuration: { ...input.configuration, curriculum: 'math', grade: '12' } };
+      await post(`${root}/${key}/versions`, { content: revision }).expect(201);
+      expect((await get(`${root}/${key}`).expect(200)).body.content).toEqual(revision);
+      expect((await get(`/api/creator/universal-library/${key}`).expect(200)).body.content).toEqual(input);
+      expect((await get(`${root}/${destination}`).expect(200)).body.content.configuration).toEqual(input.configuration);
+      expect(await artifact(key, 1)).toEqual(input);
+    },
+  );
   it('rejects unauthorized, cross-template, stale and moved references without partial versions', async () => {
     const one = await create(), two = await create();
     await post(`${root}/${one.key}/versions`, { content: { ...one.content, version: 2 } }, other).expect(404);

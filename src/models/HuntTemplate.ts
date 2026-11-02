@@ -3,7 +3,7 @@ import { allocateCustomExercises, validateCustomExercises, CustomExerciseValidat
 import type { PoolClient } from 'pg';
 import type { Locality } from './Geography.js';
 import { pool } from '../lib/postgres.js';
-import { isTemplateContent, isTemplateContentSubmittable } from '../domain/creatorTemplates.js';
+import { hasValidLearningConfiguration, isTemplateContent, isTemplateContentSubmittable } from '../domain/creatorTemplates.js';
 
 export type HuntTemplateCategory = 'universal' | 'local';
 export type HuntTemplateOrigin = 'platform' | 'creator';
@@ -405,7 +405,7 @@ export const HuntTemplates = {
       const nextVersion = (versionResult.rows[0]?.version ?? 0) + 1;
       const customIssues = validateCustomExercises(content);
       if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
-      if (!isTemplateContent(content, key, nextVersion)) {
+      if (!isTemplateContent(content, key, nextVersion) || !hasValidLearningConfiguration(content)) {
         throw new InvalidHuntTemplateContentError();
       }
       content = allocateCustomExercises(withRadiusDefaults(content, versionResult.rows[0]?.content), key, nextVersion, versionResult.rows[0]?.content);
@@ -454,7 +454,7 @@ export const HuntTemplates = {
     const customIssues = validateCustomExercises(content);
     if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
     if ((category !== undefined && category !== 'universal' && category !== 'local')
-      || !isTemplateContent(content, key, 1)) throw new InvalidHuntTemplateContentError();
+      || !isTemplateContent(content, key, 1) || !hasValidLearningConfiguration(content)) throw new InvalidHuntTemplateContentError();
     content = allocateCustomExercises(withRadiusDefaults(content), key, 1);
     const client = await pool.connect();
     try {

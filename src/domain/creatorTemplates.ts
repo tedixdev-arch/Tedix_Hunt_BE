@@ -21,6 +21,16 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+/** New authoring only. Omitted selectors mean Mixed without changing saved artifacts.
+ * Keep this separate from isTemplateContent, which also reads historical versions. */
+export const hasValidLearningConfiguration = (content: unknown): boolean => {
+  if (!isObject(content) || !isObject(content.configuration)) return false;
+  const { curriculum, grade } = content.configuration;
+  return (curriculum === undefined || curriculum === 'mixed' || curriculum === 'math')
+    && (grade === undefined || grade === 'mixed' || grade === '9' || grade === '10'
+      || grade === '11' || grade === '12');
+};
+
 // Omitted radius is resolved only when persisting a new immutable version.
 const hasValidFinishPoint = (value: unknown): boolean =>
   isObject(value) && Object.keys(value).every((key) =>
