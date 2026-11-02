@@ -129,6 +129,46 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect((await get('/api/geography/localities?countryCode=RO&q=Same').expect(200)).body.localities.some((l:any)=>l.id===place)).toBe(true);
     await get(`/api/geography/localities/${place}`).expect(200);
   });
+  for (const learning of [undefined, ...['mixed', 'math'].flatMap(curriculum =>
+    ['mixed', '9', '10', '11', '12'].map(grade => ({ curriculum, grade })))]) {
+    it(`preserves optional learning ${JSON.stringify(learning)} through draft, versions, approval and published Hunt snapshots`, async () => {
+      const key = `learning-${randomUUID()}`;
+      const initial = content(key);
+      const input = { ...initial, configuration: { ...initial.configuration, ...learning } };
+      const created = await post('/api/creator/templates', { key, content: input, category: 'local', localityId: place }).expect(201);
+      expect(created.body.content).toEqual(input);
+      expect((await get(`/api/creator/templates/${key}`, 'creator').expect(200)).body.content).toEqual(input);
+      const second = { ...input, version: 2 };
+      await post(`/api/creator/templates/${key}/versions`, { content: second }).expect(201);
+      const templateId = (await db.query('SELECT id FROM hunt_templates WHERE key=$1', [key])).rows[0].id;
+      const a = { key, templateId, version: 2 };
+      expect((await submit(a).expect(200)).body.content).toEqual(second);
+      expect((await get(`/api/admin/templates/review/${key}`, 'admin').expect(200)).body.content).toEqual(second);
+      expect((await approve(a).expect(200)).body.content).toEqual(second);
+      const h = await hunt();
+      expect((await select(h, a).expect(200)).body.templateSnapshot).toEqual(second);
+      await post(`/api/hunts/${h}/publish`, {}, 'organizer').expect(200);
+      const third = { ...input, version: 3, configuration: { ...input.configuration, curriculum: 'math', grade: '12' } };
+      await post(`/api/creator/templates/${key}/versions`, { content: third }).expect(201);
+      await submit({ ...a, version: 3 }).expect(200);
+      await approve({ ...a, version: 3 }).expect(200);
+      expect((await get(`/api/hunts/${h}`).expect(200)).body.templateSnapshot).toEqual(second);
+      expect((await state(h)).template_snapshot).toEqual(second);
+      await select(h, { ...a, version: 3 }).expect(409);
+      const versions = (await db.query('SELECT version,content FROM hunt_template_versions WHERE template_id=$1 ORDER BY version', [templateId])).rows;
+      expect(versions.map(v => v.content)).toEqual([input, second, third]);
+      if (!learning) expect(second.configuration).not.toHaveProperty('curriculum');
+    });
+  }
+  it.each([{ curriculum: 'science' }, { grade: '13' }, { grade: 9 }, { curriculum: null }])('rejects invalid new learning %j without partial drafts or versions', async learning => {
+    const key = `invalid-learning-${randomUUID()}`, initial = content(key);
+    await post('/api/creator/templates', { key, category: 'universal', content: { ...initial, configuration: { ...initial.configuration, ...learning } } }).expect(400);
+    expect((await db.query('SELECT 1 FROM hunt_templates WHERE key=$1', [key])).rowCount).toBe(0);
+    await post('/api/creator/templates', { key, category: 'universal', content: initial }).expect(201);
+    await post(`/api/creator/templates/${key}/versions`, { content: { ...initial, version: 2, configuration: { ...initial.configuration, ...learning } } }).expect(400);
+    const saved = (await get(`/api/creator/templates/${key}`, 'creator').expect(200)).body;
+    expect(saved.version).toBe(1); expect(saved.content).toEqual(initial);
+  });
   it('keeps the old approved locality through draft/submission/changes-requested then switches only on approval',async()=>{
     const a=await approved();const b=await replacement(a,other);
     await detail(a).expect(200);await detail(b,other).expect(404);await submit(b).expect(200);await detail(a).expect(200);
@@ -388,3 +428,4 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect(await templates.getVersion(a.templateId,1)).not.toBeNull();
   });
 });
+
