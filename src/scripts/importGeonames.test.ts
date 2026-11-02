@@ -23,7 +23,7 @@ async function parse(options:{ fields?:Record<number,string>; admin1?:string; ad
 describe('GeoNames optional administrative labels',()=>{
  it('preserves complete source records and administrative label order',async()=>{
   expect(await parse()).toEqual([{id:'900',country:'RO',countryName:'Romania',name:'Test Town',aliases:['Test Town','Tést Alias'],
-   context:'Municipality, Cluj County',admin1:'13',admin2:'54975',latitude:46,longitude:23,population:1234,modified:'2026-10-01'}]);
+   context:'Municipality, Cluj County',admin1Name:'Cluj County',admin1:'13',admin2:'54975',latitude:46,longitude:23,population:1234,modified:'2026-10-01'}]);
  });
  it.each([
   ['missing admin1',{admin1:''},'Municipality'],
@@ -31,7 +31,7 @@ describe('GeoNames optional administrative labels',()=>{
   ['missing both',{admin1:'',admin2:''},'Romania'],
   ['blank labels',{admin1:'RO.13\t   \t\t1\n',admin2:'RO.13.54975\t\t\t2\n'},'Romania'],
  ] as const)('keeps identity and codes with %s',async(_name,options,context)=>{
-  const [complete]=await parse();expect(await parse(options)).toEqual([{...complete,context}]);
+  const [complete]=await parse();expect(await parse(options)).toEqual([{...complete,context,admin1Name:context.includes('Cluj County')?'Cluj County':undefined}]);
  });
  it.each([
   ['no codes',{10:'',11:''},'Romania'],
@@ -39,7 +39,7 @@ describe('GeoNames optional administrative labels',()=>{
   ['no admin1 code',{10:''},'Romania'],
   ['unspecified admin1',{10:'00',11:''},'Romania'],
  ] as const)('retains incomplete source codes: %s',async(_name,fields,context)=>{
-  const [complete]=await parse();expect(await parse({fields})).toEqual([{...complete,admin1:fields[10 as keyof typeof fields]??source[10],admin2:fields[11 as keyof typeof fields]??source[11],context}]);
+  const [complete]=await parse();expect(await parse({fields})).toEqual([{...complete,admin1Name:context.includes('Cluj County')?'Cluj County':undefined,admin1:fields[10 as keyof typeof fields]??source[10],admin2:fields[11 as keyof typeof fields]??source[11],context}]);
  });
  it('does not resolve an admin2 label through an incomplete or another country/parent key',async()=>{
   const [row]=await parse({fields:{10:''},admin2:'RO..54975\tUnscoped\t\t1\nUS.13.54975\tOther country\t\t2\nRO.99.54975\tOther parent\t\t3\n'});
@@ -76,6 +76,12 @@ describe('GeoNames optional administrative labels',()=>{
   const name=code==='XK'?'Kosovo':'Fixture country';
   const [row]=await parse({fields:{8:code,10:'',11:''},country:`${code}\t\t\t\t${name}\n`,admin1:'',admin2:''});
   expect(row).toMatchObject({country:code,countryName:name,context:name,id:'900',latitude:46,longitude:23});
+ });
+ it('rejects ambiguous dictionary identities instead of fabricating a match',async()=>{
+  await expect(parse({admin1:'RO.13\tCluj\tCluj\t1\nRO.13\tOther\tOther\t2\n'})).rejects.toThrow('Conflicting metadata labels');
+ });
+ it('never assigns the unspecified admin1 sentinel even if a dictionary labels it',async()=>{
+  expect((await parse({fields:{10:'00'},admin1:'RO.00\tUnknown\tUnknown\t1\n'}))[0]).not.toHaveProperty('admin1Name');
  });
  it('still rejects malformed official rows',async()=>{
   await expect(parse({rows:[source.slice(0,18)]})).rejects.toThrow('19-column');
