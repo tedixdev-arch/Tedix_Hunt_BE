@@ -129,6 +129,20 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect((await get('/api/geography/localities?countryCode=RO&q=Same').expect(200)).body.localities.some((l:any)=>l.id===place)).toBe(true);
     await get(`/api/geography/localities/${place}`).expect(200);
   });
+  it('preserves pinned Local artifacts across Solo and variable Team setup changes', async () => {
+    const a = await approved(); const h = await hunt();
+    await select(h, a).expect(200);
+    const before = await state(h);
+    for (const config of [{ format: 'solo', teamSize: null }, { format: 'team', teamSize: 3 }, { format: 'team', teamSize: 6 }]) {
+      await request(app).patch(`/api/hunts/${h}`).set('Authorization', auth()).send(config).expect(200);
+      const after = await state(h);
+      expect(after.hunt_format).toBe(config.format); expect(after.team_size).toBe(config.teamSize);
+      for (const key of ['template_id', 'template_key', 'template_version', 'template_snapshot', 'template_locality_id', 'template_locality_snapshot', 'checkpoint_radius_configuration']) {
+        expect(after[key]).toEqual(before[key]);
+      }
+    }
+    await expect(db.query("UPDATE hunts SET template_snapshot='{}'::jsonb WHERE id=$1", [h])).rejects.toThrow();
+  });
   for (const learning of [undefined, ...['mixed', 'math'].flatMap(curriculum =>
     ['mixed', '9', '10', '11', '12'].map(grade => ({ curriculum, grade })))]) {
     it(`preserves optional learning ${JSON.stringify(learning)} through draft, versions, approval and published Hunt snapshots`, async () => {

@@ -8,7 +8,7 @@ import { Hunt, type HuntStatus, type UpdateHuntGeneralSetupInput } from '../mode
 import { HuntRoles } from '../models/HuntRole.js';
 import { Organization } from '../models/Organization.js';
 import { HuntTemplates } from '../models/HuntTemplate.js';
-import { supportedHuntOptionValues } from '../domain/huntOptions.js';
+import { validTeamSize, supportedHuntOptionValues } from '../domain/huntOptions.js';
 import { validateHuntForPublish } from '../domain/huntReadiness.js';
 
 const router = express.Router();
@@ -76,11 +76,21 @@ const parseDraftUpdate = (body: unknown): UpdateHuntGeneralSetupInput | null => 
     } else if (key === 'templateKey') {
       if (typeof value !== 'string' || !value.trim()) return null;
       update.templateKey = value.trim();
+    } else if (key === 'format') {
+      if (value !== 'solo' && value !== 'team') return null;
+      update.format = value;
+    } else if (key === 'teamSize') {
+      if (value !== null && !validTeamSize(value)) return null;
+      update.teamSize = value as number | null;
     } else if (key in supportedHuntOptionValues) {
       // Prototype choices are rejected until the pilot runtime actually supports them.
       if (value !== supportedHuntOptionValues[key as keyof typeof supportedHuntOptionValues]) return null;
       (update as Record<string, unknown>)[key] = value;
     }
+  }
+  if (update.format === 'solo') {
+    if (update.teamSize != null) return null;
+    update.teamSize = null;
   }
   return update;
 };
@@ -213,8 +223,8 @@ router.post('/', requireAuth, requireAnyRole(['creator', 'organizer']), async (r
  *               capacity: { type: integer, minimum: 1 }
  *               contactName: { type: string }
  *               templateKey: { type: string, example: signal-cluj-napoca }
- *               format: { type: string, enum: [team], description: Currently supported pilot value }
- *               teamSize: { type: integer, enum: [4], description: Currently supported pilot value; configuration only }
+ *               format: { type: string, enum: [solo, team], description: Saved participation mode; readiness remains capability gated }
+ *               teamSize: { type: integer, nullable: true, minimum: 1, maximum: 2147483647, description: Configuration only; null for Solo. Variable-size live readiness requires D2/D5 approval }
  *               accessMode: { type: string, enum: [invitation_only], description: Currently supported pilot value; does not generate invitations }
  *               difficulty: { type: string, enum: [easy], description: Currently supported pilot value }
  *               checkpointOrder: { type: string, enum: [recommended], description: Currently supported pilot value }
@@ -250,6 +260,9 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const update = parseDraftUpdate(req.body);
   if (!update) return res.status(400).json({ error: 'invalid_input' });
   if (hunt.status !== 'draft') return res.status(409).json({ error: 'invalid_hunt_state' });
+  if ((update.format ?? hunt.format) === 'solo' && update.teamSize != null) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
   if (update.templateKey && hunt.templateId) return res.status(409).json({ error: 'template_selection_conflict' });
   if (update.templateKey) {
     // Only an approved identity may be instantiated. Keep the version and its complete content

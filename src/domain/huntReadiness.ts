@@ -1,3 +1,4 @@
+import { validParticipationConfiguration } from './huntOptions.js';
 import { hasCustomExercises } from './customExercises.js';
 import type { IHunt } from '../models/Hunt.js';
 
@@ -55,9 +56,18 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
     add({ section: 'template', field: 'templateSnapshot', message: 'Select a Hunt template' });
   }
 
-  if (hunt.format !== 'team' || hunt.teamSize !== 4 || hunt.accessMode !== 'invitation_only') {
-    const field = hunt.format !== 'team' ? 'format' : hunt.teamSize !== 4 ? 'teamSize' : 'accessMode';
+  if (!validParticipationConfiguration(hunt.format, hunt.teamSize) || hunt.accessMode !== 'invitation_only') {
+    const field = hunt.format !== 'team' && hunt.format !== 'solo' ? 'format' : !validParticipationConfiguration(hunt.format, hunt.teamSize) ? 'teamSize' : 'accessMode';
     add({ section: 'options', field, message: 'Save Participants & access' });
+  }
+  // Keep the historical Team/four path. Saved mode/size is not a gameplay capability.
+  // No approved activity/collective binding permits dropping required Personal or Team work.
+  if (hunt.format === 'solo') {
+    add({ section: 'template', field: 'templateSnapshot',
+      message: 'Solo gameplay compatibility is not yet supported; required Team content cannot be discarded (D5)' });
+  } else if (hunt.format === 'team' && hunt.teamSize !== null && hunt.teamSize !== 4) {
+    add({ section: 'options', field: 'teamSize',
+      message: 'Variable Team-size gameplay readiness requires approved membership and content compatibility (D2/D5)' });
   }
   if (hunt.difficulty !== 'easy' || hunt.checkpointOrder !== 'recommended') {
     const field = hunt.difficulty !== 'easy' ? 'difficulty' : 'checkpointOrder';

@@ -10,7 +10,7 @@ import { hashGeonames, importCities, readGeonames } from './importGeonames.js';
 
 const testUrl = process.env.TEST_DATABASE_URL;
 const suite = testUrl ? describe : describe.skip;
-suite('SQL package with migrations 001-034 and restricted invoker', () => {
+suite('SQL package with all discovered migrations and restricted invoker', () => {
  const admin = new Pool({ connectionString: testUrl });
  const name = 'g4c4_' + randomUUID().replaceAll('-', '');
  const role = name + '_app';
@@ -47,9 +47,13 @@ suite('SQL package with migrations 001-034 and restricted invoker', () => {
   try {
    await c.query(await readFile(new URL('../db/pre_migration_baseline.sql', import.meta.url), 'utf8'));
    const directory = new URL('../db/migrations/', import.meta.url);
-   const migrations = await Promise.all((await readdir(directory)).filter(f => /^\d{3}_.*\.ts$/.test(f)).sort().map(async f => (await import(new URL(f,directory).href)).default));
-   expect(migrations).toHaveLength(34);
-   await runMigrations(c, migrations);
+   const filenames = (await readdir(directory)).filter(f => /^\d{3}_.*\.ts$/.test(f)).sort();
+   const expectedIds = filenames.map(f => f.slice(0, -3));
+   expect(expectedIds.length).toBeGreaterThan(0);
+   const migrations = await Promise.all(filenames.map(async f => (await import(new URL(f,directory).href)).default));
+   expect(await runMigrations(c, migrations)).toEqual(expectedIds);
+   expect((await c.query('SELECT id FROM schema_migrations ORDER BY id')).rows.map(row => row.id)).toEqual(expectedIds);
+   expect(await runMigrations(c, migrations)).toEqual([]);
    await c.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO "${role}";
     GRANT SELECT ON schema_migrations TO "${role}";
     GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names TO "${role}"`);
