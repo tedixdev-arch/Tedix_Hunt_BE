@@ -24,3 +24,5 @@ Based on merged #112 main `4d5d669`; dependencies #95/#96/#110/#111/#112 are pre
 - All migrations 001–036 applied from `pre_migration_baseline.sql` in an isolated database; second run: no migrations to apply. Existing migration suites and fresh-schema checks also passed.
 
 Initial validation exposed the historical retirement test's expected-row shape missing the new default column; its expectation now includes `invitation_enabled=true`. An early run used a stale compiled migration from before the rebase; it was removed before the clean baseline and final suite. No merge or deployment was performed. STOP for ChatGPT review.
+
+Independent verification of PR head `d653451`: **74 files / 1,653 tests passed, zero skips** (86.27 seconds); build and typecheck passed. The compiled-access checker now discovers the migration catalog instead of expecting the obsolete count of 33: **36 applied, repeat zero**. It also checks invitation control Swagger operations, the approved enrollment policy and the invitation column in a fresh full-schema bootstrap; all passed (82 runtime paths).

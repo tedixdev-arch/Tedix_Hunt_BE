@@ -8,6 +8,9 @@ const { swaggerSpec } = await import('../dist/lib/swagger.js');
 const paths = ['/api/hunts/{id}/participants/enroll','/api/hunts/{id}/participants/me',
   '/api/hunts/{id}/checkpoints/{checkpointId}/access','/api/hunts/{id}/checkpoints/{checkpointId}/proximity'];
 for (const path of paths) assert.ok(swaggerSpec.paths[path]);
+assert.ok(swaggerSpec.paths['/api/hunts/{id}/access']?.delete);
+assert.ok(swaggerSpec.paths['/api/hunts/{id}/access/regenerate']?.post);
+assert.deepEqual(swaggerSpec.components.schemas.ParticipantHuntAccessContext.properties.enrollmentPolicy.enum, ['organizer_invitation']);
 for (const path of ['/api/hunts/{id}/checkpoint-radii','/api/admin/templates/review/{key}/checkpoint-radii']) {
   assert.ok(swaggerSpec.paths[path]?.patch);
   assert.equal(swaggerSpec.paths[path].patch.requestBody.content['application/json'].schema.additionalProperties, false);
@@ -41,14 +44,16 @@ try {
       if (i===0) {
         await client.query(await readFile(new URL('../src/db/pre_migration_baseline.sql',import.meta.url),'utf8'));
         const migrations=await discoverMigrations(new URL('../dist/db/migrations',import.meta.url).pathname);
-        assert.equal((await runMigrations(client,migrations)).length,33);
+        assert.ok(migrations.length > 0);
+        assert.deepEqual(await runMigrations(client,migrations), migrations.map(m => m.id));
         assert.deepEqual(await runMigrations(client,migrations),[]);
-        console.log('Compiled migrations: 33 applied; repeat 0.');
+        console.log(`Compiled migrations: ${migrations.length} applied; repeat 0.`);
       } else {
         await client.query(await readFile(new URL('../src/db/schema.sql',import.meta.url),'utf8'));
         assert.ok((await client.query("SELECT to_regclass('participant_checkpoint_access') AS t")).rows[0].t);
         assert.ok((await client.query("SELECT to_regclass('geographic_city_names') AS t")).rows[0].t);
         await client.query('SELECT completed_at,row_count FROM geographic_imports LIMIT 0');
+        await client.query('SELECT invitation_enabled FROM hunts LIMIT 0');
         console.log('Full schema bootstrap: passed, including Participant access tables/trigger.');
       }
     } finally { client.release(); await pool.end(); }
