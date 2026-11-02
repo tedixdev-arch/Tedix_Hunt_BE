@@ -1,20 +1,39 @@
-Temporary Cluj setup
-===================
+Temporary Cluj setup through pgAdmin Web
+========================================
 
-This opt-in command adds a real manual registry reference for development Creator setup when no Cluj locality exists. It does not import GeoNames, approve a locality or Template, or make a Template eligible for Organizer use. Existing authorization, submission and exact-version eligibility checks still apply.
+Use the owner's independently verified **tedixhunt_dev** PostgreSQL connection. The real database is **tedix_hunt**, and the login/current role is **tedix_app**. Names alone do not identify the server: compare the PostgreSQL server address/port with the owner's previously reviewed independent development evidence (`DEV_PG_SERVER_ADDR` / `DEV_PG_SERVER_PORT` in the existing binding process). Do not obtain replacement target values from an unverified connection. A shared/loopback address is not a unique cluster identity; the independently verified pgAdmin development connection remains required. Never select a production connection.
 
-After normal migrations, in a dedicated development database whose name ends in `_dev`:
+No server shell, SSH, GeoNames import, new workflow or backend runtime change is needed. The script never runs on startup, migration or deployment. It does not approve localities or Templates, change permissions, update drafts or relax eligibility/version rules.
 
-```sh
-NODE_ENV=development DEVELOPMENT_LOCALITY_SEED=cluj DEVELOPMENT_DATABASE_URL='<development PostgreSQL URL>' node scripts/development/cluj-locality.mjs apply
-```
+After ChatGPT review, the owner can perform these steps (not executed by this PR):
 
-The command deliberately ignores `DATABASE_URL`. It is never run by startup, migrations or deployment. Do not point it at a production database. No database has been changed by this PR.
+1. In pgAdmin Web select **tedixhunt_dev → Databases → tedix_hunt → Tools → Query Tool**, using **tedix_app** directly (no SET ROLE). Run these read-only checks and compare the endpoint with the independently reviewed development values:
 
-Repeated application is a no-op. An existing unambiguous active Cluj reference is retained; ambiguous or inactive records require explicit Admin reconciliation. Only a new record gets the `development-setup` provenance. Country RO must already exist from normal migrations. Coordinates approximate the city centre, not a verified checkpoint or safe route.
+   ```sql
+   SELECT current_database(), current_user, session_user,
+          inet_server_addr()::text AS server_address, inet_server_port() AS server_port;
+   SELECT id, country_code, name, administrative_context, latitude, longitude, active, provider
+   FROM public.localities
+   WHERE country_code = 'RO'
+     AND lower(regexp_replace(name, '[[:space:]-]', '', 'g')) = 'clujnapoca'
+   ORDER BY id;
+   SELECT has_table_privilege(current_user, 'public.localities', 'SELECT') AS can_read,
+          has_table_privilege(current_user, 'public.localities', 'INSERT') AS can_insert,
+          has_table_privilege(current_user, 'public.localities', 'UPDATE') AS can_update;
+   ```
 
-To reverse the seed, use the same explicit environment with the `remove` action. This idempotently deactivates only the seed-owned record; it preserves UUIDs, saved snapshots, foreign keys and unrelated registry entries. Reapplication never silently reactivates an inactive record. If referenced drafts still need the locality, reconcile the catalog to that UUID before retiring it.
+   One active candidate is reused, regardless of its existing Cluj administrative label or coordinates. Keep its UUID and provenance. Do not insert a replacement or edit saved snapshots. Multiple active matches or only inactive matches require normal Admin reconciliation; do not reactivate or approve anything with this seed. Missing privileges are a real permission issue: stop rather than grant rights or use a broader role here.
 
-Frontend pairing: the FE development-mode `.env.development` enables `VITE_DEVELOPMENT_LOCATION_PRESET=cluj`. Run `npm run dev`, or build a development artifact with `npm run build -- --mode development`. Ordinary production mode ignores the flag. Removing the preset restores the catalog selector without changing the form. Organizer geographic fields remain geographic text fields; they never supply a locality UUID or substitute for eligible approved Template selection.
+2. Open/download **scripts/development/cluj-locality.sql** from this PR. In Query Tool Open File/upload it (or paste the small SQL file). Set only `expected_server_address` and `expected_server_port` to the independently reviewed **PostgreSQL** endpoint, not the HTTPS API address. Leave `action = 'apply'`. The file deliberately refuses unchanged placeholders, the wrong endpoint, any database other than `tedix_hunt`, or either login/current role other than `tedix_app`.
+3. Execute the **whole DO statement**. It is atomic; no psql meta-commands, extensions, temporary schema, superuser functions or shell access are required. pgAdmin's Messages tab reports the reused or created UUID. A single active matching reference causes no write. If none exists (including no stale seed-owned identity), it inserts one manual development reference with a database-generated UUID and explicit provenance. It creates no country, GeoNames/catalog/import, approval or Template record. A 5-second lock timeout bounds contention; on an error no partial seed is committed. If the Query Tool has an explicit transaction already open, rollback on failure; otherwise commit only after the successful result has been reviewed.
+4. Repeat the SELECT above: exactly one active selectable Cluj locality should exist. Re-executing the script does not change that row, its timestamps or provenance. No API/server restart is needed; the normal registry API reads this table.
+5. Follow FE PR #143's **docs/development-cluj-setup.md** for the normal development deployment and Creator/Organizer checks. The registered locality enables geography selection only; Organizer still needs an actually eligible approved Template through the existing exact-version workflow.
 
-Tests: `node scripts/development/cluj-locality.test.mjs` (five safety/transaction unit tests). These tests inject the database client; they do not validate a live PostgreSQL instance. The command has not been executed against any remote database.
+Reversal: use the same reviewed endpoint constants and change only `action` to `remove`. Execute the whole statement. It idempotently deactivates only the `development-setup` / `cluj-napoca` record, preserving UUIDs, foreign keys, version snapshots and history. Reused registry-owned records are never changed. Subsequent apply never silently reactivates an inactive record. Before retiring a referenced development record, use normal catalog reconciliation to preserve its UUID, or retain it while drafts still need it.
+
+Verification
+------------
+
+`src/db/developmentClujSeed.integration.test.ts` executes this exact SQL in disposable PostgreSQL 17, after all real migrations, using a non-superuser `tedix_app` role with only schema USAGE, country/locality SELECT, locality INSERT/UPDATE and no schema CREATE. It tests insert, repeat, existing-reference reuse, inactive/ambiguous refusal, endpoint/database/role guards, missing-country rollback, concurrent apply and removal with a real saved Template version reference/snapshot. The full existing BE suite remains required.
+
+Run in the existing disposable CI PostgreSQL service with `TEST_DATABASE_URL` set to its local `tedix_test` database: `npm run build` then `npm test`. This suite creates and drops its own `tedix_hunt` test database/template and test role, and refuses nonlocal/non-test bootstrap URLs. Never supply a persistent database URL to tests. No persistent database or deployed service was modified to prepare this PR.
