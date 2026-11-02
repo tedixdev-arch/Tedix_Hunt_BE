@@ -922,4 +922,3 @@ const mapAdminReview = (row: any): AdminTemplateReview => ({
   localityId: row.locality_id ?? null,
   localitySnapshot: row.locality_snapshot ?? null,
 });
-

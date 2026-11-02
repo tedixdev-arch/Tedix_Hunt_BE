@@ -223,4 +223,3 @@ type Actor = { id: string; auth: string };
     expect((await db.query('SELECT template_snapshot FROM hunts WHERE id=$1', [hunt.id])).rows[0].template_snapshot).toEqual(saved);
   });
 });
-

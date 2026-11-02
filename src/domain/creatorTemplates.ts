@@ -151,4 +151,3 @@ export const isTemplateContentSubmittable = (value: unknown, category: TemplateC
     return checkpoint.checkpointNumber === undefined || checkpoint.checkpointNumber === number;
   });
 };
-

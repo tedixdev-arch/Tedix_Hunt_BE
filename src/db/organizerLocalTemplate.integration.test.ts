@@ -428,4 +428,3 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect(await templates.getVersion(a.templateId,1)).not.toBeNull();
   });
 });
-
