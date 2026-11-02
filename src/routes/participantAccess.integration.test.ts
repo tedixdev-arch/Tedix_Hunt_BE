@@ -30,8 +30,8 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   const context = async () => (await get().expect(200)).body;
   const state = async () => (await db.query('SELECT * FROM participant_checkpoint_access ORDER BY participant_id,checkpoint_id')).rows;
   const makeHunt = async (snapshot: object, status = 'active', code: string | null = null) => (await db.query(`INSERT INTO hunts
-    (organization_id,created_by_user_id,name,status,template_key,template_version,template_snapshot,access_code,access_mode)
-    VALUES($1,$2,'Historical fixture',$3,$4,1,$5,$6,'invitation_only') RETURNING id`,
+    (organization_id,created_by_user_id,name,status,template_key,template_version,template_snapshot,access_code,access_mode,capacity)
+    VALUES($1,$2,'Historical fixture',$3,$4,1,$5,$6,'invitation_only',100) RETURNING id`,
     [org, actors.organizer, status, (snapshot as any).key, snapshot, code])).rows[0].id as string;
   beforeAll(async () => {
     await admin.query(`CREATE DATABASE "${name}"`);
@@ -102,16 +102,63 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     expect(JSON.stringify(first)).not.toMatch(/correctAnswers|teamAnswer|solution|publicContributions|templateSnapshot|password/);
     expect(responses[0].headers['cache-control']).toBe('no-store');
   });
-  it('rejects new enrollment until D7 even with correct code; public resolution never enrolls', async () => {
-    await request(app).get('/api/hunt-access/7KPM4XQ2').expect(200);
-    await rejoin({ accessCode: '7KPM4XQ2' }, hunt, 'outsider').expect(422, { error: 'enrollment_policy_unresolved' });
-    await rejoin({}, hunt, 'outsider').expect(404);
-    for (const who of ['organizer','supervisor','admin']) {
-      await rejoin({}, hunt, who).expect(404);
-      await get(hunt, who).expect(404);
-      await rejoin({ accessCode: '7KPM4XQ2' }, hunt, who).expect(422);
+  it('admits authenticated first members and guests atomically and idempotently', async () => {
+    const h = await makeHunt(createSignalClujNapocaStarter('admission'), 'published', '6KPM4XQ2');
+    await db.query("UPDATE hunts SET hunt_format='solo' WHERE id=$1",[h]);
+    await request(app).get('/api/hunt-access/6KPM4XQ2').expect(200);
+    expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1',[h])).rowCount).toBe(0);
+    await rejoin({}, h, 'outsider').expect(404);
+    for (const code of ['7KPM4XQ2','9KPM4XQ2']) await rejoin({ accessCode: code },h,'outsider').expect(404);
+    const responses = await Promise.all(Array.from({length: 8}, () => rejoin({accessCode:'6KPM4XQ2'},h,'outsider')));
+    expect(responses.every(r => r.status === 200)).toBe(true);
+    expect(new Set(responses.map(r => r.body.participantId)).size).toBe(1);
+    await rejoin({accessCode:'6KPM4XQ2'},h,'guest').expect(200);
+    expect((await db.query('SELECT * FROM teams')).rowCount).toBe(0);
+  });
+  it('serializes final-seat admissions and rejects null capacity and closed lifecycles', async () => {
+    const h = await makeHunt(createSignalClujNapocaStarter('capacity'), 'active', '5KPM4XQ2');
+    await db.query("UPDATE hunts SET capacity=1,hunt_format='team',team_size=4 WHERE id=$1",[h]);
+    const r = await Promise.all(['outsider','guest'].map(w => rejoin({accessCode:'5KPM4XQ2'},h,w)));
+    expect(r.map(x=>x.status).sort()).toEqual([200,409]);
+    expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1',[h])).rowCount).toBe(1);
+    for (const status of ['paused','draft','finished','cancelled']) {
+      await db.query('UPDATE hunts SET status=$2 WHERE id=$1',[h,status]);
+      await rejoin({accessCode:'5KPM4XQ2'},h,'admin').expect(409);
     }
-    expect((await db.query('SELECT count(*) FROM hunt_participants WHERE hunt_id=$1 AND user_id=$2', [hunt, actors.outsider])).rows[0].count).toBe('0');
+    await db.query("UPDATE hunts SET status='active',capacity=NULL WHERE id=$1",[h]);
+    await rejoin({accessCode:'5KPM4XQ2'},h,'admin').expect(409,{error:'capacity_unconfigured'});
+  });
+  it('restricts invitation controls and preserves rejoin after disable and rotation', async () => {
+    const endpoint = `/api/hunts/${hunt}/access`;
+    const supervisorRead = await request(app).get(`/api/hunts/${hunt}`).set('Authorization',auth('supervisor')).expect(200);
+    expect(supervisorRead.body.accessCode).toBeNull();
+    await request(app).delete(endpoint).expect(401);
+    await request(app).post(endpoint+'/regenerate').expect(401);
+    for (const who of ['participant','supervisor','admin']) {
+      await request(app).delete(endpoint).set('Authorization',auth(who)).expect(403);
+      await request(app).post(endpoint+'/regenerate').set('Authorization',auth(who)).expect(403);
+    }
+    await request(app).delete(endpoint).set('Authorization',auth('organizer')).expect(200);
+    await rejoin({accessCode:'7KPM4XQ2'},hunt,'outsider').expect(404);
+    await request(app).get('/api/hunt-access/7KPM4XQ2').expect(404);
+    await rejoin().expect(200);
+    const disabled = await request(app).post(endpoint).set('Authorization',auth('organizer')).expect(200);
+    expect(disabled.body.enabled).toBe(false);
+    const rotated = await request(app).post(endpoint+'/regenerate').set('Authorization',auth('organizer')).expect(200);
+    expect(rotated.body.code).not.toBe('7KPM4XQ2');
+    await rejoin({accessCode:'7KPM4XQ2'},hunt,'outsider').expect(404);
+    await rejoin().expect(200);
+    // Restore the fixture code for independent access tests.
+    await db.query("UPDATE hunts SET access_code='7KPM4XQ2' WHERE id=$1",[hunt]);
+  });
+  it('rolls back new membership when checkpoint initialization fails', async () => {
+    const h = await makeHunt(createSignalClujNapocaStarter('rollback'),'active','4KPM4XQ2');
+    await db.query(`CREATE FUNCTION reject_access_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture'; END $$`);
+    await db.query('CREATE TRIGGER reject_access_fixture BEFORE INSERT ON participant_checkpoint_access FOR EACH ROW EXECUTE FUNCTION reject_access_fixture()');
+    try { await rejoin({accessCode:'4KPM4XQ2'},h,'outsider').expect(500); }
+    finally { await db.query('DROP TRIGGER reject_access_fixture ON participant_checkpoint_access'); await db.query('DROP FUNCTION reject_access_fixture()'); }
+    expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1',[h])).rowCount).toBe(0);
+    expect((await db.query('SELECT * FROM hunt_checkpoint_identities WHERE hunt_id=$1',[h])).rowCount).toBe(0);
   });
   it('enforces bearer type, active identity and body allowlists', async () => {
     await request(app).get(`/api/hunts/${hunt}/participants/me`).expect(401);
@@ -120,7 +167,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     for (const who of ['blocked','retired']) { await get(hunt, who).expect(401); await verify(points[0], obs(), hunt, who).expect(401); }
     await rejoin({ userId: actors.second }).expect(400);
     await rejoin({ accessCode: 123 }).expect(400);
-    for (const accessCode of ['invalid', '9KPM4XQ2', '8KPM4XQ2']) await rejoin({ accessCode }).expect(404);
+    for (const accessCode of ['invalid']) await rejoin({ accessCode }).expect(404);
     await get('not-a-uuid').expect(404);
     // Existing authenticated guest identity may rejoin; no guest is created by this transport.
     await get(hunt, 'guest').expect(200);
@@ -211,32 +258,16 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     expect((await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows).toEqual(before);
   });
 
-  it('never treats capacity, mode or lifecycle as invitation authority', async () => {
-    for (const format of ['solo', 'team']) {
-      const h = await makeHunt(signalClujNapocaV1, 'published', '9KPM4XQ2');
-      try {
-        await db.query('UPDATE hunts SET hunt_format=$2,team_size=$3,capacity=1 WHERE id=$1', [h, format, format === 'solo' ? null : 4]);
-        for (const status of ['published', 'active', 'paused', 'draft', 'finished', 'cancelled']) {
-          await db.query('UPDATE hunts SET status=$2 WHERE id=$1', [h, status]);
-          const responses = await Promise.all(['participant', 'outsider'].map(who => rejoin({ accessCode: '9KPM4XQ2' }, h, who)));
-          for (const response of responses) expect(response.body).toEqual({ error:
-            ['published', 'active', 'paused'].includes(status) ? 'enrollment_policy_unresolved' : 'invalid_hunt_state' });
-        }
-        expect((await db.query('SELECT count(*) FROM hunt_participants WHERE hunt_id=$1', [h])).rows[0].count).toBe('0');
-      } finally { await db.query('DELETE FROM hunts WHERE id=$1', [h]); }
-    }
-  });
-
   it('rejects purported eligibility, membership, Team and role fields and replaced codes without writes', async () => {
     const before = (await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows;
     for (const body of [{ invitation: 'claimed' }, { invitationId: randomUUID() }, { eligible: true },
       { participantId: (await context()).participantId }, { teamId: randomUUID() }, { role: 'organizer' }, { huntId: other }])
       await rejoin({ accessCode: '7KPM4XQ2', ...body }, hunt, 'outsider').expect(400);
-    await db.query("UPDATE hunts SET access_code='6KPM4XQ2' WHERE id=$1", [hunt]);
+    await db.query("UPDATE hunts SET access_code='3KPM4XQ2' WHERE id=$1", [hunt]);
     try {
-      await rejoin({ accessCode: '7KPM4XQ2' }).expect(404);
+      await rejoin({ accessCode: '7KPM4XQ2' }).expect(200);
       await rejoin({ accessCode: '7KPM4XQ2' }, hunt, 'outsider').expect(404);
-      await rejoin({ accessCode: '6KPM4XQ2' }, hunt, 'outsider').expect(422);
+      await rejoin({}, hunt, 'outsider').expect(404);
       await rejoin().expect(200); // A code replacement is not membership revocation.
     } finally { await db.query("UPDATE hunts SET access_code='7KPM4XQ2' WHERE id=$1", [hunt]); }
     expect((await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows).toEqual(before);
@@ -308,4 +339,15 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     await request(app).get(`/api/hunts/${hunt}/participants/me`).set('Authorization', `Bearer ${sign({ sub: actors.guest, type: 'access' }, { expiresIn: -1 })}`).expect(401);
     for (const who of ['blocked', 'retired']) await rejoin({}, hunt, who).expect(401);
   });
+  it('rate limits repeated admission attempts without writing membership', async () => {
+    let limited = false;
+    for (let i = 0; i < 70; i++) {
+      const r = await rejoin({accessCode:'9KPM4XQ2'}, hunt, 'admin');
+      if (r.status === 429) { expect(Number(r.headers['retry-after'])).toBeGreaterThan(0); limited = true; break; }
+      expect(r.status).toBe(404);
+    }
+    expect(limited).toBe(true);
+    expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1 AND user_id=$2',[hunt,actors.admin])).rowCount).toBe(0);
+  });
+
 });

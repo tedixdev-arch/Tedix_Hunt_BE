@@ -179,5 +179,8 @@ export function hasValidPersistedCustomOwnership(content: unknown): boolean {
 
 /** No custom gameplay is delivered yet, even to participants with a supervisor context. */
 export function projectHuntForReader<T extends { templateSnapshot: unknown }>(hunt: T, organizer: boolean): T {
-  return !organizer && hasCustomExercises(hunt.templateSnapshot) ? { ...hunt, templateSnapshot: null } : hunt;
+  if (organizer) return hunt;
+  // The code is now an admission bearer secret, available only to Hunt Organizers.
+  return { ...hunt, ...('accessCode' in hunt ? { accessCode: null } : {}),
+    ...(hasCustomExercises(hunt.templateSnapshot) ? { templateSnapshot: null } : {}) };
 }

@@ -1,5 +1,7 @@
 # Secure Participant admission foundation — Task 6.2
 
+> Historical Task 6.2 record. Task 6.3 D7-A supersedes its unresolved-admission statements; see [implemented invitation contract](Participant_Gameplay_Contract.md#implemented-d7-a-invitation-admission). The internal UUID-only compatibility lookup remains fail closed.
+
 First enrollment remains blocked by [D7](Participant_Gameplay_Decisions.md). No approved invitation transport or provisioning actor exists in the inspected repositories. This PR hardens existing-member continuity and closes an internal membership-creation bypass; it does not claim successful first admission.
 
 Reviewed BE main `f4e55e5a464ffff02e5b7a82be201ec6dac2cc8b`, including merged #95, #96, #110 and #111; FE main `cdac4a6798a1498b226a831625e6211ec371370d`. Read the [gameplay contract](Participant_Gameplay_Contract.md), decisions and implementation sequence before changing code. No Master/Implementation Plan changes.

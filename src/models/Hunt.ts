@@ -39,6 +39,7 @@ export interface IHunt {
   difficulty: 'easy' | null;
   checkpointOrder: 'recommended' | null;
   accessCode: string | null;
+  invitationEnabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,6 +113,7 @@ export const mapHuntRow = (row: any): IHunt => ({
   difficulty: row.difficulty ?? null,
   checkpointOrder: row.checkpoint_order ?? null,
   accessCode: row.access_code ?? null,
+  invitationEnabled: row.invitation_enabled ?? true,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -133,7 +135,7 @@ export const Hunt = {
   },
 
   async findByAccessCode(code: string): Promise<IHunt | null> {
-    const { rows } = await pool.query('SELECT * FROM hunts WHERE access_code = $1 LIMIT 1', [code]);
+    const { rows } = await pool.query('SELECT * FROM hunts WHERE access_code = $1 AND invitation_enabled LIMIT 1', [code]);
     return rows[0] ? mapHuntRow(rows[0]) : null;
   },
 
@@ -161,6 +163,22 @@ export const Hunt = {
       }
     }
     throw new Error('hunt_access_code_generation_failed');
+  },
+
+  async setInvitation(id: string, regenerate: boolean): Promise<IHunt | null> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const { rows } = await pool.query(`UPDATE hunts
+          SET access_code=CASE WHEN $2 THEN $3 ELSE access_code END,
+              invitation_enabled=$2, updated_at=now()
+          WHERE id=$1 AND status=ANY($4::text[])
+            AND (NOT $2 OR access_code IS DISTINCT FROM $3) RETURNING *`,
+          [id, regenerate, regenerate ? generateHuntAccessCode() : null, ['published','active','paused']]);
+        if (rows[0]) return mapHuntRow(rows[0]);
+        if (!regenerate) return null;
+      } catch (error) { if (!isUniqueViolation(error)) throw error; }
+    }
+    return null;
   },
 
   async findForUser(userId: string): Promise<IHuntListItem[]> {

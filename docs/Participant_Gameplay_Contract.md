@@ -187,3 +187,20 @@ Wait for reviewed/implemented contract and deployed capability support. Keep cus
 ## Validation
 
 See [Task 5C validation report](Participant_Gameplay_5C_Validation.md) for this documentation change, and [historical Task 5 evidence](Participant_Gameplay_Validation.md) for #94. No gameplay integration pass is claimed. **STOP for ChatGPT review of this documentation-only Draft BE PR. Do not merge.**
+
+## Implemented D7-A invitation admission
+
+`POST /api/hunts/{id}/participants/enroll` accepts `{ "accessCode": "7KPM4XQ2" }` with an account or guest access bearer token. First admission requires the exact Hunt's currently enabled code, published/active lifecycle, a usable pinned snapshot and available Participant capacity. Missing/invalid/disabled/foreign/rotated code returns 404; closed lifecycle, missing capacity or full capacity returns 409. UUID, roles and participant IDs grant no admission authority. Public code lookup creates no membership.
+
+Existing members can omit the code and rejoin published/active/paused Hunts, even after disable/rotation or at capacity, retaining participant ID, joined time, checkpoint IDs and access progress. Syntactically malformed codes return 404 even on rejoin; syntactically valid codes are ignored for existing membership. Finished/cancelled Hunts remain closed.
+
+Organizer controls, requiring the specific Hunt organizer role:
+- `POST /api/hunts/{id}/access`: retrieve/create the stable code; returns `{huntId,code,enabled}` and never re-enables a disabled invitation.
+- `DELETE /api/hunts/{id}/access`: disable the invitation.
+- `POST /api/hunts/{id}/access/regenerate`: generate and enable a replacement, invalidating the old code.
+
+Migration 036 preserves existing codes, enabling their D7-A bearer semantics. Controls and admission serialize through the same Hunt row lock. Membership creation and checkpoint initialization commit together; uniqueness on Hunt/user prevents duplicates. Capacity counts all enrolled Participants, never Teams; null capacity rejects first admission as `capacity_unconfigured` (publication already requires positive capacity). No seat reclamation, reservations or Team creation occurs.
+
+Admission is limited to 60 requests/minute per authenticated user; public lookup to 120/minute per network identity. Limits use bounded in-process token buckets; multiple replicas require shared/edge enforcement for aggregate limits. Responses containing codes are no-store; application code does not log invitation values.
+
+Guests reuse `/api/auth/guest`: its access token expires after one hour and has no refresh token. Lost/expired guest credentials have no implemented recovery or account linking; creating another guest produces another user and cannot reclaim membership. FE must resolve the shared code, authenticate once, retain that identity/token, send the code on first enrollment, and use returned stable context for reconnect. No FE work is included. GPS grants, Team formation, gameplay execution/scoring/recovery remain separate unresolved work.

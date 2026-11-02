@@ -1,9 +1,11 @@
+import { TokenBuckets } from '../middleware/abuseProtection.js';
 import express, { type RequestHandler } from 'express';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { normalizeHuntAccessCode } from '../domain/huntAccess.js';
 import { ParticipantAccessError, record, validObservation } from '../domain/participantAccess.js';
 import { ParticipantAccess } from '../models/ParticipantAccess.js';
 
+const admissionBuckets = new TokenBuckets(10000);
 const router = express.Router({ mergeParams: true });
 router.use(requireAuth);
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -42,7 +44,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *         joinedAt: { type: string, format: date-time }
  *         huntStatus: { type: string, enum: [published, active, paused] }
  *         templateVersion: { type: integer, minimum: 1 }
- *         enrollmentPolicy: { type: string, enum: [existing_members_only] }
+ *         enrollmentPolicy: { type: string, enum: [organizer_invitation] }
  *         proximityPolicy: { type: string, enum: [unresolved] }
  *         checkpoints:
  *           type: array
@@ -51,8 +53,8 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *   post:
  *     tags: [Participant access]
  *     security: [{ bearerAuth: [] }]
- *     summary: Rejoin an existing authenticated Hunt membership
- *     description: Idempotent existing-member rejoin only. D7 has no approved invitation transport or provisioning actor. Public codes, professional roles and client-supplied eligibility never authorize first enrollment. A matching code for an eligible Hunt without membership returns 422 enrollment_policy_unresolved; without a code it returns 404. Invalid or replaced codes return 404. Reuses participantId and joinedAt without assigning a Team or consuming capacity. Published, active and paused Hunts only; this does not approve late admission.
+ *     summary: Enroll with an Organizer invitation or rejoin existing membership
+ *     description: D7-A bearer invitation admission for authenticated accounts and guests in published/active Hunts with capacity. Existing members rejoin published/active/paused Hunts without a code. Does not create Teams.
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     requestBody:
  *       required: true
@@ -69,7 +71,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *       401: { description: Authentication required }
  *       404: { description: Invalid code or inaccessible Hunt }
  *       409: { description: Ineligible Hunt or unavailable/conflicting snapshot }
- *       422: { description: New enrollment policy unresolved }
+ *       429: { description: Admission rate limit exceeded }
  * /api/hunts/{id}/participants/me:
  *   get:
  *     tags: [Participant access]
@@ -126,6 +128,8 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *       422: { description: Geography unavailable or proximity policy unresolved; no state changes }
  */
 router.post('/participants/enroll', handle(async (req: AuthRequest, res) => {
+  const retry = admissionBuckets.consume(req.user!.id, { capacity: 60, windowMs: 60000 });
+  if (retry) { res.set('Retry-After', String(retry)); res.status(429).json({ error: 'rate_limited' }); return; }
   if (!record(req.body) || Object.keys(req.body).some(k => k !== 'accessCode') ||
     (req.body.accessCode !== undefined && typeof req.body.accessCode !== 'string')) {
     res.status(400).json({ error: 'invalid_input' }); return;
