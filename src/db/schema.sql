@@ -162,8 +162,9 @@ CREATE TABLE IF NOT EXISTS hunts (
   template_version INTEGER CHECK (template_version IS NULL OR template_version >= 1),
   -- Immutable Hunt-time snapshot; existing Hunts do not follow later Template versions.
   template_snapshot JSONB,
-  hunt_format TEXT CHECK (hunt_format IS NULL OR hunt_format IN ('team')),
-  team_size INTEGER CHECK (team_size IS NULL OR team_size = 4),
+  hunt_format TEXT CHECK (hunt_format IS NULL OR hunt_format IN ('solo', 'team')),
+  team_size INTEGER CHECK (team_size IS NULL OR team_size > 0),
+  CONSTRAINT hunts_solo_team_size_check CHECK (hunt_format IS DISTINCT FROM 'solo' OR team_size IS NULL),
   access_mode TEXT CHECK (access_mode IS NULL OR access_mode IN ('invitation_only')),
   difficulty TEXT CHECK (difficulty IS NULL OR difficulty IN ('easy')),
   checkpoint_order TEXT CHECK (checkpoint_order IS NULL OR checkpoint_order IN ('recommended')),

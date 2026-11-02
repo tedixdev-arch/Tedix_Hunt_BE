@@ -33,7 +33,7 @@ export interface IHunt {
   templateVersion: number | null;
   templateSnapshot: HuntTemplateSnapshot | null;
   checkpointRadiusConfiguration?: CheckpointRadii | null;
-  format: 'team' | null;
+  format: 'solo' | 'team' | null;
   teamSize: number | null;
   accessMode: 'invitation_only' | null;
   difficulty: 'easy' | null;
@@ -75,8 +75,8 @@ export interface UpdateHuntGeneralSetupInput {
   templateVersion?: number;
   templateSnapshot?: HuntTemplateSnapshot;
   checkpointRadiusConfiguration?: CheckpointRadii;
-  format?: 'team';
-  teamSize?: 4;
+  format?: 'solo' | 'team';
+  teamSize?: number | null;
   accessMode?: 'invitation_only';
   difficulty?: 'easy';
   checkpointOrder?: 'recommended';
@@ -199,6 +199,7 @@ export const Hunt = {
   },
 
   async updateDraft(id: string, input: UpdateHuntGeneralSetupInput, client: Pick<PoolClient, 'query'> = pool): Promise<IHunt | null> {
+    if (input.format === 'solo') input = { ...input, teamSize: null };
     const columns: Record<keyof UpdateHuntGeneralSetupInput, string> = {
       name: 'name', country: 'country', region: 'region', city: 'city', startDate: 'start_date',
       startTime: 'start_time', timezone: 'timezone', durationMinutes: 'duration_minutes',
@@ -213,7 +214,7 @@ export const Hunt = {
     const assignments = entries.map(([field], index) => `${columns[field]} = $${index + 2}`);
     const { rows } = await client.query(
       `UPDATE hunts SET ${assignments.join(', ')}, updated_at = now()
-       WHERE id = $1 AND status = 'draft'${input.templateKey ? ' AND template_id IS NULL' : ''}
+       WHERE id = $1 AND status = 'draft'${input.templateKey ? ' AND template_id IS NULL' : ''}${input.teamSize != null && input.format === undefined ? " AND hunt_format IS DISTINCT FROM 'solo'" : ''}
        RETURNING *`,
       [id, ...entries.map(([, value]) => value)],
     );

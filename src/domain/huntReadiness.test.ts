@@ -49,12 +49,22 @@ describe('validateHuntForPublish', () => {
   });
 
   it.each([
-    ['format', null], ['teamSize', 3], ['accessMode', null],
+    ['format', null], ['teamSize', 0], ['accessMode', null],
     ['difficulty', null], ['checkpointOrder', null],
   ] as const)('rejects a missing or unsupported pilot option %s', (field, value) => {
     const result = validateHuntForPublish({ ...completeHunt, [field]: value } as IHunt);
     expect(result.ready).toBe(false);
     expect(result.issues).toContainEqual(expect.objectContaining({ section: 'options', field }));
+  });
+
+  it.each([2, 3, 5, 6])('keeps variable Team size %s publication gated on D2/D5', (teamSize) => {
+    expect(validateHuntForPublish({ ...completeHunt, teamSize }).issues).toContainEqual(
+      expect.objectContaining({ field: 'teamSize', message: expect.stringContaining('D2/D5') }));
+  });
+
+  it('blocks Solo without dropping Team content', () => {
+    expect(validateHuntForPublish({ ...completeHunt, format: 'solo', teamSize: null }).issues).toContainEqual(
+      expect.objectContaining({ field: 'templateSnapshot', message: expect.stringContaining('D5') }));
   });
 
   it('deduplicates higher-level option guidance', () => {

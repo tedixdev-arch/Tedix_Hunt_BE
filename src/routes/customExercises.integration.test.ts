@@ -218,8 +218,12 @@ type Actor = { id: string; auth: string };
     expect(Object.keys(publicRead.body).sort()).toEqual(['code', 'huntId', 'name', 'status']);
     const contexts = await get('/api/me/hunt-contexts', participant).expect(200);
     expect(JSON.stringify(contexts.body)).not.toContain('customExercises');
-    const publish = await post(`/api/hunts/${hunt.id}/publish`, {}).expect(422);
-    expect(publish.body.issues.some((issue: any) => issue.message.includes('Custom exercise gameplay'))).toBe(true);
-    expect((await db.query('SELECT template_snapshot FROM hunts WHERE id=$1', [hunt.id])).rows[0].template_snapshot).toEqual(saved);
+    for (const config of [{ format: 'solo', teamSize: null }, { format: 'team', teamSize: 3 }, { format: 'team', teamSize: 4 }]) {
+      await request(app).patch(`/api/hunts/${hunt.id}`).set('Authorization', owner.auth).send(config).expect(200);
+      const publish = await post(`/api/hunts/${hunt.id}/publish`, {}).expect(422);
+      expect(publish.body.issues.some((issue: any) => issue.message.includes('Custom exercise gameplay'))).toBe(true);
+      // Required Personal and Team slots both remain pinned, including the terminal slot.
+      expect((await db.query('SELECT template_snapshot FROM hunts WHERE id=$1', [hunt.id])).rows[0].template_snapshot).toEqual(saved);
+    }
   });
 });

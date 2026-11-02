@@ -264,7 +264,7 @@ describe('Hunt routes', () => {
   });
 
   it.each([
-    [{ format: 'single' }], [{ teamSize: 3 }], [{ teamSize: 5 }],
+    [{ format: 'single' }], [{ teamSize: 0 }], [{ teamSize: 1.5 }], [{ teamSize: '4' }], [{ teamSize: -1 }], [{ teamSize: 2147483648 }], [{ format: 'solo', teamSize: 4 }],
     [{ accessMode: 'open' }], [{ difficulty: 'medium' }], [{ difficulty: 'advanced' }],
     [{ checkpointOrder: 'short' }],
   ])('rejects unsupported prototype option %#', async (body) => {
@@ -362,7 +362,7 @@ describe('Hunt routes', () => {
   it('lists only supported pilot options for authenticated users', async () => {
     await request(app).get('/api/hunt-options').expect(401, { error: 'unauthorized' });
     await request(app).get('/api/hunt-options').set('Authorization', auth).expect(200, {
-      formats: [{ key: 'team', label: 'Team Hunters' }],
+      formats: [{ key: 'solo', label: 'Solo' }, { key: 'team', label: 'Team Hunters' }],
       teamSizes: [4],
       accessModes: [{ key: 'invitation_only', label: 'Invitation-only' }],
       difficulties: [{ key: 'easy', label: 'Easy' }],

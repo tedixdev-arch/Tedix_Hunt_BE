@@ -9,12 +9,12 @@ const router = express.Router();
  * /api/hunt-options:
  *   get:
  *     tags: [Hunt Options]
- *     summary: List currently supported pilot runtime options
- *     description: Returns only values supported by the current pilot runtime; unsupported prototype choices are intentionally omitted.
+ *     summary: List Hunt setup choices
+ *     description: Solo and Team are setup choices, not live gameplay capabilities. teamSizes lists the historical pilot choice; variable-size configuration is accepted by Hunt PATCH while publication remains gated on D2/D5.
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Supported pilot Hunt options
+ *         description: Hunt setup options
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/HuntOptions' }
