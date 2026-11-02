@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readFile, readdir } from 'node:fs/promises';
 import { Pool } from 'pg';
 import request from 'supertest';
@@ -17,6 +19,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   let enroll: typeof import('../models/HuntParticipant.js').HuntParticipant.enroll;
   const actors: Record<string, string> = {};
   let org: string, hunt: string, other: string, legacy: string;
+  let databaseUrl: string;
   let points: string[];
   const auth = (who = 'participant') => `Bearer ${sign({ sub: actors[who], type: 'access' })}`;
   const get = (h = hunt, who = 'participant') => request(app).get(`/api/hunts/${h}/participants/me`).set('Authorization', auth(who));
@@ -33,6 +36,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   beforeAll(async () => {
     await admin.query(`CREATE DATABASE "${name}"`);
     const url = new URL(testUrl!); url.pathname = `/${name}`;
+    databaseUrl = url.toString();
     db = new Pool({ connectionString: url.toString() });
     const client = await db.connect();
     try {
@@ -65,15 +69,16 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     sign = (await import('../lib/jwt.js')).signJwt;
     enroll = (await import('../models/HuntParticipant.js')).HuntParticipant.enroll;
     // Trusted pre-existing membership fixture; no public invitation policy is fabricated.
-    for (const who of ['participant','second','blocked','retired','guest']) await enroll(hunt, actors[who]);
-    await enroll(other, actors.outsider); await enroll(legacy, actors.participant);
+    for (const who of ['participant','second','blocked','retired','guest','racer'])
+      await db.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2)', [hunt, actors[who]]);
+    await db.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2),($3,$4)', [other, actors.outsider, legacy, actors.participant]);
     for (const role of ['organizer','supervisor']) await db.query('INSERT INTO hunt_roles VALUES($1,$2,$3)', [hunt, actors[role], role]);
   }, 30000);
   afterAll(async () => {
     app?.locals.stopAbuseProtection(); await appPool?.end(); await db?.end();
     await admin.query(`DROP DATABASE IF EXISTS "${name}"`); await admin.end();
   });
-  it('returns the same membership for concurrent model enrollment without duplicates or Teams', async () => {
+  it('returns the same historical membership for concurrent model rejoin without duplicates or Teams', async () => {
     const results = await Promise.all(Array.from({ length: 20 }, () => enroll(hunt, actors.racer)));
     expect(new Set(results.map(r => r.id)).size).toBe(1);
     expect((await db.query('SELECT count(*) FROM hunt_participants WHERE hunt_id=$1 AND user_id=$2', [hunt, actors.racer])).rows[0].count).toBe('1');
@@ -194,5 +199,113 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     await request(app).patch(`/api/hunts/${hunt}`).set('Authorization', auth()).send({ name: 'No' }).expect(403);
     await request(app).get(`/api/hunts/${hunt}`).set('Authorization', auth('organizer')).expect(200);
     await request(app).get('/api/admin/users').set('Authorization', auth()).expect(403);
+  });
+
+  it('denies first membership through the model, including concurrent duplicate attempts', async () => {
+    const before = (await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows;
+    const results = await Promise.allSettled(Array.from({ length: 12 }, () => enroll(hunt, actors.outsider)));
+    for (const result of results) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') expect(result.reason).toMatchObject({ status: 422, code: 'enrollment_policy_unresolved' });
+    }
+    expect((await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows).toEqual(before);
+  });
+
+  it('never treats capacity, mode or lifecycle as invitation authority', async () => {
+    for (const format of ['solo', 'team']) {
+      const h = await makeHunt(signalClujNapocaV1, 'published', '9KPM4XQ2');
+      try {
+        await db.query('UPDATE hunts SET hunt_format=$2,team_size=$3,capacity=1 WHERE id=$1', [h, format, format === 'solo' ? null : 4]);
+        for (const status of ['published', 'active', 'paused', 'draft', 'finished', 'cancelled']) {
+          await db.query('UPDATE hunts SET status=$2 WHERE id=$1', [h, status]);
+          const responses = await Promise.all(['participant', 'outsider'].map(who => rejoin({ accessCode: '9KPM4XQ2' }, h, who)));
+          for (const response of responses) expect(response.body).toEqual({ error:
+            ['published', 'active', 'paused'].includes(status) ? 'enrollment_policy_unresolved' : 'invalid_hunt_state' });
+        }
+        expect((await db.query('SELECT count(*) FROM hunt_participants WHERE hunt_id=$1', [h])).rows[0].count).toBe('0');
+      } finally { await db.query('DELETE FROM hunts WHERE id=$1', [h]); }
+    }
+  });
+
+  it('rejects purported eligibility, membership, Team and role fields and replaced codes without writes', async () => {
+    const before = (await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows;
+    for (const body of [{ invitation: 'claimed' }, { invitationId: randomUUID() }, { eligible: true },
+      { participantId: (await context()).participantId }, { teamId: randomUUID() }, { role: 'organizer' }, { huntId: other }])
+      await rejoin({ accessCode: '7KPM4XQ2', ...body }, hunt, 'outsider').expect(400);
+    await db.query("UPDATE hunts SET access_code='6KPM4XQ2' WHERE id=$1", [hunt]);
+    try {
+      await rejoin({ accessCode: '7KPM4XQ2' }).expect(404);
+      await rejoin({ accessCode: '7KPM4XQ2' }, hunt, 'outsider').expect(404);
+      await rejoin({ accessCode: '6KPM4XQ2' }, hunt, 'outsider').expect(422);
+      await rejoin().expect(200); // A code replacement is not membership revocation.
+    } finally { await db.query("UPDATE hunts SET access_code='7KPM4XQ2' WHERE id=$1", [hunt]); }
+    expect((await db.query('SELECT * FROM hunt_participants ORDER BY id')).rows).toEqual(before);
+  });
+
+  it('rejoins historical Solo and Team identities at full capacity without changing roster or join time', async () => {
+    for (const format of ['solo', 'team']) {
+      const h = await makeHunt(signalClujNapocaV1);
+      try {
+        await db.query('UPDATE hunts SET hunt_format=$2,team_size=$3,capacity=1 WHERE id=$1', [h, format, format === 'solo' ? null : 4]);
+        const member = (await db.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2) RETURNING *', [h, actors.participant])).rows[0];
+        if (format === 'team') {
+          const team = (await db.query("INSERT INTO teams(hunt_id,name) VALUES($1,'Existing Team') RETURNING id", [h])).rows[0].id;
+          await db.query('INSERT INTO team_members(hunt_id,team_id,hunt_participant_id) VALUES($1,$2,$3)', [h, team, member.id]);
+        }
+        const roster = (await db.query('SELECT * FROM team_members WHERE hunt_id=$1', [h])).rows;
+        const responses = await Promise.all(Array.from({ length: 8 }, () => rejoin({}, h)));
+        for (const response of responses) {
+          expect(response.status).toBe(200);
+          expect(response.body).toMatchObject({ participantId: member.id, joinedAt: member.joined_at.toISOString() });
+        }
+        expect((await db.query('SELECT * FROM team_members WHERE hunt_id=$1', [h])).rows).toEqual(roster);
+        await rejoin({}, h, 'outsider').expect(404);
+        expect((await db.query('SELECT count(*) FROM hunt_participants WHERE hunt_id=$1', [h])).rows[0].count).toBe('1');
+      } finally { await db.query('DELETE FROM hunts WHERE id=$1', [h]); }
+    }
+  });
+
+  it('rolls back partial context initialization after a database failure and retries the same identity', async () => {
+    const h = await makeHunt(signalClujNapocaV1);
+    const member = (await db.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2) RETURNING *', [h, actors.participant])).rows[0];
+    await db.query(`CREATE FUNCTION admission_test_failure() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'injected context initialization failure'; END $$;
+      CREATE TRIGGER admission_test_failure BEFORE INSERT ON participant_checkpoint_access
+      FOR EACH ROW WHEN (NEW.participant_id='${member.id}'::uuid) EXECUTE FUNCTION admission_test_failure()`);
+    try {
+      await rejoin({}, h).expect(500);
+      expect((await db.query('SELECT access_snapshot_digest FROM hunt_participants WHERE id=$1', [member.id])).rows[0].access_snapshot_digest).toBeNull();
+      expect((await db.query('SELECT count(*) FROM hunt_checkpoint_identities WHERE hunt_id=$1', [h])).rows[0].count).toBe('0');
+      expect((await db.query('SELECT count(*) FROM participant_checkpoint_access WHERE hunt_id=$1', [h])).rows[0].count).toBe('0');
+    } finally {
+      await db.query('DROP TRIGGER admission_test_failure ON participant_checkpoint_access; DROP FUNCTION admission_test_failure()');
+    }
+    expect((await rejoin({}, h).expect(200)).body.participantId).toBe(member.id);
+    await db.query('DELETE FROM hunts WHERE id=$1', [h]);
+  });
+
+  it('keeps guest identity through a new server process; new or expired guest sessions cannot impersonate it', async () => {
+    const before = (await get(hunt, 'guest').expect(200)).body;
+    const script = `
+      const { createApp } = await import('./dist/app.js');
+      const { pool } = await import('./dist/lib/postgres.js');
+      const app = createApp(); const server = app.listen(0, '127.0.0.1');
+      await new Promise(resolve => server.once('listening', resolve));
+      try {
+        const response = await fetch('http://127.0.0.1:' + server.address().port + '/api/hunts/' + process.env.TASK_HUNT + '/participants/me',
+          { headers: { Authorization: process.env.TASK_AUTH } });
+        console.log(JSON.stringify({ status: response.status, body: await response.json() }));
+      } finally { await new Promise(resolve => server.close(resolve)); app.locals.stopAbuseProtection(); await pool.end(); }
+    `;
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, DATABASE_URL: databaseUrl, TASK_HUNT: hunt, TASK_AUTH: auth('guest') },
+    });
+    expect(JSON.parse(stdout)).toEqual({ status: 200, body: before });
+    const fresh = (await request(app).post('/api/auth/guest').send({ userId: actors.guest, participantId: before.participantId }).expect(201)).body;
+    expect(fresh.user.id).not.toBe(actors.guest);
+    expect(fresh.tokens.refreshToken).toBeUndefined();
+    await request(app).get(`/api/hunts/${hunt}/participants/me`).set('Authorization', `Bearer ${fresh.tokens.accessToken}`).expect(404);
+    await request(app).get(`/api/hunts/${hunt}/participants/me`).set('Authorization', `Bearer ${sign({ sub: actors.guest, type: 'access' }, { expiresIn: -1 })}`).expect(401);
+    for (const who of ['blocked', 'retired']) await rejoin({}, hunt, who).expect(401);
   });
 });

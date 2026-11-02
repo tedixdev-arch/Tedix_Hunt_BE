@@ -226,19 +226,28 @@ describe('core Hunt persistence', () => {
     expect(query).toHaveBeenCalledTimes(5);
   });
 
-  it('enrolls idempotently and finds a Hunt participant', async () => {
+  it('reuses an existing Hunt participant without writing membership', async () => {
     const row = { id: 'participant-1', hunt_id: 'hunt-1', user_id: 'user-2', joined_at: createdAt };
     query.mockResolvedValueOnce({ rows: [row] }).mockResolvedValueOnce({ rows: [row] });
 
     await expect(HuntParticipant.enroll('hunt-1', 'user-2')).resolves.toMatchObject({
       id: 'participant-1', huntId: 'hunt-1', userId: 'user-2',
     });
-    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('ON CONFLICT'), [
+    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT'), [
       'hunt-1', 'user-2',
     ]);
     await expect(HuntParticipant.findByHuntAndUser('hunt-1', 'user-2')).resolves.toMatchObject({
       id: 'participant-1',
     });
+  });
+
+  it('denies model first enrollment while D7 is unresolved', async () => {
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(HuntParticipant.enroll('hunt-1', 'user-2')).rejects.toMatchObject({
+      status: 422, code: 'enrollment_policy_unresolved',
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).not.toMatch(/INSERT|UPDATE/);
   });
 
   it('creates and finds a team, then adds a same-Hunt participant', async () => {

@@ -1,4 +1,5 @@
 import { pool } from '../lib/postgres.js';
+import { fail } from '../domain/participantAccess.js';
 
 export interface IHuntParticipant {
   id: string;
@@ -15,15 +16,14 @@ const mapRow = (row: any): IHuntParticipant => ({
 });
 
 export const HuntParticipant = {
+  /** Compatibility entry point for existing identities only.
+   * D7 has not approved a provisioning actor or invitation transport. Keep the
+   * model fail-closed too: knowing Hunt/user UUIDs is not admission authority.
+   * Lifecycle and authenticated access remain enforced by ParticipantAccess.
+   */
   async enroll(huntId: string, userId: string): Promise<IHuntParticipant> {
-    const { rows } = await pool.query(
-      `INSERT INTO hunt_participants (hunt_id, user_id)
-       VALUES ($1, $2)
-       ON CONFLICT (hunt_id, user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-       RETURNING *`,
-      [huntId, userId],
-    );
-    return mapRow(rows[0]);
+    const participant = await HuntParticipant.findByHuntAndUser(huntId, userId);
+    return participant ?? fail(422, 'enrollment_policy_unresolved');
   },
 
   async findByHuntAndUser(huntId: string, userId: string): Promise<IHuntParticipant | null> {
