@@ -13,3 +13,14 @@ Per-process bounded token buckets enforce 60 admission requests/minute per authe
 Guest authentication still supplies a one-hour access token with no refresh token. Rejoin requires the original identity's valid credentials. Lost/expired guest-token recovery and account linking remain unavailable; creating a new guest never restores membership. FE must resolve the shared code, authenticate once, send the code to enrollment, navigate only on success, persist the session and reconnect using caller-scoped context. No FE changes are included.
 
 Gameplay/GPS grants, Team formation, scoring and recovery policies remain outside this approval. Existing publication safeguards and Master Execution Plan are unchanged.
+
+## Validation
+
+Based on merged #112 main `4d5d669`; dependencies #95/#96/#110/#111/#112 are present. Node 24.19.0 and disposable PostgreSQL 17.11 were used; no live data was accessed.
+
+- Complete unfiltered backend suite with `TEST_DATABASE_URL`: **74 files / 1,653 tests passed**, zero failures/skips (85.62 seconds).
+- Admission/access authenticated Express/PostgreSQL suite: **20 tests passed**, including first admission, account/guest identity, public lookup without writes, cross-Hunt/invalid/disabled/old codes, unauthorized/unauthenticated controls, blocked/retired callers, duplicate requests, final-seat concurrency, null capacity, closed lifecycle, full-capacity rejoin, Solo/Team isolation, rollback, guest process restart/expiry and admission rate limiting.
+- `npm run build`, separate `npm run typecheck`, and diff whitespace checks passed.
+- All migrations 001–036 applied from `pre_migration_baseline.sql` in an isolated database; second run: no migrations to apply. Existing migration suites and fresh-schema checks also passed.
+
+Initial validation exposed the historical retirement test's expected-row shape missing the new default column; its expectation now includes `invitation_enabled=true`. An early run used a stale compiled migration from before the rebase; it was removed before the clean baseline and final suite. No merge or deployment was performed. STOP for ChatGPT review.
