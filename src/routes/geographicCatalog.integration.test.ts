@@ -7,6 +7,7 @@ import { runMigrations } from '../db/migrate.js';
 import { importCities, readGeonames, type CityImport } from '../scripts/importGeonames.js';
 import catalogMigration from '../db/migrations/032_geographic_catalog.js';
 import completionMigration from '../db/migrations/033_geographic_import_completion.js';
+import regionsMigration from '../db/migrations/037_geographic_regions.js';
 import kosovoMigration from '../db/migrations/034_geonames_kosovo_country.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
@@ -32,7 +33,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);expect(await history()).toEqual(before);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;
@@ -50,6 +51,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await request(app).get('/api/geography/catalog-status').expect(401);
   await get('/api/geography/catalog-status','participant').expect(403);
   await search('cluj').expect(503,unavailable);
+  await get('/api/geography/regions?countryCode=RO').expect(503,unavailable);
   await get('/api/geography/cities/681290').expect(503,unavailable);
   await post('/api/geography/cities/681290/resolve').expect(503,unavailable);
   await post('/api/geography/cities/681290/registration',{create:true,reason:'not imported'},'admin').expect(503,unavailable);
@@ -206,12 +208,12 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    expect((await search('test alias').expect(200)).body.cities[0].geographicId).toBe('900');
    await writeFile(files[2],'');
    const partial=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))partial.push(row);
-   expect(partial).toEqual([{...rows[0],context:'Municipality'}]);await ingest(partial);
+   expect(partial).toEqual([{...rows[0],admin1Name:undefined,context:'Municipality'}]);await ingest(partial);
    expect((await db.query('SELECT administrative_context,admin1_code,admin2_code FROM geographic_cities WHERE geoname_id=900')).rows[0])
     .toEqual({administrative_context:'Municipality',admin1_code:'13',admin2_code:'54975'});
    await writeFile(files[3],'');
    const fallback=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))fallback.push(row);
-   expect(fallback).toEqual([{...rows[0],context:'Romania'}]);const run=await ingest(fallback);
+   expect(fallback).toEqual([{...rows[0],admin1Name:undefined,context:'Romania'}]);const run=await ingest(fallback);
    expect(run.rows).toBe(1);
    expect((await db.query('SELECT country_code,admin1_code,admin2_code,latitude,longitude,import_id FROM geographic_cities WHERE geoname_id=900')).rows[0])
     .toEqual({country_code:'RO',admin1_code:'13',admin2_code:'54975',latitude:46,longitude:23,import_id:run.importId});
@@ -221,6 +223,52 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    await writeFile(files[1],'');
    await expect((async()=>{for await(const row of readGeonames(files[0],files[1],files[2],files[3]))void row;})()).rejects.toThrow('Missing country metadata');
   } finally {await rm(dir,{recursive:true,force:true});}
+ });
+ it('persists official-format Cluj identity and preserves it through missing-label refreshes',async()=>{
+  const dir=await mkdtemp('work/regions-');
+  try {
+   const files=['cities500.txt','countryInfo.txt','admin1CodesASCII.txt','admin2Codes.txt'].map(f=>`${dir}/${f}`);
+   await writeFile(files[0],['681290','Cluj-Napoca','Cluj-Napoca','Cluj','46.7667','23.6','P','PPLA','RO','','13','54975','','','300000','','','Europe/Bucharest','2026-10-04'].join('\t')+'\n');
+   await writeFile(files[1],'RO\tROU\t642\tRO\tRomania\n');
+   await writeFile(files[2],'RO.13\tCluj\tCluj\t681291\n');await writeFile(files[3],'');
+   const rows=[];for await(const row of readGeonames(...files as [string,string,string,string]))rows.push(row);
+   await ingest(rows);await ingest(rows);
+   const response=await get('/api/geography/regions?countryCode=RO').expect(200);
+   expect(response.body).toMatchObject({regionLabel:'County',regions:expect.arrayContaining([{countryCode:'RO',admin1Code:'13',displayName:'Cluj',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}])});
+   expect(response.body.regions.filter((r:any)=>r.admin1Code==='13')).toHaveLength(1);
+   expect((await search('cluj','&admin1Code=13').expect(200)).body.cities.find((c:any)=>c.geographicId==='681290')).toMatchObject({geographicId:'681290',localityId:canonical,admin1Code:'13',regionDisplayName:'Cluj',regionStatus:'resolved'});
+   await writeFile(files[2],'');const partial=[];for await(const row of readGeonames(...files as [string,string,string,string]))partial.push(row);
+   await ingest(partial);
+   expect((await search('cluj','&admin1Code=13').expect(200)).body.cities[0].regionDisplayName).toBe('Cluj');
+   const before=(await db.query('SELECT * FROM geographic_regions ORDER BY 1,2')).rows;
+   await expect(ingest([...Array.from({length:500},(_,i)=>city(String(2000+i),'Rollback',{admin1:'99',admin1Name:'Rollback region'})),city('2500','Invalid',{latitude:NaN})])).rejects.toThrow();
+   expect((await db.query('SELECT * FROM geographic_regions ORDER BY 1,2')).rows).toEqual(before);
+   expect((await db.query('SELECT 1 FROM geographic_cities WHERE geoname_id=2000')).rowCount).toBe(0);
+  }finally{await rm(dir,{recursive:true,force:true});}
+ });
+ it('filters before pagination, separates country identities and exposes incomplete metadata',async()=>{
+  await ingest([city('400','Same Town',{aliases:[],admin1:'A',admin1Name:'First'}),city('401','Same Town',{aliases:[],admin1:'B',admin1Name:'Second'}),
+   city('402','Same Town',{aliases:[],country:'US',countryName:'United States',admin1:'A',admin1Name:'American region'}),
+   city('403','Same Town',{aliases:[],admin1:'MISSING'}),city('404','Same Town',{aliases:[],admin1:''}),city('405','Same Town',{aliases:[],admin1:'00'})]);
+  expect((await search('same','&admin1Code=B&limit=1').expect(200)).body).toMatchObject({cities:[{geographicId:'401',regionDisplayName:'Second'}],nextAfter:null});
+  expect((await get('/api/geography/cities?countryCode=US&q=same&admin1Code=A').expect(200)).body.cities.map((c:any)=>c.geographicId)).toEqual(['402']);
+  expect((await search('same','&admin1Code=MISSING').expect(200)).body.cities).toEqual([]);
+  expect((await search('same','&admin1Code=UNKNOWN').expect(200)).body.cities).toEqual([]);
+  const rows=(await search('same').expect(200)).body.cities;
+  expect(rows.find((c:any)=>c.geographicId==='403').regionStatus).toBe('missing_label');
+  for(const id of ['404','405'])expect(rows.find((c:any)=>c.geographicId===id)).toMatchObject({regionStatus:'unspecified',regionDisplayName:null});
+  const page=(await get('/api/geography/regions?countryCode=RO&limit=1').expect(200)).body;
+  expect(page.metadataStatus).toBe('incomplete');expect(page.regions).toHaveLength(1);expect(page.nextAfter).toBeTruthy();
+  const next=(await get(`/api/geography/regions?countryCode=RO&limit=1&after=${page.nextAfter}`).expect(200)).body;
+  expect(next.regions[0].admin1Code).not.toBe(page.regions[0].admin1Code);
+  expect((await get('/api/geography/regions?countryCode=US').expect(200)).body.regionLabel).toBe('State / Region');
+  await db.query("INSERT INTO countries(code,display_name) VALUES('CA','Canada') ON CONFLICT DO NOTHING");
+  expect((await get('/api/geography/regions?countryCode=CA').expect(200)).body).toMatchObject({regions:[],metadataStatus:'ready',nextAfter:null});
+  for(const qs of ['countryCode=ro','countryCode=ZZ','countryCode=RO&limit=51','countryCode=RO&after=00','countryCode=RO&after=A&after=B','countryCode=RO&x=1'])await get(`/api/geography/regions?${qs}`).expect(400);
+  for(const code of ['00','', 'a.b'])await search('same',`&admin1Code=${code}`).expect(400);
+  await request(app).get('/api/geography/regions?countryCode=RO').expect(401);
+  await get('/api/geography/regions?countryCode=RO','participant').expect(403);
+  await get('/api/geography/regions?countryCode=RO','organizer').expect(200);
  });
  it('imports XK unchanged, exposes Kosovo, and preserves canonical locality identity on reconciliation and reimport',async()=>{
   const before=await history();

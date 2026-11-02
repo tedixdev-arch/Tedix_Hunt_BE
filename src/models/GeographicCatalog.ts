@@ -8,9 +8,11 @@ export class CatalogError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
 }
 const projection = `g.geoname_id::text AS "geographicId",g.country_code AS "countryCode",c.display_name AS "countryDisplayName",
+ g.admin1_code AS "admin1Code",r.display_name AS "regionDisplayName",
+ CASE WHEN g.admin1_code IN ('','00') THEN 'unspecified' WHEN r.admin1_code IS NULL THEN 'missing_label' ELSE 'resolved' END AS "regionStatus",
  g.name,g.administrative_context AS "administrativeContext",g.latitude,g.longitude,
  g.locality_id AS "localityId",COALESCE(l.active AND l.country_code=g.country_code,false) AS "registeredActive"`;
-const joins = `FROM geographic_cities g JOIN countries c ON c.code=g.country_code LEFT JOIN localities l ON l.id=g.locality_id`;
+const joins = `FROM geographic_cities g JOIN countries c ON c.code=g.country_code LEFT JOIN localities l ON l.id=g.locality_id LEFT JOIN geographic_regions r ON r.country_code=g.country_code AND r.admin1_code=g.admin1_code`;
 
 // Completion and catalog rows must both be committed before reads can claim availability.
 async function catalogReady(db: Pick<PoolClient, 'query'> = pool): Promise<boolean> {
@@ -59,14 +61,29 @@ export const GeographicCatalog = {
     const ready = await catalogReady();
     return {source:'geonames',status:ready ? 'ready' : 'not_imported',nextAction:ready ? null : 'import_catalog'};
   },
-  async search(country: string, query: string, limit: number, after: string) {
+  async regions(country: string, limit: number, after: string) {
+    await requireCatalogReady();
+    const rows=(await pool.query(`SELECT country_code AS "countryCode",admin1_code AS "admin1Code",display_name AS "displayName",
+      source,'GeoNames (CC BY 4.0)' AS attribution FROM geographic_regions
+      WHERE country_code=$1 AND admin1_code COLLATE "C">$2 COLLATE "C" ORDER BY admin1_code COLLATE "C" LIMIT $3`,[country,after,limit+1])).rows;
+    const missing=(await pool.query(`SELECT EXISTS(SELECT 1 FROM geographic_cities g LEFT JOIN geographic_regions r
+      ON r.country_code=g.country_code AND r.admin1_code=g.admin1_code
+      WHERE g.country_code=$1 AND g.admin1_code NOT IN ('','00') AND r.admin1_code IS NULL) AS missing`,[country])).rows[0].missing;
+    const more=rows.length>limit; rows.splice(limit);
+    return {regions:rows,nextAfter:more?rows.at(-1).admin1Code:null,regionLabel:country==='RO'?'County':'State / Region',
+      metadataStatus:missing?'incomplete':'ready'};
+  },
+  async search(country: string, query: string, limit: number, after: string, admin1Code?: string) {
     await requireCatalogReady();
     const pattern = normalizeCityName(query).replace(/[\\%_]/g, '\\$&') + '%';
     // Ordered source-ID keyset paging is stable across label/population updates. Prefix index filters aliases first.
     const rows = (await pool.query(`WITH matches AS MATERIALIZED (SELECT DISTINCT n.geoname_id FROM geographic_city_names n
-        WHERE n.country_code=$1 AND n.normalized_name LIKE $2 AND n.geoname_id>$3::bigint
+        JOIN geographic_cities filtered ON filtered.geoname_id=n.geoname_id
+        WHERE n.country_code=$1 AND ($5::text IS NULL OR (filtered.admin1_code=$5 AND EXISTS(
+          SELECT 1 FROM geographic_regions region WHERE region.country_code=filtered.country_code AND region.admin1_code=filtered.admin1_code)))
+        AND n.normalized_name LIKE $2 AND n.geoname_id>$3::bigint
         ORDER BY n.geoname_id LIMIT $4)
-      SELECT ${projection} ${joins} JOIN matches m ON m.geoname_id=g.geoname_id ORDER BY g.geoname_id`, [country,pattern,after,limit+1])).rows;
+      SELECT ${projection} ${joins} JOIN matches m ON m.geoname_id=g.geoname_id ORDER BY g.geoname_id`, [country,pattern,after,limit+1,admin1Code??null])).rows;
     const more = rows.length > limit; rows.splice(limit);
     return { cities: await present(rows), nextAfter: more ? rows.at(-1).geographicId : null };
   },

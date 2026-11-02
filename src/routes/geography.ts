@@ -79,7 +79,7 @@ router.get('/localities/:id', async (req, res, next) => {
 
 // Dedicated autocomplete budget; independent of disabled-by-default authentication budgets.
 const catalogBuckets = new TokenBuckets(10000);
-router.use(['/cities','/catalog-status'], (req: AuthRequest, res, next) => {
+router.use(['/cities','/regions','/catalog-status'], (req: AuthRequest, res, next) => {
   res.setHeader('Cache-Control','private, no-store');
   const retry = catalogBuckets.consume(req.user!.id, { capacity: 120, windowMs: 60000 });
   if (retry) return res.setHeader('Retry-After',retry).status(429).json({error:'rate_limited'});
@@ -130,6 +130,7 @@ router.get('/catalog-status', async (req,res,next) => {
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: query, name: countryCode, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+ *       - { in: query, name: admin1Code, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,40}$' }, description: Optional exact GeoNames admin1 identity; requires a stored authoritative region label. Reset cursor when region changes. }
  *       - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 100 } }
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
  *       - { in: query, name: after, schema: { type: string, pattern: '^[1-9]\d{0,14}$' } }
@@ -221,6 +222,9 @@ router.get('/catalog-status', async (req,res,next) => {
  *         countryCode: { type: string }
  *         countryDisplayName: { type: string }
  *         name: { type: string }
+ *         admin1Code: { type: string, description: Raw GeoNames admin1 code; empty or 00 means unspecified. Identity requires countryCode. }
+ *         regionDisplayName: { type: string, nullable: true, description: Authoritative admin1 dictionary label; never parsed from context }
+ *         regionStatus: { type: string, enum: [resolved, missing_label, unspecified] }
  *         administrativeContext: { type: string }
  *         latitude: { type: number }
  *         longitude: { type: number }
@@ -230,16 +234,49 @@ router.get('/catalog-status', async (req,res,next) => {
  *         nextAction: { type: string, enum: [bind_locality, contact_admin, request_registration] }
  *         hasApprovedLocalTemplate: { type: boolean, description: At least one currently C7-eligible public Local artifact; excludes private review/draft information and is advisory only }
  */
-router.get('/cities', async (req, res, next) => {
-  const {countryCode,q,limit='20',after='0'}=req.query;
-  if(Object.keys(req.query).some(k=>!['countryCode','q','limit','after'].includes(k))
+/**
+ * @openapi
+ * /api/geography/regions:
+ *   get:
+ *     tags: [Geography]
+ *     summary: List imported GeoNames admin1 regions within a country
+ *     description: Region identity is countryCode plus admin1Code. Labels come from admin1CodesASCII, independently of administrativeContext. metadataStatus incomplete means city codes lack dictionary labels; ready does not imply full country coverage. Empty regions with ready is a valid empty imported result. Region label is County for RO and State / Region elsewhere.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: countryCode, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+ *       - { in: query, name: after, schema: { type: string }, description: Opaque admin1Code cursor from nextAfter; reset on country change. }
+ *     responses:
+ *       200: { description: regions array of countryCode/admin1Code/displayName/source/attribution, nextAfter code or null, regionLabel, metadataStatus ready or incomplete }
+ *       400: { description: invalid_input }
+ *       401: { description: Authentication required }
+ *       403: { description: Creator, Organizer or Admin required }
+ *       429: { description: rate_limited }
+ *       503: { description: catalog_not_imported }
+ */
+const admin1CodeValid = (value: unknown): value is string => typeof value==='string' && /^[A-Za-z0-9-]{1,40}$/.test(value) && value!=='00';
+router.get('/regions', async(req,res,next)=>{
+  const {countryCode,limit='50',after=''}=req.query;
+  if(Object.keys(req.query).some(k=>!['countryCode','limit','after'].includes(k))
     || typeof countryCode!=='string' || !/^[A-Z]{2}$/.test(countryCode)
+    || typeof limit!=='string' || !/^(?:[1-9]|[1-4]\d|50)$/.test(limit)
+    || (after!=='' && !admin1CodeValid(after)))return res.status(400).json({error:'invalid_input'});
+  try {
+    if(!(await Geography.countries()).some(c=>c.code===countryCode))return res.status(400).json({error:'invalid_input'});
+    return res.json(await GeographicCatalog.regions(countryCode,Number(limit),after as string));
+  }catch(error){return catalogFailure(error,res,next);}
+});
+router.get('/cities', async (req, res, next) => {
+  const {countryCode,q,admin1Code,limit='20',after='0'}=req.query;
+  if(Object.keys(req.query).some(k=>!['countryCode','q','admin1Code','limit','after'].includes(k))
+    || typeof countryCode!=='string' || !/^[A-Z]{2}$/.test(countryCode)
+    || (admin1Code!==undefined && !admin1CodeValid(admin1Code))
     || typeof q!=='string' || q.length>100 || normalizeCityName(q).length<2
     || typeof limit!=='string' || !/^(?:[1-9]|[1-4]\d|50)$/.test(limit)
     || typeof after!=='string' || (after!=='0' && !geographicId(after))) return res.status(400).json({error:'invalid_input'});
   try {
     if(!(await Geography.countries()).some(c=>c.code===countryCode))return res.status(400).json({error:'invalid_input'});
-    return res.json(await GeographicCatalog.search(countryCode,q,Number(limit),after));
+    return res.json(await GeographicCatalog.search(countryCode,q,Number(limit),after,admin1Code as string|undefined));
   }catch(error){return catalogFailure(error,res,next);}
 });
 router.get('/cities/:id', async(req,res,next)=>{

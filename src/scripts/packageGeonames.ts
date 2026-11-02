@@ -57,7 +57,7 @@ export async function packageGeonames(paths: string[], output: string, scope: 'r
   writeFileSync(fd, sql);
  };
  try {
-  write(`-- GeoNames (CC BY 4.0): https://www.geonames.org/\n-- Scope: ${label}\n-- Execute the entire file once. One statement; invoker permissions; atomic on error.\nDO $tedix_geonames_package$\nDECLARE _tedix_import_run uuid;\nBEGIN\nPERFORM pg_catalog.set_config('search_path','pg_catalog,public,pg_temp',true);\nIF (SELECT count(*) FROM public.schema_migrations WHERE id IN ('032_geographic_catalog','033_geographic_import_completion','034_geonames_kosovo_country')) <> 3 THEN\n RAISE EXCEPTION 'Required geographic migrations 032-034 missing';\nEND IF;\n`);
+  write(`-- GeoNames (CC BY 4.0): https://www.geonames.org/\n-- Scope: ${label}\n-- Execute the entire file once. One statement; invoker permissions; atomic on error.\nDO $tedix_geonames_package$\nDECLARE _tedix_import_run uuid;\nBEGIN\nPERFORM pg_catalog.set_config('search_path','pg_catalog,public,pg_temp',true);\nIF (SELECT count(*) FROM public.schema_migrations WHERE id IN ('032_geographic_catalog','033_geographic_import_completion','034_geonames_kosovo_country','037_geographic_regions')) <> 4 THEN\n RAISE EXCEPTION 'Required geographic migrations 032-034 and 037 missing';\nEND IF;\n`);
   const result = await importCities(new SqlImportTarget(write), readGeonames(paths[0], paths[1], paths[2], paths[3], countryCode), {
    dataset, sha256,
   });
