@@ -104,6 +104,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   });
   it('admits authenticated first members and guests atomically and idempotently', async () => {
     const h = await makeHunt(createSignalClujNapocaStarter('admission'), 'published', '6KPM4XQ2');
+    await db.query("UPDATE hunts SET hunt_format='solo' WHERE id=$1",[h]);
     await request(app).get('/api/hunt-access/6KPM4XQ2').expect(200);
     expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1',[h])).rowCount).toBe(0);
     await rejoin({}, h, 'outsider').expect(404);
@@ -116,7 +117,7 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   });
   it('serializes final-seat admissions and rejects null capacity and closed lifecycles', async () => {
     const h = await makeHunt(createSignalClujNapocaStarter('capacity'), 'active', '5KPM4XQ2');
-    await db.query('UPDATE hunts SET capacity=1 WHERE id=$1',[h]);
+    await db.query("UPDATE hunts SET capacity=1,hunt_format='team',team_size=4 WHERE id=$1",[h]);
     const r = await Promise.all(['outsider','guest'].map(w => rejoin({accessCode:'5KPM4XQ2'},h,w)));
     expect(r.map(x=>x.status).sort()).toEqual([200,409]);
     expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1',[h])).rowCount).toBe(1);
@@ -129,12 +130,17 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
   });
   it('restricts invitation controls and preserves rejoin after disable and rotation', async () => {
     const endpoint = `/api/hunts/${hunt}/access`;
+    const supervisorRead = await request(app).get(`/api/hunts/${hunt}`).set('Authorization',auth('supervisor')).expect(200);
+    expect(supervisorRead.body.accessCode).toBeNull();
+    await request(app).delete(endpoint).expect(401);
+    await request(app).post(endpoint+'/regenerate').expect(401);
     for (const who of ['participant','supervisor','admin']) {
       await request(app).delete(endpoint).set('Authorization',auth(who)).expect(403);
       await request(app).post(endpoint+'/regenerate').set('Authorization',auth(who)).expect(403);
     }
     await request(app).delete(endpoint).set('Authorization',auth('organizer')).expect(200);
     await rejoin({accessCode:'7KPM4XQ2'},hunt,'outsider').expect(404);
+    await request(app).get('/api/hunt-access/7KPM4XQ2').expect(404);
     await rejoin().expect(200);
     const disabled = await request(app).post(endpoint).set('Authorization',auth('organizer')).expect(200);
     expect(disabled.body.enabled).toBe(false);
@@ -333,4 +339,15 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     await request(app).get(`/api/hunts/${hunt}/participants/me`).set('Authorization', `Bearer ${sign({ sub: actors.guest, type: 'access' }, { expiresIn: -1 })}`).expect(401);
     for (const who of ['blocked', 'retired']) await rejoin({}, hunt, who).expect(401);
   });
+  it('rate limits repeated admission attempts without writing membership', async () => {
+    let limited = false;
+    for (let i = 0; i < 70; i++) {
+      const r = await rejoin({accessCode:'9KPM4XQ2'}, hunt, 'admin');
+      if (r.status === 429) { expect(Number(r.headers['retry-after'])).toBeGreaterThan(0); limited = true; break; }
+      expect(r.status).toBe(404);
+    }
+    expect(limited).toBe(true);
+    expect((await db.query('SELECT * FROM hunt_participants WHERE hunt_id=$1 AND user_id=$2',[hunt,actors.admin])).rowCount).toBe(0);
+  });
+
 });
