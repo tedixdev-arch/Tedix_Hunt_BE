@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "TedixHunt Participant gameplay — PROPOSAL ONLY",
-    "version": "0.0.0-proposal",
-    "description": "Task 5 contract-only Draft PR. No operations below are implemented or served by /api/docs.json. All 22 custom mechanics remain blocked from Hunt publication. See Participant_Gameplay_Contract.md for unresolved policies, invariants, existing endpoints and acceptance gates."
+    "version": "0.0.1-proposal-5c",
+    "description": "Task 5C documentation-only implementation handoff. These four gameplay paths are NOT implemented or served by /api/docs.json. Existing enrollment/rejoin, checkpoint access/proximity and radius setup routes from #95/#96 remain separate runtime contracts. All 22 custom mechanics remain blocked from Hunt publication. Team success awards exactly +100 once, including automatic five-minute recovery; no partial/per-member/normalized Team points. Solo/Team share one checkpoint/FinishPoint engine; huntCompleted means subject success, never global Hunt closure. See Participant_Gameplay_Contract.md and Participant_Gameplay_Decisions.md for approved rules, residual policy gates and missing individual/recovery activity transports."
   },
   "x-implementation-status": "proposed-not-implemented",
   "security": [
@@ -48,7 +48,7 @@
       "get": {
         "operationId": "proposedGetParticipantChallenge",
         "summary": "Proposed safe current challenge delivery",
-        "description": "Only allowlisted interaction data and caller-specific private information; no answers, hints, feedback or solutions. Team private allocation and memory-card phase policy remain blocked on product decisions. Every request checks access and exact Hunt snapshot.",
+        "description": "Only allowlisted interaction and caller-authorized earned private information. Assignment alone never discloses a fragment. Team delivery includes persisted activity/fragment/collective flags, authoritative five-minute deadline and revisions. Checks current membership, access, exact pinned source plus effective radius digest and stage. D5 activity/recovery binding and D8 memory phase remain implementation gates.",
         "responses": {
           "200": {
             "description": "Safe per-mechanic projection",
@@ -153,8 +153,21 @@
                         "challengeCompleted": false,
                         "checkpointCompleted": false,
                         "huntCompleted": false
+                      },
+                      "teamExecution": {
+                        "serverTime": "2026-11-02T12:01:00.000Z",
+                        "availableAt": "2026-11-02T12:00:00.000Z",
+                        "recoveryDeadlineAt": "2026-11-02T12:05:00.000Z",
+                        "recoveryActive": false,
+                        "membershipRevision": 1,
+                        "allocationRevision": 1,
+                        "ownRequiredActivityCompleted": true,
+                        "allRequiredActivitiesCompleted": false,
+                        "allRequiredFragmentsAvailable": false,
+                        "collectiveCompleted": false
                       }
-                    }
+                    },
+                    "summary": "Caller earned the shown fragment through a completed required activity; collective stage still incomplete."
                   },
                   "sharedFinalKey": {
                     "value": {
@@ -180,8 +193,21 @@
                         "challengeCompleted": false,
                         "checkpointCompleted": false,
                         "huntCompleted": false
+                      },
+                      "teamExecution": {
+                        "serverTime": "2026-11-02T12:01:00.000Z",
+                        "availableAt": "2026-11-02T12:00:00.000Z",
+                        "recoveryDeadlineAt": "2026-11-02T12:05:00.000Z",
+                        "recoveryActive": false,
+                        "membershipRevision": 1,
+                        "allocationRevision": 1,
+                        "ownRequiredActivityCompleted": true,
+                        "allRequiredActivitiesCompleted": false,
+                        "allRequiredFragmentsAvailable": false,
+                        "collectiveCompleted": false
                       }
-                    }
+                    },
+                    "summary": "Caller earned the shown fragment through a completed required activity; collective stage still incomplete."
                   }
                 }
               }
@@ -266,7 +292,8 @@
               }
             }
           }
-        }
+        },
+        "x-implementation-status": "proposed-not-implemented"
       }
     },
     "/api/hunts/{id}/checkpoints/{checkpointId}/challenges/{classification}/attempts": {
@@ -306,7 +333,7 @@
         "operationId": "proposedSubmitParticipantAttempt",
         "summary": "Proposed server-authoritative attempt",
         "x-implementation-status": "proposed-not-implemented",
-        "description": "Requires membership, pinned snapshot, active Hunt, checkpoint access/GPS grant, progression, suspension and stage authorization. Atomic attempt/assistance, score and completion mutation with idempotency. Product policies in Participant_Gameplay_Contract.md are blockers.",
+        "description": "Strict server-authoritative Personal or collective Team answer. Requires current actor/membership, pinned execution digest, active Hunt, valid access grant, checkpoint order, suspension and stage guard; Team also requires current membership/allocation revisions. Transaction records attempt, completion, approved score events and unlock once. Team collective success requires earned fragments and all required member activities before automatic five-minute recovery; after recovery unfinished originals no longer block, fragments and valid collective solution still mandatory. Team +100 once, normal or recovery, no partial points. This is not the original/recovery individual activity submission API.",
         "parameters": [
           {
             "in": "header",
@@ -355,7 +382,9 @@
                     "type": "distributed-information",
                     "response": {
                       "optionId": "east"
-                    }
+                    },
+                    "membershipRevision": 1,
+                    "allocationRevision": 1
                   }
                 },
                 "sharedFinalKey": {
@@ -370,7 +399,9 @@
                         "fragment1"
                       ],
                       "code": "0712"
-                    }
+                    },
+                    "membershipRevision": 1,
+                    "allocationRevision": 1
                   }
                 }
               }
@@ -518,7 +549,7 @@
         "operationId": "proposedReleaseParticipantHint",
         "summary": "Proposed next authorized hint (policy unresolved)",
         "x-implementation-status": "proposed-not-implemented",
-        "description": "Requires membership, pinned snapshot, active Hunt, checkpoint access/GPS grant, progression, suspension and stage authorization. Atomic attempt/assistance, score and completion mutation with idempotency. Product policies in Participant_Gameplay_Contract.md are blockers.",
+        "description": "Deferred assistance contract, excluded from minimum pilot proposal pending D4 approval. Rechecks actor/membership, pinned execution digest, active Hunt, access, progression/suspension and stage. Releases only next authorized hint and approved effect atomically with idempotency. Never interprets recovery as hint/skip or penalizes automatic Team Recovery.",
         "parameters": [
           {
             "in": "header",
@@ -543,7 +574,7 @@
         },
         "responses": {
           "200": {
-            "description": "Authoritative scoped result; valid incorrect attempts also return 200",
+            "description": "Next authorized hint and persisted ordinal; same key/body returns the prior release without a second approved penalty.",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -660,7 +691,7 @@
       "get": {
         "operationId": "proposedGetParticipantProgress",
         "summary": "Proposed authenticated persisted progress/resume",
-        "description": "Caller Personal and shared Team completion/score only, no other player responses or clues. Score beneficiary and stage policies require review.",
+        "description": "Committed caller-authorized Solo or shared Team subject progress/results, with separate score categories. No answers, other member responses, private fragments or raw snapshot. Authorized read remains available after subject success and global Hunt finish; it grants no access or mutation rights. Cancellation/revocation retention policy remains D6/D7. huntCompleted is subject success, not global closure.",
         "responses": {
           "200": {
             "description": "Committed caller-scoped state",
@@ -762,7 +793,8 @@
               }
             }
           }
-        }
+        },
+        "x-implementation-status": "proposed-not-implemented"
       }
     }
   },
@@ -797,7 +829,8 @@
             "type": "boolean"
           },
           "huntCompleted": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Persisted success of this Solo Participant or Team after all required checkpoints and terminal activities. Does not set global Hunt status to finished."
           }
         },
         "required": [
@@ -826,23 +859,34 @@
           },
           "score": {
             "type": "object",
+            "additionalProperties": false,
+            "description": "Once-only effect of this attempt plus persisted category totals. A same-key retry returns the original result; a different-key attempt after completion has zero new award. Unsuccessful collective answer and individual/recovery activity have no Team award.",
             "properties": {
-              "delta": {
-                "type": "number",
-                "minimum": -1000000000,
-                "maximum": 1000000000
+              "teamChallengeDelta": {
+                "type": "integer",
+                "enum": [
+                  0,
+                  100
+                ]
               },
-              "total": {
+              "personalDelta": {
                 "type": "number",
-                "minimum": -1000000000,
-                "maximum": 1000000000
+                "nullable": true
+              },
+              "otherDelta": {
+                "type": "number",
+                "nullable": true
+              },
+              "summary": {
+                "$ref": "#/components/schemas/ScoreSummary"
               }
             },
             "required": [
-              "delta",
-              "total"
-            ],
-            "additionalProperties": false
+              "teamChallengeDelta",
+              "personalDelta",
+              "otherDelta",
+              "summary"
+            ]
           }
         },
         "required": [
@@ -1535,7 +1579,7 @@
               },
               "step": {
                 "type": "number",
-                "minimum": 0.000001,
+                "minimum": 1e-06,
                 "maximum": 1000000000
               }
             },
@@ -3283,13 +3327,25 @@
               "word"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -3377,6 +3433,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -3389,7 +3448,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -3424,13 +3484,25 @@
               "optionId"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -3549,6 +3621,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -3561,7 +3636,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -3596,13 +3672,25 @@
               "value"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -3700,6 +3788,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -3712,7 +3803,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -3747,13 +3839,25 @@
               "frequencyId"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -3878,6 +3982,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -3890,7 +3997,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -3925,13 +4033,25 @@
               "value"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -4029,6 +4149,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -4041,7 +4164,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -4081,13 +4205,25 @@
               "trustedSignalIds"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -4175,6 +4311,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -4187,7 +4326,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -4234,13 +4374,25 @@
               "code"
             ],
             "additionalProperties": false
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consistency precondition against current server state, not a membership or fragment claim. Stale revision returns 409."
           }
         },
         "required": [
           "challengeId",
           "templateVersion",
           "type",
-          "response"
+          "response",
+          "membershipRevision",
+          "allocationRevision"
         ],
         "additionalProperties": false
       },
@@ -4338,6 +4490,9 @@
           },
           "completion": {
             "$ref": "#/components/schemas/Completion"
+          },
+          "teamExecution": {
+            "$ref": "#/components/schemas/TeamExecution"
           }
         },
         "required": [
@@ -4350,7 +4505,8 @@
           "instructions",
           "interaction",
           "playerInformation",
-          "completion"
+          "completion",
+          "teamExecution"
         ],
         "additionalProperties": false
       },
@@ -4574,12 +4730,11 @@
             "minimum": 1
           },
           "huntCompleted": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Persisted success of this Solo Participant or Team after all required checkpoints and terminal activities. Does not set global Hunt status to finished."
           },
           "score": {
-            "type": "number",
-            "minimum": -1000000000,
-            "maximum": 1000000000
+            "$ref": "#/components/schemas/ScoreSummary"
           },
           "checkpoints": {
             "type": "array",
@@ -4604,7 +4759,8 @@
                   "type": "boolean"
                 },
                 "teamCompleted": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Configured compatible Team Challenge completion; false for Solo/unconfigured Team slot. Does not make that slot required."
                 },
                 "checkpointCompleted": {
                   "type": "boolean"
@@ -4622,16 +4778,115 @@
             },
             "minItems": 0,
             "maxItems": 21
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "solo",
+              "team"
+            ],
+            "description": "Approved Hunt participation mode. Solo has no synthetic Team."
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Caller-authorized HuntParticipant UUID in Solo, actual Team UUID in Team mode."
           }
         },
         "required": [
           "templateVersion",
           "huntCompleted",
           "score",
-          "checkpoints"
+          "checkpoints",
+          "mode",
+          "subjectId"
         ],
         "additionalProperties": false
+      },
+      "ScoreSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Authoritative separate categories. teamChallengePoints is the scoped Team total, zero for Solo. Null Personal/other totals mean the category has no approved configured execution policy, not earned zero. No combined leaderboard is inferred.",
+        "properties": {
+          "teamChallengePoints": {
+            "type": "integer",
+            "minimum": 0,
+            "multipleOf": 100
+          },
+          "personalPoints": {
+            "type": "number",
+            "nullable": true
+          },
+          "otherPoints": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "teamChallengePoints",
+          "personalPoints",
+          "otherPoints"
+        ]
+      },
+      "TeamExecution": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Caller-authorized persisted Team stage state; no roster or private assignment map. Deadline is exactly five minutes after server availability; D2 defines the precise availability event and pause handling before implementation. Recovery is automatic when required individual work remains unfinished at deadline. Activation does not reveal fragments, solve the collective puzzle or award points. Aggregate activity/fragment flags remain distinct from caller completion. Revision preconditions never confer authorization.",
+        "properties": {
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "availableAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recoveryDeadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recoveryActive": {
+            "type": "boolean"
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "allocationRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "ownRequiredActivityCompleted": {
+            "type": "boolean"
+          },
+          "allRequiredActivitiesCompleted": {
+            "type": "boolean"
+          },
+          "allRequiredFragmentsAvailable": {
+            "type": "boolean"
+          },
+          "collectiveCompleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "serverTime",
+          "availableAt",
+          "recoveryDeadlineAt",
+          "recoveryActive",
+          "membershipRevision",
+          "allocationRevision",
+          "ownRequiredActivityCompleted",
+          "allRequiredActivitiesCompleted",
+          "allRequiredFragmentsAvailable",
+          "collectiveCompleted"
+        ]
       }
     }
-  }
+  },
+  "x-contract-gaps": [
+    "Collective Team answer schemas below do not define per-member original/recovery activity transports. Define those against D5-approved immutable activity/fragment/recovery bindings before Team implementation; no generic skip or answer bypass.",
+    "Admission/Team formation, GPS lifetime/fallback, suspension, availability/pause timing, non-Team score categories and Legacy execution-policy selection retain explicit Product Owner gates. No 30-second age or 5-metre accuracy policy is approved here.",
+    "Hints remain gated and excluded from the minimum pilot proposal pending D4 approval. No solution endpoint. Seven-stop Signal ends at checkpoint seven FinishPoint; no eighth gameplay operation."
+  ]
 }
