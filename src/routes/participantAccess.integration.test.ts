@@ -38,9 +38,13 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     try {
       await client.query(await readFile(new URL('../db/pre_migration_baseline.sql', import.meta.url), 'utf8'));
       const directory = new URL('../db/migrations/', import.meta.url);
+      const filenames = (await readdir(directory)).filter(f => /^\d{3}_.*\.ts$/.test(f)).sort();
+      const expectedIds = filenames.map(f => f.slice(0, -3));
+      expect(expectedIds.length).toBeGreaterThan(0);
       const migrations = [];
-      for (const f of (await readdir(directory)).filter(f => /^\d{3}_.*\.ts$/.test(f)).sort()) migrations.push((await import(new URL(f, directory).href)).default);
-      expect(await runMigrations(client, migrations)).toHaveLength(34);
+      for (const f of filenames) migrations.push((await import(new URL(f, directory).href)).default);
+      expect(await runMigrations(client, migrations)).toEqual(expectedIds);
+      expect((await client.query('SELECT id FROM schema_migrations ORDER BY id')).rows.map(row => row.id)).toEqual(expectedIds);
       expect(await runMigrations(client, migrations)).toEqual([]);
     } finally { client.release(); }
     for (const who of ['participant', 'second', 'racer', 'outsider', 'organizer', 'admin', 'supervisor', 'blocked', 'retired', 'guest']) {
