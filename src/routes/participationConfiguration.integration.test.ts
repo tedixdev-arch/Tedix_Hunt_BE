@@ -69,6 +69,8 @@ type Actor = { id: string; auth: string };
     await patch(id, { format: 'team', teamSize: 4 }).expect(200);
     await patch(id, { format: 'solo' }).expect(200);
     expect((await get(id).expect(200)).body).toMatchObject({ format: 'solo', teamSize: null });
+    // Historical membership fixture, not an approved provisioning transport.
+    await db.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2)', [id, participant.id]);
     const { HuntParticipant } = await import('../models/HuntParticipant.js');
     expect(await HuntParticipant.enroll(id, participant.id)).toMatchObject({ huntId: id, userId: participant.id });
     await patch(id, { teamSize: 3 }).expect(400);

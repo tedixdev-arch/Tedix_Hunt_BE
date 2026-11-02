@@ -52,7 +52,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *     tags: [Participant access]
  *     security: [{ bearerAuth: [] }]
  *     summary: Rejoin an existing authenticated Hunt membership
- *     description: Idempotent existing-member rejoin only. New membership is denied with enrollment_policy_unresolved (D7), even with a valid code. Does not create Teams. Published, active and paused Hunts only.
+ *     description: Idempotent existing-member rejoin only. D7 has no approved invitation transport or provisioning actor. Public codes, professional roles and client-supplied eligibility never authorize first enrollment. A matching code for an eligible Hunt without membership returns 422 enrollment_policy_unresolved; without a code it returns 404. Invalid or replaced codes return 404. Reuses participantId and joinedAt without assigning a Team or consuming capacity. Published, active and paused Hunts only; this does not approve late admission.
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     requestBody:
  *       required: true
