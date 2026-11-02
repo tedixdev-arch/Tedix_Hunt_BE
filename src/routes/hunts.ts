@@ -298,6 +298,7 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
  *       409: { $ref: '#/components/responses/InvalidHuntState' }
  */
 router.post('/:id/access', requireAuth, async (req: AuthRequest, res) => {
+  res.set('Cache-Control', 'no-store');
   const id = String(req.params.id);
   const hunt = await Hunt.findById(id);
   if (!hunt) return res.status(404).json({ error: 'not_found' });
@@ -309,8 +310,47 @@ router.post('/:id/access', requireAuth, async (req: AuthRequest, res) => {
   }
   const accessedHunt = await Hunt.ensureAccessCode(id);
   if (!accessedHunt?.accessCode) return res.status(409).json({ error: 'invalid_hunt_state' });
-  return res.json({ huntId: accessedHunt.id, code: accessedHunt.accessCode });
+  return res.json({ huntId: accessedHunt.id, code: accessedHunt.accessCode, enabled: accessedHunt.invitationEnabled ?? true });
 });
+
+/**
+ * @openapi
+ * /api/hunts/{id}/access:
+ *   delete:
+ *     tags: [Hunts]
+ *     summary: Disable invitation admission while preserving memberships
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     responses:
+ *       200: { description: Invitation disabled }
+ *       401: { description: Authentication required }
+ *       403: { description: Hunt Organizer required }
+ *       404: { description: Hunt not found }
+ *       409: { description: Invalid Hunt state }
+ * /api/hunts/{id}/access/regenerate:
+ *   post:
+ *     tags: [Hunts]
+ *     summary: Replace and enable invitation; invalidate previous code
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     responses:
+ *       200: { description: New code and enabled status }
+ *       401: { description: Authentication required }
+ *       403: { description: Hunt Organizer required }
+ *       404: { description: Hunt not found }
+ *       409: { description: Invalid Hunt state }
+ */
+for (const regenerate of [false, true]) {
+  router[regenerate ? 'post' : 'delete'](regenerate ? '/:id/access/regenerate' : '/:id/access', requireAuth, async (req: AuthRequest, res) => {
+    const id = String(req.params.id);
+    if (!await Hunt.findById(id)) return res.status(404).json({ error: 'not_found' });
+    if (!await HuntRoles.hasRole(id, req.user!.id, 'organizer')) return res.status(403).json({ error: 'forbidden' });
+    const hunt = await Hunt.setInvitation(id, regenerate);
+    if (!hunt) return res.status(409).json({ error: 'invalid_hunt_state' });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ huntId: id, code: hunt.accessCode, enabled: hunt.invitationEnabled });
+  });
+}
 
 /**
  * @openapi

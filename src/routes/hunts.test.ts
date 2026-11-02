@@ -456,7 +456,7 @@ describe('Hunt routes', () => {
     mocks.findHuntById.mockResolvedValueOnce({ ...hunt, status });
     const response = await request(app).post('/api/hunts/hunt-1/access')
       .set('Authorization', auth).expect(200);
-    expect(response.body).toEqual({ huntId: 'hunt-1', code: '7KPM4XQ2' });
+    expect(response.body).toEqual({ huntId: 'hunt-1', code: '7KPM4XQ2', enabled: true });
     expect(mocks.ensureAccessCode).toHaveBeenCalledWith('hunt-1');
   });
 

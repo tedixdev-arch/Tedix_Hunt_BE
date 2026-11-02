@@ -196,8 +196,9 @@ const options: swaggerJsdoc.Options = {
         },
         HuntAccess: {
           type: 'object',
-          required: ['huntId', 'code'],
+          required: ['huntId', 'code', 'enabled'],
           properties: {
+            enabled: { type: 'boolean' },
             huntId: { type: 'string', format: 'uuid' },
             code: { type: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$', example: '7KPM4XQ2' },
           },

@@ -12,7 +12,7 @@ export interface ParticipantCheckpointStatus {
 }
 export interface ParticipantHuntContext {
   huntId: string; participantId: string; joinedAt: Date; huntStatus: string; templateVersion: number;
-  enrollmentPolicy: 'existing_members_only'; proximityPolicy: 'unresolved';
+  enrollmentPolicy: 'organizer_invitation'; proximityPolicy: 'unresolved';
   checkpoints: ParticipantCheckpointStatus[];
 }
 
@@ -29,12 +29,17 @@ async function withContext<T>(huntId: string, userId: string, code: string | und
     const hunt = hunts[0];
     if (!hunt) return fail(404, 'not_found');
     const { rows: participants } = await client.query('SELECT * FROM hunt_participants WHERE hunt_id=$1 AND user_id=$2 FOR UPDATE', [huntId, userId]);
-    const participant = participants[0];
-    // A UUID or professional role is never enrollment authority. A code does not create an invitation.
-    if (code !== undefined && hunt.access_code !== code) return fail(404, 'not_found');
-    if (!participant && code === undefined) return fail(404, 'not_found');
+    let participant = participants[0];
     if (!['published','active','paused'].includes(hunt.status)) return fail(409, 'invalid_hunt_state');
-    if (!participant) return fail(422, 'enrollment_policy_unresolved');
+    if (!participant) {
+      if (code === undefined || !hunt.invitation_enabled || hunt.access_code !== code) return fail(404, 'not_found');
+      if (hunt.status === 'paused') return fail(409, 'invalid_hunt_state');
+      if (!Number.isInteger(hunt.capacity) || hunt.capacity < 1) return fail(409, 'capacity_unconfigured');
+      const { rows: counts } = await client.query('SELECT count(*)::int AS count FROM hunt_participants WHERE hunt_id=$1', [huntId]);
+      if (counts[0].count >= hunt.capacity) return fail(409, 'hunt_capacity_exceeded');
+      const { rows } = await client.query('INSERT INTO hunt_participants(hunt_id,user_id) VALUES($1,$2) RETURNING *', [huntId,userId]);
+      participant = rows[0];
+    }
     if (!hunt.template_key || !Number.isInteger(hunt.template_version) || !hunt.snapshot_digest) return fail(409, 'snapshot_unavailable');
     if (participant.access_snapshot_digest !== null && participant.access_snapshot_digest !== hunt.snapshot_digest) return fail(409, 'snapshot_conflict');
     // Resolve an in-memory execution view; never rewrite the approved source snapshot.
@@ -66,7 +71,7 @@ async function withContext<T>(huntId: string, userId: string, code: string | und
       WHERE c.hunt_id=$1 AND a.participant_id=$2 ORDER BY c.ordinal`, [huntId, participant.id]);
     const context: ParticipantHuntContext = {
       huntId, participantId: participant.id, joinedAt: participant.joined_at, huntStatus: hunt.status, templateVersion: hunt.template_version,
-      enrollmentPolicy: 'existing_members_only', proximityPolicy: 'unresolved',
+      enrollmentPolicy: 'organizer_invitation', proximityPolicy: 'unresolved',
       checkpoints: states.map(s => ({ checkpointId: s.id, kind: s.kind, accessState: s.state,
         gameplayCompleted: false, mayAccessGameplay: false, verifiedAt: s.verified_at })),
     };

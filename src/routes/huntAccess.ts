@@ -1,7 +1,9 @@
+import { TokenBuckets, networkIdentity } from '../middleware/abuseProtection.js';
 import express from 'express';
 import { normalizeHuntAccessCode } from '../domain/huntAccess.js';
 import { Hunt } from '../models/Hunt.js';
 
+const lookupBuckets = new TokenBuckets(10000);
 const router = express.Router();
 
 /**
@@ -19,6 +21,9 @@ const router = express.Router();
  *       404: { description: Invalid or unknown access code, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
  */
 router.get('/:code', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const retry = lookupBuckets.consume(networkIdentity(req.ip ?? 'unknown'), { capacity: 120, windowMs: 60000 });
+  if (retry) { res.set('Retry-After', String(retry)); return res.status(429).json({ error: 'rate_limited' }); }
   const code = normalizeHuntAccessCode(String(req.params.code));
   if (!code) return res.status(404).json({ error: 'not_found' });
   const hunt = await Hunt.findByAccessCode(code);

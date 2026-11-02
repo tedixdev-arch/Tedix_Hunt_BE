@@ -17,7 +17,7 @@ const mapRow = (row: any): IHuntParticipant => ({
 
 export const HuntParticipant = {
   /** Compatibility entry point for existing identities only.
-   * D7 has not approved a provisioning actor or invitation transport. Keep the
+   * First enrollment is exclusively handled by ParticipantAccess with D7-A invitation checks. Keep the
    * model fail-closed too: knowing Hunt/user UUIDs is not admission authority.
    * Lifecycle and authenticated access remain enforced by ParticipantAccess.
    */

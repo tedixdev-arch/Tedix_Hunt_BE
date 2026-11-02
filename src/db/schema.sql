@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS hunts (
   start_time TIME,
   timezone TEXT,
   duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes >= 1),
+  invitation_enabled BOOLEAN NOT NULL DEFAULT true,
   capacity INTEGER CHECK (capacity IS NULL OR capacity >= 1),
   contact_name TEXT,
   template_key TEXT,

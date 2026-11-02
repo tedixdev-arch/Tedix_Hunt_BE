@@ -106,7 +106,7 @@ describe('core Hunt persistence', () => {
       templateKey: null, templateVersion: null, templateSnapshot: null, checkpointRadiusConfiguration: null,
       templateId: null, templateLocalityId: null, templateLocalitySnapshot: null,
       format: null, teamSize: null, accessMode: null, difficulty: null, checkpointOrder: null,
-      accessCode: null,
+      accessCode: null, invitationEnabled: true,
       huntRoles: ['organizer', 'supervisor'],
     }]);
     expect(query).toHaveBeenCalledWith(expect.stringMatching(
