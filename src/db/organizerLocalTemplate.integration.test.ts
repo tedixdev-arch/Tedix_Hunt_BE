@@ -425,6 +425,31 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     const b=await replacement(a,id);await submit(b).expect(200);await approve(b).expect(200);await suspend(b).expect(200);
     await db.query('UPDATE localities SET latitude=48,active=false WHERE id=$1',[id]);expect(await state(h)).toEqual(saved);
   });
+  it('discovers only C7-eligible mapped geography before paging with exact country/region isolation',async()=>{
+    const ids=[await locality(),await locality(),await locality(),await locality('HU')];
+    const sources=await Promise.all(ids.map(id=>approved(id)));
+    const run=(await db.query(`INSERT INTO geographic_imports(source,dataset,sha256,attribution)
+      VALUES('geonames','organizer test',repeat('a',64),'GeoNames (CC BY 4.0)') RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO geographic_regions(country_code,admin1_code,display_name,import_id)
+      VALUES('RO','13','Cluj',$1) ON CONFLICT(country_code,admin1_code) DO NOTHING`,[run]);
+    for(let i=0;i<ids.length;i++)await db.query(`INSERT INTO geographic_cities
+      (geoname_id,country_code,name,administrative_context,admin1_code,admin2_code,latitude,longitude,population,source_modified,import_id,locality_id)
+      VALUES($1,$2,'Identical name','Not a region label',$3,'',46,23,1,'2026-01-01',$4,$5)`,
+      [900000000+i,i===3?'HU':'RO',i===2?'00':'13',run,ids[i]]);
+    await suspend(sources[0]).expect(200);
+    const path='/api/organizer/geography';
+    const regions=(await get(`${path}/regions?countryCode=RO`).expect(200)).body.regions;
+    expect(regions).toEqual(expect.arrayContaining([expect.objectContaining({regionId:'RO:admin1:13',label:'Cluj',labelStatus:'resolved'}),
+      expect.objectContaining({regionId:'RO:unknown',labelStatus:'unspecified'})]));
+    const page=await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13&limit=1`).expect(200);
+    expect(page.body.cities.map((c:any)=>c.localityId)).toEqual([ids[1]]);expect(page.body.nextCursor).toBeNull();
+    expect((await get(`${path}/cities?countryCode=RO&regionId=RO:unknown`).expect(200)).body.cities.map((c:any)=>c.localityId)).toEqual([ids[2]]);
+    await db.query('UPDATE localities SET active=false WHERE id=$1',[ids[1]]);
+    // A forged cross-country mapping must not leak the otherwise eligible HU artifact.
+    await db.query("UPDATE geographic_cities SET country_code='RO' WHERE locality_id=$1",[ids[3]]);
+    expect((await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13`).expect(200)).body).toEqual({cities:[],nextCursor:null});
+  });
+
   it('rejects malformed immutable locality pairs at the database boundary',async()=>{
     const a=await create();const snapshot=(await db.query('SELECT locality_snapshot FROM hunt_template_versions WHERE template_id=$1',[a.templateId])).rows[0].locality_snapshot;
     for(const saved of [{...snapshot,id:randomUUID()},{...snapshot,latitude:'46'},{...snapshot,longitude:181},{...snapshot,provenance:'private'}])
