@@ -1,0 +1,140 @@
+{
+  "environment": "disposable local PostgreSQL 17; curated development seed; NOT deployed development",
+  "approvedLocalTemplates": "0",
+  "geographicId": "681290",
+  "localityId": "07744359-2a90-4e14-a135-b278047c7edd",
+  "responses": [
+    {
+      "role": "creator",
+      "method": "GET",
+      "path": "/api/geography/countries",
+      "status": 200,
+      "body": {
+        "countries": [
+          {
+            "code": "RO",
+            "displayName": "Romania"
+          }
+        ]
+      }
+    },
+    {
+      "role": "creator",
+      "method": "GET",
+      "path": "/api/geography/regions?countryCode=RO",
+      "status": 200,
+      "body": {
+        "regions": [
+          {
+            "countryCode": "RO",
+            "admin1Code": "13",
+            "displayName": "Cluj",
+            "source": "geonames",
+            "attribution": "GeoNames (CC BY 4.0)"
+          }
+        ],
+        "nextAfter": null,
+        "regionLabel": "County",
+        "metadataStatus": "ready"
+      }
+    },
+    {
+      "role": "creator",
+      "method": "GET",
+      "path": "/api/geography/cities?countryCode=RO&admin1Code=13&q=cluj",
+      "status": 200,
+      "body": {
+        "cities": [
+          {
+            "geographicId": "681290",
+            "countryCode": "RO",
+            "countryDisplayName": "Romania",
+            "admin1Code": "13",
+            "regionDisplayName": "Cluj",
+            "regionStatus": "resolved",
+            "name": "Cluj-Napoca",
+            "administrativeContext": "Cluj",
+            "latitude": 46.7712,
+            "longitude": 23.6236,
+            "localityId": "07744359-2a90-4e14-a135-b278047c7edd",
+            "registeredActive": true,
+            "source": "geonames",
+            "attribution": "GeoNames (CC BY 4.0)",
+            "registrationState": "registered",
+            "nextAction": "bind_locality",
+            "hasApprovedLocalTemplate": false
+          }
+        ],
+        "nextAfter": null
+      }
+    },
+    {
+      "role": "organizer",
+      "method": "GET",
+      "path": "/api/organizer/geography/countries",
+      "status": 200,
+      "body": {
+        "countries": [
+          {
+            "countryCode": "RO",
+            "displayName": "Romania"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "role": "organizer",
+      "method": "GET",
+      "path": "/api/organizer/geography/regions?countryCode=RO",
+      "status": 200,
+      "body": {
+        "regions": [
+          {
+            "regionId": "RO:admin1:13",
+            "countryCode": "RO",
+            "regionCode": "13",
+            "label": "Cluj",
+            "labelStatus": "resolved",
+            "level": "admin1"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "role": "organizer",
+      "method": "GET",
+      "path": "/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13",
+      "status": 200,
+      "body": {
+        "cities": [
+          {
+            "geographicId": "681290",
+            "countryCode": "RO",
+            "countryDisplayName": "Romania",
+            "localityId": "07744359-2a90-4e14-a135-b278047c7edd",
+            "name": "Cluj-Napoca",
+            "administrativeContext": "Cluj",
+            "regionCode": "13",
+            "regionDisplayName": "Cluj",
+            "regionId": "RO:admin1:13",
+            "source": "geonames",
+            "attribution": "GeoNames (CC BY 4.0)"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "role": "organizer",
+      "method": "GET",
+      "path": "/api/organizer/local-templates?countryCode=RO&localityId=07744359-2a90-4e14-a135-b278047c7edd",
+      "status": 200,
+      "body": {
+        "templates": [],
+        "nextCursor": null
+      }
+    }
+  ]
+}

@@ -46,11 +46,11 @@ Verify through existing authenticated Creator endpoints:
 - POST /api/geography/cities/681290/resolve with an empty JSON body
 
 Organizer discovery remains on /api/organizer/geography/{countries,regions,cities}
-and the existing C7 resolver. A seeded locality alone supplies no Organizer
-inventory. Only an independently approved, currently eligible Creator Local
-artifact mapped to this UUID makes the city visible there. Drafts, pending reviews,
-suspended or materially changed localities remain ineligible. No approval,
-review, version, draft, Hunt or saved snapshot is written by the seed.
+and now reads this same geographic catalog independently of Local Hunt availability.
+A seeded locality supplies geographic selection without approval. Local Hunt listing,
+preview and selection retain the existing C7 resolver and require an independently
+approved, currently eligible Creator Local artifact. No approval, review, version,
+draft, Hunt or saved snapshot is written by the seed.
 
 ## Eligibility evidence
 
@@ -69,7 +69,7 @@ concurrent/repeated seeding, Creator country/county/city/resolve endpoints,
 canonical UUID reuse with differing historical coordinates, ambiguity/inactivity
 rollback, nondevelopment rejection, existing-import preservation, incomplete-import
 rollback, unchanged draft/version/review/legacy Hunt data, independent test review,
-and C7 Organizer exclusion/inclusion/suspension.
+and C7 Local Hunt exclusion/inclusion/suspension independently of location discovery.
 
 Run with TEST_DATABASE_URL set to a disposable PostgreSQL service with CREATE
 DATABASE permission, followed by `npm run typecheck` and `npm run build`.

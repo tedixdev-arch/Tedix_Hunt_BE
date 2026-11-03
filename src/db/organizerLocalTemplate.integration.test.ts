@@ -425,7 +425,7 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     const b=await replacement(a,id);await submit(b).expect(200);await approve(b).expect(200);await suspend(b).expect(200);
     await db.query('UPDATE localities SET latitude=48,active=false WHERE id=$1',[id]);expect(await state(h)).toEqual(saved);
   });
-  it('discovers only C7-eligible mapped geography before paging with exact country/region isolation',async()=>{
+  it('discovers catalog geography independently of C7 with exact country/region isolation',async()=>{
     const ids=[await locality(),await locality(),await locality(),await locality('HU')];
     const sources=await Promise.all(ids.map(id=>approved(id)));
     const run=(await db.query(`INSERT INTO geographic_imports(source,dataset,sha256,attribution)
@@ -442,12 +442,13 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     expect(regions).toEqual(expect.arrayContaining([expect.objectContaining({regionId:'RO:admin1:13',label:'Cluj',labelStatus:'resolved'}),
       expect.objectContaining({regionId:'RO:unknown',labelStatus:'unspecified'})]));
     const page=await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13&limit=1`).expect(200);
-    expect(page.body.cities.map((c:any)=>c.localityId)).toEqual([ids[1]]);expect(page.body.nextCursor).toBeNull();
+    expect(page.body.cities.map((c:any)=>c.localityId)).toEqual([ids[0]]);expect(page.body.nextCursor).not.toBeNull();
     expect((await get(`${path}/cities?countryCode=RO&regionId=RO:unknown`).expect(200)).body.cities.map((c:any)=>c.localityId)).toEqual([ids[2]]);
     await db.query('UPDATE localities SET active=false WHERE id=$1',[ids[1]]);
     // A forged cross-country mapping must not leak the otherwise eligible HU artifact.
     await db.query("UPDATE geographic_cities SET country_code='RO' WHERE locality_id=$1",[ids[3]]);
-    expect((await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13`).expect(200)).body).toEqual({cities:[],nextCursor:null});
+    const discovered=(await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13`).expect(200)).body.cities;
+    expect(discovered.map((c:any)=>c.localityId)).toEqual([ids[0],ids[1],null]);
   });
 
   it('rejects malformed immutable locality pairs at the database boundary',async()=>{
