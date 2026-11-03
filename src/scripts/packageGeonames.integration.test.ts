@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import { packageGeonames } from './packageGeonames.js';
 import { hashGeonames, importCities, readGeonames } from './importGeonames.js';
@@ -66,7 +66,12 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
  }, 30000);
  afterAll(async () => {
   if (db) await db.end();
-  await admin.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+  // Pool.end() can resolve before PostgreSQL observes the clients' disconnects.
+  // Wait for this suite's sessions; forcing the drop races their socket shutdown (57P01).
+  await vi.waitFor(async () => {
+   expect((await admin.query('SELECT count(*) FROM pg_stat_activity WHERE datname=$1', [name])).rows[0].count).toBe('0');
+  }, {timeout:5000});
+  await admin.query(`DROP DATABASE IF EXISTS "${name}"`);
   await admin.query(`DROP ROLE IF EXISTS "${role}"`);
   await admin.end();
   if (dir) await rm(dir, {recursive:true,force:true});

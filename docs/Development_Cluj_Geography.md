@@ -77,3 +77,23 @@ DATABASE permission, followed by `npm run typecheck` and `npm run build`.
 Validated on 2026-11-03: complete BE suite **76 files / 1,680 tests passed**,
 including all seven new seed tests and existing C6b/C7 regressions; no tests
 skipped. `npm run typecheck`, `npm run build` and `git diff --check` passed.
+
+### PR #116 CI teardown correction
+
+The initial Actions run passed all 1,680 assertions but failed on an unhandled
+PostgreSQL 57P01 from the package integration suite's forced database drop.
+The reported client was closing (`_ending: true`, `_ended: false`): pg-pool
+removes clients from its bookkeeping before their sockets finish closing, so
+awaiting Pool.end() alone did not make WITH (FORCE) safe. Every package suite
+database has a unique UUID name; no other suite targets it for deletion.
+Parallel execution can affect timing but does not share that database.
+
+The package suite now waits up to five seconds for its own pg_stat_activity
+session count to reach zero, then drops the database normally. A leaked session
+fails teardown; no PostgreSQL error handler, test disabling or serialization
+was added.
+
+After the correction, locked dependency installation, build, typecheck, fresh
+disposable baseline and all 37 migrations passed. The complete BE suite with
+PostgreSQL and two concurrent Vitest workers passed all 76 files / 1,680 tests
+with zero unhandled errors.
