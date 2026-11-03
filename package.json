@@ -12,7 +12,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -b tsconfig.json",
     "test": "vitest run",
-    "import-geonames": "tsx src/scripts/importGeonames.ts"
+    "import-geonames": "tsx src/scripts/importGeonames.ts",
+    "seed:development:cluj": "tsx src/scripts/seedDevelopmentCluj.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
