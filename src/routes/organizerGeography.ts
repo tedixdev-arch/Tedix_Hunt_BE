@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { requireAuth, requireAnyRole, type AuthRequest } from '../middleware/auth.js';
 import { TokenBuckets } from '../middleware/abuseProtection.js';
-import { eligibleCities } from '../models/OrganizerGeography.js';
+import { catalogCities, catalogRegions } from '../models/OrganizerGeography.js';
+import { Geography } from '../models/Geography.js';
 import { LocalSelectionError } from '../models/OrganizerLocalTemplate.js';
 
 export const organizerGeographyRouter = Router();
@@ -19,14 +20,14 @@ const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
  * /api/organizer/geography/countries:
  *   get:
  *     tags: [Geography]
- *     summary: Countries containing C7-eligible mapped Local Hunts
+ *     summary: Stored countries independent of Local Hunt availability
  *     description: Organizer only; private no-store. Returns countries (countryCode, displayName) and opaque nextCursor. Full FE contract in docs/Organizer_Eligible_Geography.md.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
  *       - { in: query, name: cursor, schema: { type: string } }
  *     responses:
- *       200: { description: Eligible countries and nextCursor or null }
+ *       200: { description: Catalog countries and nextCursor or null }
  *       400: { description: invalid_input }
  *       401: { description: unauthorized }
  *       403: { description: forbidden }
@@ -34,7 +35,7 @@ const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
  * /api/organizer/geography/regions:
  *   get:
  *     tags: [Geography]
- *     summary: Admin1 regions containing C7-eligible mapped Local Hunts
+ *     summary: Stored admin1 regions independent of Local Hunt availability
  *     description: Returns regions (regionId, countryCode, regionCode, label, labelStatus, level) and nextCursor. Missing metadata is explicit; no County inference.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -42,7 +43,7 @@ const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
  *       - { in: query, name: cursor, schema: { type: string } }
  *     responses:
- *       200: { description: Eligible regions and nextCursor or null }
+ *       200: { description: Catalog regions and nextCursor or null }
  *       400: { description: invalid_input }
  *       401: { description: unauthorized }
  *       403: { description: forbidden }
@@ -50,7 +51,7 @@ const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
  * /api/organizer/geography/cities:
  *   get:
  *     tags: [Geography]
- *     summary: Cities containing C7-eligible Local Hunts in an exact region
+ *     summary: Catalog cities in an exact region independent of Local Hunt availability
  *     description: Returns cities with geographicId, canonical localityId, countryCode, countryDisplayName, name, administrativeContext, regionId, regionCode, regionDisplayName, source, attribution; nextCursor is opaque or null.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -59,7 +60,7 @@ const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
  *       - { in: query, name: cursor, schema: { type: string } }
  *     responses:
- *       200: { description: Eligible cities and nextCursor or null }
+ *       200: { description: Catalog cities and nextCursor or null }
  *       400: { description: invalid_input }
  *       401: { description: unauthorized }
  *       403: { description: forbidden }
@@ -84,14 +85,15 @@ router.get(['/countries','/regions','/cities'],async(req,res,next)=>{
         after=decoded.after;
       }catch{throw new LocalSelectionError('invalid_input',400);}
     }
-    const cities=await eligibleCities(typeof countryCode==='string'?countryCode:undefined);
-    const region=(c:typeof cities[number])=>`${c.countryCode}:${c.regionCode===null?'unknown':`admin1:${c.regionCode}`}`;
+    const region=(c:{countryCode:string;regionCode:string|null})=>`${c.countryCode}:${c.regionCode===null?'unknown':`admin1:${c.regionCode}`}`;
     const items=new Map<string,object>();
-    for(const c of cities){
-      if(kind==='countries')items.set(c.countryCode,{countryCode:c.countryCode,displayName:c.countryDisplayName});
-      else if(kind==='regions')items.set(region(c),{regionId:region(c),countryCode:c.countryCode,regionCode:c.regionCode,
+    if(kind==='countries') {
+      for(const c of await Geography.countries())items.set(c.code,{countryCode:c.code,displayName:c.displayName});
+    } else if(kind==='regions') {
+      for(const c of await catalogRegions(countryCode as string))items.set(region(c),{regionId:region(c),countryCode:c.countryCode,regionCode:c.regionCode,
         label:c.regionCode===null?'Unknown region':c.regionDisplayName ?? c.regionCode,labelStatus:c.regionCode===null?'unspecified':c.regionDisplayName===null?'missing_label':'resolved',level:'admin1'});
-      else if(region(c)===regionId)items.set(c.geographicId,{...c,regionId:region(c),source:'geonames',attribution:'GeoNames (CC BY 4.0)'});
+    } else {
+      for(const c of await catalogCities(countryCode as string))if(region(c)===regionId)items.set(c.geographicId,{...c,regionId:region(c),source:'geonames',attribution:'GeoNames (CC BY 4.0)'});
     }
     const sorted=[...items].sort(([a],[b])=>compare(a,b)).filter(([id])=>after===null||compare(id,after)>0);
     const page=sorted.slice(0,Number(limit));

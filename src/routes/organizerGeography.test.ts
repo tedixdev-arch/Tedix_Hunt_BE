@@ -13,31 +13,26 @@ const root='/api/organizer/geography';
 const get=(path:string)=>request(app).get(root+path).set('Authorization',auth);
 function row(id='1',countryCode='RO',regionCode:string|null='13') {
   const localityId=`00000000-0000-0000-0000-${id.padStart(12,'0')}`;
-  const snapshot={id:localityId,countryCode,countryDisplayName:countryCode,name:'Same city',administrativeContext:'County',latitude:46,longitude:23};
-  return {templateId:localityId,key:'local-test',version:1,origin:'creator',category:'local',created_by_user_id:'owner',
-    version_origin:'creator',version_category:'local',version_owner:'owner',local_suspended_at:null,decision:'approved',reviewer_user_id:'reviewer',
-    localityId,localitySnapshot:snapshot,currentLocality:{...snapshot,active:true},geographicId:id,regionCode,catalogName:'Same city',catalogContext:'County',
-    content:{key:'local-test',version:1,displayName:'Local',theme:'Explore',mission:{name:'Find'},scoring:{startingScore:100},
-      configuration:{normalCheckpointCount:1,checkpointPositions:[{checkpointNumber:1,name:'Start',latitude:46,longitude:23,radiusMeters:25}],
-        finishPoint:{name:'End',latitude:46,longitude:23,radiusMeters:25}},checkpoints:[{checkpoint:1},{role:'terminal',navigationMode:'none'}]}};
+  return {localityId,geographicId:id,countryCode,countryDisplayName:countryCode,name:'Same city',administrativeContext:'County',regionCode,regionDisplayName:null};
 }
 beforeEach(()=>{
   vi.clearAllMocks();
   vi.mocked(User.findById).mockResolvedValue({id:'actor',roles:['organizer'],isGuest:false,accountStatus:'active'} as any);
   vi.mocked(pool.query).mockResolvedValue({rows:[]} as never);
 });
-describe('Organizer eligible geography',()=>{
-  it('filters with C7 before grouping/pagination and deduplicates exact localities',async()=>{
-    const valid=row('9');
-    const bad=[{...row('1'),local_suspended_at:'now'},{...row('2'),decision:'pending'},
-      {...row('3'),currentLocality:{...row('3').currentLocality,active:false}},
-      {...row('4'),localitySnapshot:{...row('4').localitySnapshot,countryCode:'HU'}},
-      {...row('5'),content:{}},{...row('6'),version_owner:'other'}];
-    vi.mocked(pool.query).mockResolvedValue({rows:[...bad,valid,valid]} as never);
+describe('Organizer catalog geography',()=>{
+  it('discovers catalog cities without reading approval or Hunt inventory',async()=>{
+    const city=row('681290');
+    vi.mocked(pool.query).mockResolvedValue({rows:[city]} as never);
     const r=await get('/cities?countryCode=RO&regionId=RO:admin1:13&limit=1').expect(200);
-    expect(r.body.cities).toHaveLength(1);expect(r.body.cities[0]).toMatchObject({geographicId:'9',localityId:valid.localityId});expect(r.body.nextCursor).toBeNull();
+    expect(r.body).toEqual({cities:[{...city,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
     expect(r.headers['cache-control']).toBe('private, no-store');
-    const sql=vi.mocked(pool.query).mock.calls[0][0];expect(sql).not.toMatch(/LIMIT/i);expect(sql).toContain('g.locality_id=a."localityId"');
+    const sql=vi.mocked(pool.query).mock.calls[0][0];
+    expect(sql).toContain('FROM geographic_cities');expect(sql).not.toMatch(/hunt_templates|hunt_template_versions|hunt_template_reviews|FROM hunts/);
+  });
+  it('includes unregistered catalog cities with an explicit null canonical locality',async()=>{
+    vi.mocked(pool.query).mockResolvedValue({rows:[{...row('681290'),localityId:null}]} as never);
+    expect((await get('/cities?countryCode=RO&regionId=RO:admin1:13').expect(200)).body.cities[0].localityId).toBeNull();
   });
   it('scopes country at the database boundary and region by code, never city names',async()=>{
     vi.mocked(pool.query).mockResolvedValue({rows:[row('1','RO','13'),row('2','RO','14')]} as never);
@@ -55,8 +50,8 @@ describe('Organizer eligible geography',()=>{
       expect.objectContaining({regionId:'RO:admin1:14',label:'Cluj',labelStatus:'resolved'})]));
     expect((await get('/cities?countryCode=RO&regionId=RO:unknown')).body.cities).toHaveLength(1);
   });
-  it('returns countries only with eligible inventory and walks scoped cursors without duplicates',async()=>{
-    vi.mocked(pool.query).mockResolvedValue({rows:[row('1','RO'),row('2','HU'),row('3','RO'),{...row('4','FR'),decision:'pending'}]} as never);
+  it('returns stored countries without Hunt inventory and walks scoped cursors without duplicates',async()=>{
+    vi.mocked(pool.query).mockResolvedValue({rows:[{code:'RO',displayName:'RO'},{code:'HU',displayName:'HU'}]} as never);
     const first=await get('/countries?limit=1').expect(200);expect(first.body.countries).toEqual([{countryCode:'HU',displayName:'HU'}]);
     const last=await get(`/countries?limit=1&cursor=${first.body.nextCursor}`).expect(200);
     expect(last.body.countries).toEqual([{countryCode:'RO',displayName:'RO'}]);expect(last.body.nextCursor).toBeNull();
@@ -73,6 +68,7 @@ describe('Organizer eligible geography',()=>{
     expect(regions.body.regions[0].regionCode).toBe('13');
     const next=await get(`/regions?countryCode=RO&limit=1&cursor=${regions.body.nextCursor}`).expect(200);
     expect(next.body.regions[0].regionCode).toBe('14');expect(next.body.nextCursor).toBeNull();
+    vi.mocked(pool.query).mockResolvedValue({rows:[{code:'RO',displayName:'Romania'}]} as never);
     expect((await get('/countries/').expect(200)).body.countries).toHaveLength(1);
   });
   it.each(['/countries','/regions?countryCode=RO','/cities?countryCode=RO&regionId=RO:admin1:13'])('returns empty %s',async path=>{
