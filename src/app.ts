@@ -1,3 +1,4 @@
+import { organizerGeographyRouter } from './routes/organizerGeography.js';
 import { organizerLocalTemplatesRouter, huntLocalTemplateRouter } from './routes/organizerLocalTemplates.js';
 import { localityProposalsRouter, adminLocalityProposalsRouter } from './routes/localityProposals.js';
 import { geographyRouter } from './routes/geography.js';
@@ -82,6 +83,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/hunt-access', huntAccessRouter);
   app.use('/api/reward-options', rewardOptionsRouter);
   app.use('/api/hunts/:id/rewards', huntRewardsRouter);
+  app.use('/api/organizer/geography', organizerGeographyRouter);
   app.use('/api/organizer/local-templates', organizerLocalTemplatesRouter);
   app.use('/api/hunts/:id/local-template', huntLocalTemplateRouter);
   app.use('/api/hunts', huntsRouter);
