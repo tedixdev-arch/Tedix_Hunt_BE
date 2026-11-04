@@ -22,6 +22,14 @@ const options: swaggerJsdoc.Options = {
         },
       },
       schemas: {
+        LibraryExercise: {
+          description: 'Canonical exercise data without Template id/owner. Exact strings and structures are preserved.',
+          oneOf: Object.keys(mechanics).map(type => {
+            const schema = exerciseSchema(type as keyof typeof mechanics);
+            const { id: _id, owner: _owner, ...properties } = schema.properties!;
+            return { ...schema, properties };
+          }),
+        },
         CustomExercise: {
           description: 'Template-version-owned data-only snapshot. Omit id and owner together for a new instance. A save may echo the latest source version instance at its same checkpoint/classification slot; the server allocates a fresh id and destination owner for every new immutable version. Never pass IDs from another Template/version/slot. Assignment is containment in checkpoints[].customExercises. Plain text only; strings retain exact whitespace. Payload limit 100 KiB, maximum depth 12 and 12000 values. Collections have bounded sizes and unique IDs; relational membership/completeness rules apply. See docs/Custom_Exercise_Persistence.md.',
           oneOf: Object.keys(mechanics).map(type => exerciseSchema(type as keyof typeof mechanics)),

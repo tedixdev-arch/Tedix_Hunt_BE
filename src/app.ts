@@ -1,3 +1,4 @@
+import { creatorContentRouter } from './routes/creatorContent.js';
 import { organizerGeographyRouter } from './routes/organizerGeography.js';
 import { organizerLocalTemplatesRouter, huntLocalTemplateRouter } from './routes/organizerLocalTemplates.js';
 import { localityProposalsRouter, adminLocalityProposalsRouter } from './routes/localityProposals.js';
@@ -82,6 +83,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/admin/templates', adminTemplateEligibilityRouter);
   app.use('/api/organizer-applications', organizerApplicationsRouter);
   app.use('/api/creator-applications', creatorApplicationsRouter);
+  app.use('/api/creator/content', creatorContentRouter);
   app.use('/api/creator/templates', creatorTemplatesRouter);
   app.use('/api/creator/universal-library', creatorUniversalLibraryRouter);
   app.use('/api/organizations', organizationsRouter);
@@ -122,7 +124,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
     response,
     _next,
   ) => {
-    if (abuseConfig.enabled && (error?.type === 'entity.parse.failed' || error?.type === 'entity.too.large')) {
+    if ((abuseConfig.enabled || _request.path === '/api/creator/content' || _request.path.startsWith('/api/creator/content/')) && (error?.type === 'entity.parse.failed' || error?.type === 'entity.too.large')) {
       response.status(error.type === 'entity.too.large' ? 413 : 400).json({ error: 'invalid_input' });
       return;
     }
