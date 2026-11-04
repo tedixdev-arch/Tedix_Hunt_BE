@@ -19,7 +19,7 @@ const testUrl=process.env.TEST_DATABASE_URL;
   const directory=new URL('./migrations/',import.meta.url);
   migrations=await Promise.all((await readdir(directory)).filter(n=>/^\d{3}_.*\.ts$/.test(n)).sort().map(async n=>(await import(new URL(n,directory).href)).default));
   const c=await db.connect();
-  try{await c.query(await readFile(new URL('./pre_migration_baseline.sql',import.meta.url),'utf8'));await runMigrations(c,migrations.filter(m=>m.id!==reviewMigration.id));}finally{c.release();}
+  try{await c.query(await readFile(new URL('./pre_migration_baseline.sql',import.meta.url),'utf8'));await runMigrations(c,migrations.filter(m=>m.id<reviewMigration.id));}finally{c.release();}
  });
  afterAll(async()=>{await db?.end();if(created)await admin.query(`DROP DATABASE "${name}"`);await admin.end();});
  it('fails closed on legacy promotions, then preserves C2a drafts and installs identical fresh-schema protections',async()=>{
@@ -35,7 +35,7 @@ const testUrl=process.env.TEST_DATABASE_URL;
    await expect(reviewMigration.up(c)).rejects.toThrow('Reconcile legacy non-draft Content');
    await c.query('ROLLBACK');
    expect((await c.query("SELECT to_regclass('library_content_review_events') name")).rows[0].name).toBeNull();
-   expect(await runMigrations(c,migrations)).toEqual(['043_content_review']);
+   expect(await runMigrations(c,migrations)).toEqual(['043_content_review','044_approved_content_discovery']);
    expect(await runMigrations(c,migrations)).toEqual([]);
    expect((await c.query('SELECT to_jsonb(r) row FROM library_content_revisions r')).rows).toEqual(before);
    const inspect=async()=>({
@@ -44,10 +44,14 @@ const testUrl=process.env.TEST_DATABASE_URL;
     triggers:(await c.query(`SELECT pg_get_triggerdef(g.oid) def FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid WHERE t.relname LIKE 'library_content%' AND NOT g.tgisinternal ORDER BY 1`)).rows,
     functions:(await c.query(`SELECT proname,prosrc FROM pg_proc WHERE proname IN ('protect_library_revision','protect_library_identity','guard_library_review_event','apply_library_review_event') ORDER BY 1`)).rows,
    });
+   const indexes=async()=>(await c.query("SELECT indexname,indexdef FROM pg_indexes WHERE tablename LIKE 'library_content%' ORDER BY indexname")).rows;
+   const upgradedIndexes=await indexes();
+   expect(upgradedIndexes.some(i=>i.indexname==='library_content_approved_latest')).toBe(true);
    const upgraded=await inspect();
    await c.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
    await c.query(await readFile(new URL('./schema.sql',import.meta.url),'utf8'));
    expect(await inspect()).toEqual(upgraded);
+   expect(await indexes()).toEqual(upgradedIndexes);
   } finally {c.release();}
  });
 });

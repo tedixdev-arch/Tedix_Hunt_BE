@@ -59,3 +59,21 @@ it('documents exact Content revision review, independent authorization, feedback
   expect(spec.paths['/api/creator/content'].get.parameters.find((p:any)=>p.name==='view').schema.enum).toEqual(['all']);
   expect(spec.components.schemas.LibraryContent.properties.reviewEvents.items.$ref).toBe('#/components/schemas/LibraryReviewEvent');
 });
+
+it('documents approved discovery, every supported mechanic, exact detail and bounded optional filters', () => {
+ const spec=swaggerSpec as any;
+ const list=spec.paths['/api/creator/content/approved'].get;
+ const detail=spec.paths['/api/creator/content/approved/{contentId}/revisions/{revisionId}'].get;
+ for(const operation of [list,detail]) expect(operation.security).toEqual([{bearerAuth:[]}]);
+ expect(list.parameters.map((p:any)=>p.name)).toEqual(['limit','after','classification','type','category','grade','q','countryCode','admin1Code','geographicId']);
+ expect(list.parameters.every((p:any)=>!p.required)).toBe(true);
+ expect(list.parameters.find((p:any)=>p.name==='limit').schema.maximum).toBe(100);
+ const canonical=spec.components.schemas.LibraryExercise.oneOf.map((s:any)=>s.properties.type.enum[0]).sort();
+ expect(list.parameters.find((p:any)=>p.name==='type').schema.enum.toSorted()).toEqual(canonical);
+ expect(spec.components.schemas.ApprovedLibraryMetadata.properties.type.enum.toSorted()).toEqual(canonical);
+ expect(spec.components.schemas.ApprovedLibraryMetadata.properties).not.toHaveProperty('exercise');
+ expect(spec.components.schemas.ApprovedLibraryMetadata.properties).not.toHaveProperty('ownerId');
+ expect(detail.parameters.map((p:any)=>p.name)).toEqual(['contentId','revisionId']);
+ expect(detail.responses).toHaveProperty('404');
+ expect(spec.components.schemas.ApprovedLibraryDetail.allOf[1].properties.exercise.$ref).toBe('#/components/schemas/LibraryExercise');
+});
