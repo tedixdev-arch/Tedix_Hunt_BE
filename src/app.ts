@@ -1,3 +1,4 @@
+import { approvedContentRouter } from './routes/approvedContent.js';
 import { adminContentReviewRouter } from './routes/contentReview.js';
 import { creatorContentRouter } from './routes/creatorContent.js';
 import { organizerGeographyRouter } from './routes/organizerGeography.js';
@@ -84,6 +85,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/admin/templates', adminTemplateEligibilityRouter);
   app.use('/api/organizer-applications', organizerApplicationsRouter);
   app.use('/api/creator-applications', creatorApplicationsRouter);
+  app.use('/api/creator/content/approved', approvedContentRouter);
   app.use('/api/creator/content', creatorContentRouter);
   app.use('/api/admin/content/review', adminContentReviewRouter);
   app.use('/api/creator/templates', creatorTemplatesRouter);

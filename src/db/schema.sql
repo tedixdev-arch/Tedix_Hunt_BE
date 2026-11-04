@@ -1200,3 +1200,6 @@ BEGIN
   RAISE EXCEPTION 'Submitted or archived heads cannot advance' USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
+
+-- C2d approved discovery; keep in sync with migration 044.
+CREATE INDEX library_content_approved_latest ON library_content_revisions(content_id,version DESC) WHERE status='approved';
