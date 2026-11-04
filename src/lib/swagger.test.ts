@@ -39,3 +39,23 @@ it.each(['login', 'register'])('documents disabled Tedix authentication for part
   expect(operation.requestBody.content['application/json'].schema.properties).not.toHaveProperty('tedixUserId');
   expect(operation.responses['401'].description).toContain('no account details or tokens');
 });
+
+it('documents exact Content revision review, independent authorization, feedback and compatible Creator discovery', () => {
+  const spec=swaggerSpec as any;
+  for(const path of [
+    '/api/creator/content/{id}/revisions/{revisionId}/submit',
+    '/api/admin/content/review/{id}/revisions/{revisionId}/approve',
+    '/api/admin/content/review/{id}/revisions/{revisionId}/request-changes',
+  ]) {
+    const operation=spec.paths[path].post;
+    expect(operation.security).toEqual([{bearerAuth:[]}]);
+    expect(operation.parameters.map((p:any)=>p.name)).toEqual(['id','revisionId']);
+    expect(operation.requestBody.content['application/json'].schema.additionalProperties).toBe(false);
+    expect(operation.responses).toHaveProperty('409');
+  }
+  expect(spec.paths['/api/admin/content/review/{id}/revisions/{revisionId}'].get).toBeTruthy();
+  expect(spec.paths['/api/admin/content/review'].get.parameters.map((p:any)=>p.name)).toEqual(['limit','after']);
+  expect(spec.paths['/api/admin/content/review/{id}/revisions/{revisionId}/request-changes'].post.requestBody.content['application/json'].schema.required).toEqual(['comment']);
+  expect(spec.paths['/api/creator/content'].get.parameters.find((p:any)=>p.name==='view').schema.enum).toEqual(['all']);
+  expect(spec.components.schemas.LibraryContent.properties.reviewEvents.items.$ref).toBe('#/components/schemas/LibraryReviewEvent');
+});

@@ -36,7 +36,7 @@ type Actor = { id: string; auth: string };
       const directory = new URL('../db/migrations/', import.meta.url), migrations: Migration[] = [];
       for (const name of (await readdir(directory)).filter(n => /^\d{3}_.*\.ts$/.test(n)).sort()) migrations.push((await import(new URL(name, directory).href)).default);
       const applied = await runMigrations(client, migrations);
-      expect(applied).toContain('042_content_library');
+      expect(applied).toContain('043_content_review');
       expect(await runMigrations(client, migrations)).toEqual([]);
     } finally { client.release(); }
     (await import('../config/environment.js')).environment.databaseUrl = url.toString();
@@ -88,7 +88,12 @@ type Actor = { id: string; auth: string };
   expect(b.version).toBe(2); expect(b.revisionId).not.toBe(a.revisionId);
   await update().expect(409);
   expect((await get(`${url}/revisions/${a.revisionId}`).expect(200)).body.exercise).toEqual(a.exercise);
-  await db.query("UPDATE library_content_revisions SET status='approved' WHERE id=$1",[b.revisionId]);
+  await expect(db.query("UPDATE library_content_revisions SET status='approved' WHERE id=$1",[b.revisionId])).rejects.toThrow();
+  // Existing C2a draft update stays append-only; review now uses the guarded API.
+  const classified=(await request(app).put(url).set('Authorization',owner.auth).send({exercise:a.exercise,category:'Science',baseRevisionId:b.revisionId}).expect(200)).body;
+  b.revisionId=classified.revisionId; b.exercise=classified.exercise;
+  await request(app).post(`${url}/revisions/${b.revisionId}/submit`).set('Authorization',owner.auth).send({}).expect(200);
+  await request(app).post(`/api/admin/content/review/${a.contentId}/revisions/${b.revisionId}/approve`).set('Authorization',reviewer.auth).send({}).expect(200);
   await request(app).put(url).set('Authorization',owner.auth).send({exercise:a.exercise,baseRevisionId:b.revisionId}).expect(409);
   await expect(db.query("UPDATE library_content_revisions SET exercise='{}' WHERE id=$1",[b.revisionId])).rejects.toThrow();
   await expect(db.query('DELETE FROM library_content_revisions WHERE id=$1',[b.revisionId])).rejects.toThrow();
@@ -115,5 +120,162 @@ type Actor = { id: string; auth: string };
    expect((await post({exercise:e,category:'Mathematics',curriculum:{subject:'math',grade:'5'},geography}).expect(201)).body.geography).toEqual(geography);
     const list=(await get(root).expect(200)).body;
   expect(list.items.every((i:any)=>i.ownerId===owner.id&&i.status==='draft')).toBe(true);
+ });
+ const adminRoot='/api/admin/content/review';
+ const create=async(who=owner,category:string|null='Science')=>(await post({exercise:exerciseFixtures[0],category},who).expect(201)).body;
+ const submit=(r:any,who=owner)=>request(app).post(`${root}/${r.contentId}/revisions/${r.revisionId}/submit`).set('Authorization',who.auth).send({});
+ const decide=(r:any,action='approve',who=reviewer,body:any={})=>request(app).post(`${adminRoot}/${r.contentId}/revisions/${r.revisionId}/${action}`).set('Authorization',who.auth).send(body);
+ const detail=(r:any,who=reviewer)=>get(`${adminRoot}/${r.contentId}/revisions/${r.revisionId}`,who);
+ it('owner submits once without creating a revision; submitted heads remain discoverable and immutable',async()=>{
+  const r=await create();
+  await submit(r,other).expect(404);
+  await submit(r,participant).expect(403);
+  const submitted=(await submit(r).expect(200)).body;
+  expect(submitted).toMatchObject({revisionId:r.revisionId,version:r.version,status:'submitted',exercise:r.exercise});
+  expect(submitted.reviewEvents).toHaveLength(1);
+  expect(submitted.reviewEvents[0]).toMatchObject({actorUserId:owner.id,decision:'submitted',revisionId:r.revisionId});
+  await submit(r).expect(409);
+  expect((await get(`${root}?view=all`).expect(200)).body.items.some((i:any)=>i.revisionId===r.revisionId)).toBe(true);
+  expect((await get(root).expect(200)).body.items.some((i:any)=>i.revisionId===r.revisionId)).toBe(false);
+  expect((await get(`${root}/${r.contentId}`).expect(200)).body.status).toBe('submitted');
+  await request(app).post(`${root}/${r.contentId}/revisions`).set('Authorization',owner.auth).send({baseRevisionId:r.revisionId}).expect(409);
+  await request(app).put(`${root}/${r.contentId}`).set('Authorization',owner.auth).send({exercise:r.exercise,baseRevisionId:r.revisionId}).expect(409);
+ });
+ it('submission validates complete stored canonical exercise and requires category without imposing math curriculum',async()=>{
+  const draft=await create(owner,null);
+  await submit(draft).expect(400);
+  // C2a SQL constraints allow legacy incomplete JSON; submission must revalidate it.
+  const client=await db.connect();
+  let corrupt:any;
+  try {
+   await client.query('BEGIN');
+   const id=(await client.query('INSERT INTO library_content(owner_id,head_version) VALUES ($1,1) RETURNING id',[owner.id])).rows[0].id;
+   const rev=(await client.query(`INSERT INTO library_content_revisions(content_id,version,exercise,category,geographic_scope)
+    VALUES ($1,1,'{"classification":"personal"}','Science','universal') RETURNING id`,[id])).rows[0].id;
+   await client.query('COMMIT'); corrupt={contentId:id,revisionId:rev};
+  } finally {client.release();}
+  const invalid=await submit(corrupt).expect(400);
+  expect(invalid.body.error).toBe('invalid_content');
+  expect((await get(`${root}/${corrupt.contentId}`).expect(200)).body).toMatchObject({status:'draft',reviewEvents:[]});
+  const nonMath=await create();
+  expect((await submit(nonMath).expect(200)).body.curriculum).toEqual({});
+ });
+ it('Admin sees exact canonical detail and paginated classification queue without personal information',async()=>{
+  const r=await create();await submit(r).expect(200);
+  await detail(r,owner).expect(403);
+  const inspected=(await detail(r).expect(200)).body;
+  expect(inspected).toMatchObject({revisionId:r.revisionId,ownerId:owner.id,exercise:r.exercise,geography:r.geography,status:'submitted'});
+  const first=(await get(`${adminRoot}?limit=1`,reviewer).expect(200)).body;
+  expect(first.items).toHaveLength(1);expect(first.nextAfter).toBeTruthy();
+  const next=(await get(`${adminRoot}?limit=1&after=${first.nextAfter}`,reviewer).expect(200)).body;
+  expect(next.items[0].revisionId).not.toBe(first.items[0].revisionId);
+  for(const row of [...first.items,...next.items]){
+   expect(row.classification).toBe('personal');expect(row.submittedAt).toBeTruthy();
+   expect(row).not.toHaveProperty('email');expect(row).not.toHaveProperty('exercise');expect(row).not.toHaveProperty('ownerId');
+  }
+  await get(`${adminRoot}?limit=0`,reviewer).expect(400);
+  await get(`${adminRoot}?after=invalid`,reviewer).expect(400);
+  await detail({...r,contentId:randomUUID()}).expect(404);
+  await get(`${adminRoot}/${r.contentId}/revisions/invalid`,reviewer).expect(400);
+ });
+ it('independent Admin approves exact revision; duplicate and wrong pairs reject, with intact audit and historical approval',async()=>{
+  const r=await create();const wrong=await create();await submit(r).expect(200);
+  await decide(r,'approve',owner).expect(403);
+  await decide({...r,contentId:wrong.contentId}).expect(404);
+  await decide(r,'approve',reviewer,{exercise:r.exercise}).expect(400);
+  const approved=(await decide(r).expect(200)).body;
+  expect(approved).toMatchObject({revisionId:r.revisionId,status:'approved',exercise:r.exercise,version:1});
+  expect(approved.reviewEvents).toHaveLength(2);
+  expect(approved.reviewEvents[1]).toMatchObject({revisionId:r.revisionId,contentId:r.contentId,actorUserId:reviewer.id,decision:'approved',comment:null});
+  expect(Date.parse(approved.reviewEvents[1].decidedAt)).toBeGreaterThan(0);
+  await decide(r).expect(409); await decide(r,'request-changes',reviewer,{comment:'Please revise wording'}).expect(409);
+  await expect(db.query("UPDATE library_content_revisions SET exercise=exercise||'{\"title\":\"changed\"}' WHERE id=$1",[r.revisionId])).rejects.toThrow();
+  const draft=(await request(app).post(`${root}/${r.contentId}/revisions`).set('Authorization',owner.auth).send({baseRevisionId:r.revisionId}).expect(201)).body;
+  expect(draft).toMatchObject({status:'draft',version:2,exercise:r.exercise,reviewEvents:[]});
+  const history=(await get(`${root}/${r.contentId}/revisions/${r.revisionId}`).expect(200)).body;
+  expect(history).toEqual(approved);
+  await expect(db.query("UPDATE library_content_review_events SET comment='Edited' WHERE revision_id=$1",[r.revisionId])).rejects.toThrow();
+  await expect(db.query('DELETE FROM library_content_review_events WHERE revision_id=$1',[r.revisionId])).rejects.toThrow();
+  await expect(db.query('TRUNCATE library_content_review_events')).rejects.toThrow();
+ });
+ it('requires meaningful request-changes feedback; owner can read it and create a new correction draft',async()=>{
+  const r=await create();await submit(r).expect(200);
+  for(const comment of [undefined,'','  ','!!','x'.repeat(1001)]) await decide(r,'request-changes',reviewer,{comment}).expect(400);
+  const result=(await decide(r,'request-changes',reviewer,{comment:'  Clarify the answer choices.  '}).expect(200)).body;
+  expect(result.status).toBe('changes_requested');
+  expect(result.reviewEvents[1]).toMatchObject({decision:'changes_requested',comment:'Clarify the answer choices.',actorUserId:reviewer.id});
+  expect((await get(`${root}/${r.contentId}`).expect(200)).body).toEqual(result);
+  await get(`${root}/${r.contentId}`,other).expect(404);
+  const draft=(await request(app).post(`${root}/${r.contentId}/revisions`).set('Authorization',owner.auth).send({baseRevisionId:r.revisionId}).expect(201)).body;
+  await submit(draft).expect(200); await decide(draft).expect(200);
+  expect((await get(`${root}/${r.contentId}/revisions/${r.revisionId}`).expect(200)).body.reviewEvents).toEqual(result.reviewEvents);
+ });
+ it('dual-role Creator/Admin cannot review own submission by user identity',async()=>{
+  const dual=await actor(['creator','admin']),r=await create(dual);
+  await submit(r,dual).expect(200);
+  await decide(r,'approve',dual).expect(403);
+  await decide(r,'request-changes',dual,{comment:'My own feedback'}).expect(403);
+  await decide(r).expect(200);
+ });
+ it('concurrent decisions produce one winning event and one conflict',async()=>{
+  const r=await create();await submit(r).expect(200);
+  const second=await actor(['admin']);
+  const results=await Promise.all([decide(r),decide(r,'request-changes',second,{comment:'Please clarify instructions'})]);
+  expect(results.map(x=>x.status).sort()).toEqual([200,409]);
+  const events=(await db.query("SELECT * FROM library_content_review_events WHERE revision_id=$1 AND decision<>'submitted'",[r.revisionId])).rows;
+  expect(events).toHaveLength(1);
+  expect((await get(`${root}/${r.contentId}`).expect(200)).body.status).toBe(events[0].decision);
+ });
+ it('rejects stale draft submissions and obsolete submissions even if legacy SQL advanced the head',async()=>{
+  const r=await create();
+  const newer=(await request(app).put(`${root}/${r.contentId}`).set('Authorization',owner.auth).send({exercise:r.exercise,category:'Science',baseRevisionId:r.revisionId}).expect(200)).body;
+  await submit(r).expect(409);await submit(newer).expect(200);
+  // Privileged fixture models a pre-existing obsolete submission, bypassing only
+  // the head guard. Supported API and ordinary SQL cannot create this situation.
+  const c=await db.connect();
+  try {
+   await c.query('BEGIN');
+   await c.query('ALTER TABLE library_content DISABLE TRIGGER library_identity_immutable');
+   await c.query(`INSERT INTO library_content_revisions(content_id,version,exercise,category,geographic_scope)
+    VALUES ($1,3,$2,'Science','universal')`,[r.contentId,r.exercise]);
+   await c.query('UPDATE library_content SET head_version=3 WHERE id=$1',[r.contentId]);
+   await c.query('SET CONSTRAINTS ALL IMMEDIATE');
+   await c.query('ALTER TABLE library_content ENABLE TRIGGER library_identity_immutable');await c.query('COMMIT');
+  } catch(e){await c.query('ROLLBACK');throw e;} finally{c.release();}
+  await decide(newer).expect(409);await detail(newer).expect(404);
+ });
+ it('ordinary SQL cannot set lifecycle status, forge review roles, mutate audit or bypass using a GUC',async()=>{
+  const r=await create(),role='content_guard_'+randomUUID().replaceAll('-','');
+  await admin.query(`CREATE ROLE "${role}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`);
+  const c=await db.connect();
+  try {
+   await c.query(`GRANT USAGE ON SCHEMA public TO "${role}"; GRANT SELECT,INSERT,UPDATE,DELETE ON library_content,library_content_revisions,library_content_review_events TO "${role}";
+    GRANT SELECT ON users,user_roles TO "${role}"`);
+   await c.query(`SET ROLE "${role}"`);
+   await c.query("SELECT set_config('app.content_review','true',false)");
+   await expect(c.query("UPDATE library_content_revisions SET status='submitted' WHERE id=$1",[r.revisionId])).rejects.toThrow();
+   await expect(c.query("UPDATE library_content_revisions SET status='approved' WHERE id=$1",[r.revisionId])).rejects.toThrow();
+   await expect(c.query(`INSERT INTO library_content_review_events(content_id,revision_id,actor_user_id,decision) VALUES ($1,$2,$3,'submitted')`,[r.contentId,r.revisionId,other.id])).rejects.toThrow();
+   await c.query(`INSERT INTO library_content_review_events(content_id,revision_id,actor_user_id,decision) VALUES ($1,$2,$3,'submitted')`,[r.contentId,r.revisionId,owner.id]);
+   await expect(c.query(`INSERT INTO library_content_review_events(content_id,revision_id,actor_user_id,decision) VALUES ($1,$2,$3,'approved')`,[r.contentId,r.revisionId,owner.id])).rejects.toThrow();
+   await c.query(`INSERT INTO library_content_review_events(content_id,revision_id,actor_user_id,decision) VALUES ($1,$2,$3,'approved')`,[r.contentId,r.revisionId,reviewer.id]);
+   await expect(c.query('DELETE FROM library_content_review_events WHERE revision_id=$1',[r.revisionId])).rejects.toThrow();
+   await expect(c.query("UPDATE library_content_revisions SET status='draft' WHERE id=$1",[r.revisionId])).rejects.toThrow();
+   await expect(c.query(`INSERT INTO library_content_revisions(content_id,version,status,exercise,geographic_scope) VALUES ($1,2,'approved',$2,'universal')`,[r.contentId,r.exercise])).rejects.toThrow();
+  } finally {
+   await c.query('RESET ROLE');await c.query(`DROP OWNED BY "${role}"`);c.release();await admin.query(`DROP ROLE "${role}"`);
+  }
+ });
+ it('Content review leaves all Template and Hunt records unchanged',async()=>{
+  const organization=(await db.query("INSERT INTO organizations(name,owner_id) VALUES ('Content boundary fixture',$1) RETURNING id",[owner.id])).rows[0].id;
+  await db.query(`INSERT INTO hunts(organization_id,created_by_user_id,name,status,template_key,template_version,template_snapshot)
+   VALUES ($1,$2,'Existing frozen snapshot','finished','signal-cluj-napoca',1,$3)`,
+   [organization,owner.id,{key:'signal-cluj-napoca',version:1,frozen:'original snapshot'}]);
+  const snapshot=async()=>({templates:(await db.query('SELECT to_jsonb(t) row FROM hunt_templates t ORDER BY id')).rows,
+   versions:(await db.query('SELECT to_jsonb(t) row FROM hunt_template_versions t ORDER BY id')).rows,
+   reviews:(await db.query('SELECT to_jsonb(t) row FROM hunt_template_reviews t ORDER BY to_jsonb(t)::text')).rows,
+   hunts:(await db.query('SELECT to_jsonb(t) row FROM hunts t ORDER BY id')).rows});
+  const before=await snapshot(),r=await create();await submit(r).expect(200);await decide(r).expect(200);
+  expect(await snapshot()).toEqual(before);
  });
 });

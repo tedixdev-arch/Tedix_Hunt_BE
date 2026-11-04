@@ -27,3 +27,18 @@ export function validateContent(input: unknown) {
   if (geography.scope === 'city' && (typeof geography.geographicId !== 'string' || !/^[1-9][0-9]{0,17}$/.test(geography.geographicId))) return fail('Invalid GeoNames identifier');
   return {exercise:e,category,curriculum,geography};
 }
+
+// C2a permits a missing category in drafts. Submission requires a supported category,
+// but no math curriculum (or invented Main/Unit/Lesson identifiers) is required.
+export function validateContentSubmission(input: unknown) {
+  const data = validateContent(input);
+  if (data.category === null) throw new ContentError('submission_category_required');
+  return data;
+}
+export function reviewComment(input: unknown, required: boolean): string | null {
+  if (input === undefined && !required) return null;
+  if (typeof input !== 'string' || input.trim().length < 3 || input.trim().length > 1000 || !/[\p{L}\p{N}]/u.test(input)) {
+    throw new ContentError('invalid_review_comment');
+  }
+  return input.trim();
+}
