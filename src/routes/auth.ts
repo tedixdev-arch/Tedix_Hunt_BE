@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { signJwt } from '../lib/jwt.js';
 import { normalizeEmail, User, type IUser } from '../models/User.js';
 import { RefreshToken } from '../models/RefreshToken.js';
+import { setting } from '../domain/platformSettings.js';
 import { Organization } from '../models/Organization.js';
 import { environment } from '../config/environment.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
@@ -458,7 +459,7 @@ router.post('/participant/login', async (req, res) => {
  *   post:
  *     tags: [Auth]
  *     summary: Continue as guest
- *     description: Issues a short-lived (1h) participant access token with no refresh token.
+ *     description: Issues a participant access token (Platform Settings sessions.guestSessionHours, default 4h) with no refresh token. An optional display name (max 60 characters) is stored for leaderboards and Organizer monitoring.
  *     responses:
  *       201:
  *         description: Guest participant token issued
@@ -473,9 +474,14 @@ router.post('/participant/login', async (req, res) => {
  *                   properties:
  *                     accessToken: { type: string }
  */
-router.post('/guest', async (_req, res) => {
-  const user = await User.create({ role: 'participant', isGuest: true });
-  const accessToken = signJwt({ sub: user.id, type: 'access' }, { expiresIn: '1h' });
+router.post('/guest', async (req, res) => {
+  // Optional display name for leaderboards and Organizer monitoring; never an identity claim.
+  const rawName = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>).name : undefined;
+  if (rawName !== undefined && typeof rawName !== 'string') return res.status(400).json({ error: 'invalid_input' });
+  const name = typeof rawName === 'string' ? rawName.normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+  const user = await User.create({ role: 'participant', isGuest: true, ...(name ? { name } : {}) });
+  // A guest has no refresh token, so the token must outlive a typical Hunt session.
+  const accessToken = signJwt({ sub: user.id, type: 'access' }, { expiresIn: `${setting<number>('sessions.guestSessionHours')}h` as '4h' });
   res.status(201).json({ user: publicUser(user), tokens: { accessToken } });
 });
 

@@ -62,9 +62,8 @@ describe('validateHuntForPublish', () => {
       expect.objectContaining({ field: 'teamSize', message: expect.stringContaining('D2/D5') }));
   });
 
-  it('blocks Solo without dropping Team content', () => {
-    expect(validateHuntForPublish({ ...completeHunt, format: 'solo', teamSize: null }).issues).toContainEqual(
-      expect.objectContaining({ field: 'templateSnapshot', message: expect.stringContaining('D5') }));
+  it('publishes Solo under pilot gameplay, which plays every Personal and Team stage', () => {
+    expect(validateHuntForPublish({ ...completeHunt, format: 'solo', teamSize: null })).toEqual({ ready: true, issues: [] });
   });
 
   it('deduplicates higher-level option guidance', () => {

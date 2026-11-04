@@ -101,7 +101,8 @@ suite('Task 5B real authenticated Express/PostgreSQL radius configuration', () =
     expect(r.body.checkpoints.map((p: any) => p.accessState)).toEqual(['eligible_for_proximity','not_yet_accessible','not_yet_accessible']);
     expect(r.body.checkpoints.every((p: any) => !p.mayAccessGameplay && !p.gameplayCompleted)).toBe(true);
     const gps = { latitude: 46, longitude: 23, accuracyMeters: 1, observedAt: new Date().toISOString() };
-    await request(app).post(`/api/hunts/${h}/checkpoints/${r.body.checkpoints[0].checkpointId}/proximity`).set('Authorization', auth('participant')).send(gps).expect(422, { error: 'proximity_policy_unresolved' });
+    await request(app).post(`/api/hunts/${h}/checkpoints/${r.body.checkpoints[0].checkpointId}/proximity`).set('Authorization', auth('participant')).send(gps).expect(200).expect(res => expect(res.body).toMatchObject({ accessState: 'proximity_verified', gameplayCompleted: false }));
+    // Arrival inside an overlapping circle grants only the current checkpoint; it never unlocks the next one.
     await request(app).post(`/api/hunts/${h}/checkpoints/${r.body.checkpoints[1].checkpointId}/proximity`).set('Authorization', auth('participant')).send(gps).expect(409);
   });
   it('allows Admin radius-only Local draft revisions while retaining original ownership', async () => {

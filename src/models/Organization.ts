@@ -17,6 +17,8 @@ export interface IOrganization {
   owner: string | PublicUser;
   members: (string | PublicUser)[];
   createdAt: Date;
+  /** Personal Independent Organizer workspace: rewards are unavailable. */
+  independent?: true;
 }
 
 const PUBLIC_USER_COLUMNS = 'id, email, role, name, is_guest, tedix_user_id, created_at';
@@ -35,6 +37,7 @@ const mapRow = (row: any, members: string[] = []): IOrganization => ({
   owner: row.owner_id,
   members,
   createdAt: row.created_at,
+  ...(row.independent === true ? { independent: true as const } : {}),
 });
 
 const memberIds = async (organizationId: string): Promise<string[]> => {

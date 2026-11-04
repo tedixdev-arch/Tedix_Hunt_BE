@@ -25,6 +25,10 @@ import { meRouter } from './routes/me.js';
 import { creatorTemplatesRouter } from './routes/creatorTemplates.js';
 import { adminTemplateEligibilityRouter } from './routes/adminTemplateEligibility.js';
 import { adminTemplateReviewsRouter } from './routes/adminTemplateReviews.js';
+import { huntOperationsRouter } from './routes/huntOperations.js';
+import { adminOperationsRouter, customHuntRequestsRouter } from './routes/adminOperations.js';
+import { independentOrganizerRouter } from './routes/independentOrganizer.js';
+import { auditTrail } from './middleware/auditTrail.js';
 
 import { readAbuseProtectionConfig, type AbuseProtectionConfig } from './config/abuseProtection.js';
 import { createAbuseProtection } from './middleware/abuseProtection.js';
@@ -49,6 +53,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use(abuse.middleware);
   app.use(express.json());
   app.use(abuse.accountMiddleware);
+  app.use(auditTrail);
 
   app.get('/', (_request, response) => {
     response.status(200).json({
@@ -68,9 +73,11 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/geography/locality-proposals', localityProposalsRouter);
   app.use('/api/admin/locality-proposals', adminLocalityProposalsRouter);
   app.use('/api/geography', geographyRouter);
+  app.use('/api/auth/independent-organizer', independentOrganizerRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
   app.use('/api/admin/users', adminUsersRouter);
+  app.use('/api/admin', adminOperationsRouter);
   app.use('/api/admin/templates/review', adminTemplateReviewsRouter);
   app.use('/api/admin/templates', adminTemplateEligibilityRouter);
   app.use('/api/organizer-applications', organizerApplicationsRouter);
@@ -78,6 +85,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/creator/templates', creatorTemplatesRouter);
   app.use('/api/creator/universal-library', creatorUniversalLibraryRouter);
   app.use('/api/organizations', organizationsRouter);
+  app.use('/api/custom-hunt-requests', customHuntRequestsRouter);
   app.use('/api/hunt-templates', huntTemplatesRouter);
   app.use('/api/hunt-options', huntOptionsRouter);
   app.use('/api/hunt-access', huntAccessRouter);
@@ -86,6 +94,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/organizer/geography', organizerGeographyRouter);
   app.use('/api/organizer/local-templates', organizerLocalTemplatesRouter);
   app.use('/api/hunts/:id/local-template', huntLocalTemplateRouter);
+  app.use('/api/hunts/:id', huntOperationsRouter);
   app.use('/api/hunts', huntsRouter);
   app.use('/api/hunts/:id', participantAccessRouter);
 

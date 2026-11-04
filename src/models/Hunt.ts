@@ -14,6 +14,8 @@ export type HuntStatus = 'draft' | 'published' | 'active' | 'paused' | 'cancelle
 export interface IHunt {
   id: string;
   organizationId: string;
+  /** Present on findById: the owning organization is an Independent Organizer workspace. */
+  organizationIndependent?: boolean;
   createdByUserId: string;
   name: string;
   status: HuntStatus;
@@ -116,6 +118,7 @@ export const mapHuntRow = (row: any): IHunt => ({
   invitationEnabled: row.invitation_enabled ?? true,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  ...(typeof row.organization_independent === 'boolean' ? { organizationIndependent: row.organization_independent } : {}),
 });
 
 export const Hunt = {
@@ -130,7 +133,9 @@ export const Hunt = {
   },
 
   async findById(id: string): Promise<IHunt | null> {
-    const { rows } = await pool.query('SELECT * FROM hunts WHERE id = $1 LIMIT 1', [id]);
+    // to_jsonb keeps this read valid on schemas that predate organizations.independent (migration 040).
+    const { rows } = await pool.query(`SELECT h.*, (SELECT (to_jsonb(o)->>'independent')::boolean FROM organizations o
+      WHERE o.id = h.organization_id) AS organization_independent FROM hunts h WHERE h.id = $1 LIMIT 1`, [id]);
     return rows[0] ? mapHuntRow(rows[0]) : null;
   },
 

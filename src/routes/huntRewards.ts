@@ -28,6 +28,11 @@ const authorize = async (req: AuthRequest, res: Response, write: boolean) => {
     res.status(409).json({ error: 'invalid_hunt_state' });
     return null;
   }
+  // Independent Organizer workspaces cannot configure rewards.
+  if (write && hunt.organizationIndependent === true) {
+    res.status(403).json({ error: 'rewards_unavailable_independent' });
+    return null;
+  }
   return hunt;
 };
 

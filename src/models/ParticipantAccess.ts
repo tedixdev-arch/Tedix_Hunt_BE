@@ -1,26 +1,30 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../lib/postgres.js';
-import { fail, record, snapshotCheckpoints, type SnapshotCheckpoint } from '../domain/participantAccess.js';
+import { distanceMeters, evaluateProximity, fail, record, snapshotCheckpoints, type GpsObservation, type SnapshotCheckpoint } from '../domain/participantAccess.js';
+import { GAMEPLAY_POLICY_REVISION, pilotProximityPolicy } from '../domain/gameplay.js';
 
 export interface ParticipantCheckpointStatus {
   checkpointId: string;
   kind: 'regular' | 'finish';
   accessState: 'not_yet_accessible' | 'eligible_for_proximity' | 'proximity_verified';
-  gameplayCompleted: false;
-  mayAccessGameplay: false;
+  gameplayCompleted: boolean;
+  mayAccessGameplay: boolean;
   verifiedAt: Date | null;
 }
 export interface ParticipantHuntContext {
   huntId: string; participantId: string; joinedAt: Date; huntStatus: string; templateVersion: number;
-  enrollmentPolicy: 'organizer_invitation'; proximityPolicy: 'unresolved';
+  enrollmentPolicy: 'organizer_invitation'; proximityPolicy: typeof GAMEPLAY_POLICY_REVISION;
   checkpoints: ParticipantCheckpointStatus[];
+}
+export interface ParticipantExecution {
+  hunt: Record<string, any>; participant: Record<string, any>; execution: Record<string, any>;
 }
 
 /** Every access path locks Hunt first. Lifecycle writers already update/lock that row.
  * Future completion/suspension writers must use the same order and recheck grants.
  */
 async function withContext<T>(huntId: string, userId: string, code: string | undefined,
-  action: (context: ParticipantHuntContext, points: Map<string, SnapshotCheckpoint>, client: PoolClient) => Promise<T>): Promise<T> {
+  action: (context: ParticipantHuntContext, points: Map<string, SnapshotCheckpoint>, client: PoolClient, scope: ParticipantExecution) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -66,17 +70,20 @@ async function withContext<T>(huntId: string, userId: string, code: string | und
     await client.query(`INSERT INTO participant_checkpoint_access(hunt_id,participant_id,checkpoint_id,snapshot_digest,state)
       SELECT hunt_id,$2,id,snapshot_digest,CASE WHEN ordinal=1 THEN 'eligible_for_proximity' ELSE 'not_yet_accessible' END
       FROM hunt_checkpoint_identities WHERE hunt_id=$1 ON CONFLICT(participant_id,checkpoint_id) DO NOTHING`, [huntId, participant.id]);
-    const { rows: states } = await client.query(`SELECT c.id,c.kind,a.state,a.verified_at FROM hunt_checkpoint_identities c
+    const { rows: states } = await client.query(`SELECT c.id,c.kind,a.state,a.verified_at,p.completed_at FROM hunt_checkpoint_identities c
       JOIN participant_checkpoint_access a ON a.hunt_id=c.hunt_id AND a.checkpoint_id=c.id AND a.snapshot_digest=c.snapshot_digest
+      LEFT JOIN participant_checkpoint_progress p ON p.participant_id=a.participant_id AND p.checkpoint_id=c.id
       WHERE c.hunt_id=$1 AND a.participant_id=$2 ORDER BY c.ordinal`, [huntId, participant.id]);
     const context: ParticipantHuntContext = {
       huntId, participantId: participant.id, joinedAt: participant.joined_at, huntStatus: hunt.status, templateVersion: hunt.template_version,
-      enrollmentPolicy: 'organizer_invitation', proximityPolicy: 'unresolved',
+      enrollmentPolicy: 'organizer_invitation', proximityPolicy: GAMEPLAY_POLICY_REVISION,
       checkpoints: states.map(s => ({ checkpointId: s.id, kind: s.kind, accessState: s.state,
-        gameplayCompleted: false, mayAccessGameplay: false, verifiedAt: s.verified_at })),
+        gameplayCompleted: s.completed_at !== null,
+        mayAccessGameplay: hunt.status === 'active' && s.state === 'proximity_verified' && s.completed_at === null,
+        verifiedAt: s.verified_at })),
     };
     const points = new Map(checkpoints.map((c, i) => [c.id, definitions[i]]));
-    const result = await action(context, points, client);
+    const result = await action(context, points, client, { hunt, participant, execution });
     await client.query('COMMIT');
     return result;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
@@ -89,14 +96,27 @@ export const ParticipantAccess = {
     const checkpoint = context.checkpoints.find(c => c.checkpointId === checkpointId);
     return checkpoint ?? fail(404, 'not_found');
   }),
-  verify: (huntId: string, userId: string, checkpointId: string) => withContext(huntId, userId, undefined, async (context, points) => {
-    const checkpoint = context.checkpoints.find(c => c.checkpointId === checkpointId);
-    if (!checkpoint) return fail(404, 'not_found');
-    if (context.huntStatus !== 'active') return fail(409, 'invalid_hunt_state');
-    if (checkpoint.accessState === 'not_yet_accessible') return fail(409, 'checkpoint_not_eligible');
-    if (!points.get(checkpointId)?.point) return fail(422, 'checkpoint_geography_unavailable');
-    // D1 age/accuracy/uncertainty and D6 suspension/grant validity are unresolved.
-    // No environment variable or request field can approve policy or persist a grant.
-    return fail(422, 'proximity_policy_unresolved');
-  }),
+  /** Pilot D1 grant: fresh, accurate observation inside the pinned effective radius. Grants persist until completion. */
+  verify: (huntId: string, userId: string, checkpointId: string, observation: GpsObservation, now = Date.now()) =>
+    withContext(huntId, userId, undefined, async (context, points, client, scope) => {
+      const checkpoint = context.checkpoints.find(c => c.checkpointId === checkpointId);
+      if (!checkpoint) return fail(404, 'not_found');
+      if (context.huntStatus !== 'active') return fail(409, 'invalid_hunt_state');
+      if (checkpoint.accessState === 'not_yet_accessible') return fail(409, 'checkpoint_not_eligible');
+      if (checkpoint.accessState === 'proximity_verified') return checkpoint;
+      const point = points.get(checkpointId)?.point;
+      if (!point) return fail(422, 'checkpoint_geography_unavailable');
+      const outcome = evaluateProximity(observation, point, pilotProximityPolicy(), now);
+      if (outcome !== 'verified') return fail(422, `proximity_${outcome}`);
+      const accuracy = observation.accuracyMeters;
+      await client.query(`UPDATE participant_checkpoint_access SET state='proximity_verified', verified_at=now(), observed_at=$3,
+        accuracy_meters=$4, distance_meters=$5, policy_revision=$6 WHERE participant_id=$1 AND checkpoint_id=$2 AND state='eligible_for_proximity'`,
+        [scope.participant.id, checkpointId, observation.observedAt, accuracy, distanceMeters(observation, point), GAMEPLAY_POLICY_REVISION]);
+      await client.query('UPDATE hunt_participants SET last_activity_at=now(), started_at=COALESCE(started_at, now()) WHERE id=$1', [scope.participant.id]);
+      return { ...checkpoint, accessState: 'proximity_verified' as const, verifiedAt: new Date(), mayAccessGameplay: true };
+    }),
+  /** Gameplay executor entry point. Locks Hunt then membership in the shared order. */
+  withExecution: <T>(huntId: string, userId: string,
+    action: (context: ParticipantHuntContext, points: Map<string, SnapshotCheckpoint>, client: PoolClient, scope: ParticipantExecution) => Promise<T>) =>
+    withContext(huntId, userId, undefined, action),
 };

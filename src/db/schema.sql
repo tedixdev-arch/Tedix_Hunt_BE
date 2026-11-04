@@ -926,3 +926,124 @@ ALTER TABLE geographic_imports
   (completed_at IS NULL AND row_count IS NULL) OR
   (completed_at IS NOT NULL AND row_count IS NOT NULL AND row_count > 0)
  );
+
+-- Migration 038: pilot Solo participant gameplay state.
+ALTER TABLE hunt_participants
+  ADD COLUMN started_at TIMESTAMPTZ,
+  ADD COLUMN finished_at TIMESTAMPTZ,
+  ADD COLUMN last_activity_at TIMESTAMPTZ;
+ALTER TABLE participant_checkpoint_access ADD COLUMN granted_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE TABLE participant_checkpoint_progress (
+  hunt_id UUID NOT NULL,
+  participant_id UUID NOT NULL REFERENCES hunt_participants(id) ON DELETE CASCADE,
+  checkpoint_id UUID NOT NULL REFERENCES hunt_checkpoint_identities(id) ON DELETE CASCADE,
+  personal_attempts INTEGER NOT NULL DEFAULT 0 CHECK (personal_attempts >= 0),
+  team_attempts INTEGER NOT NULL DEFAULT 0 CHECK (team_attempts >= 0),
+  personal_solved_at TIMESTAMPTZ,
+  team_solved_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (participant_id, checkpoint_id),
+  FOREIGN KEY (hunt_id, participant_id) REFERENCES hunt_participants(hunt_id, id) ON DELETE CASCADE
+);
+CREATE TABLE participant_challenge_attempts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  hunt_id UUID NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES hunt_participants(id) ON DELETE CASCADE,
+  checkpoint_id UUID NOT NULL REFERENCES hunt_checkpoint_identities(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL CHECK (stage IN ('personal', 'team')),
+  correct BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX participant_challenge_attempts_participant_idx ON participant_challenge_attempts(participant_id, created_at);
+CREATE TABLE participant_score_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  hunt_id UUID NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES hunt_participants(id) ON DELETE CASCADE,
+  checkpoint_id UUID REFERENCES hunt_checkpoint_identities(id) ON DELETE CASCADE,
+  category TEXT NOT NULL CHECK (category IN ('starting_score', 'failed_attempt', 'first_attempt_bonus',
+    'personal_solved', 'team_solved', 'finish_puzzle', 'mission_completion')),
+  points INTEGER NOT NULL,
+  event_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (participant_id, event_key)
+);
+CREATE INDEX participant_score_events_hunt_idx ON participant_score_events(hunt_id, participant_id);
+CREATE TABLE hunt_help_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  hunt_id UUID NOT NULL REFERENCES hunts(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES hunt_participants(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('help', 'emergency')),
+  message TEXT NOT NULL DEFAULT '' CHECK (length(message) <= 500),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  resolved_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  CHECK ((status = 'open' AND resolved_at IS NULL) OR (status = 'resolved' AND resolved_at IS NOT NULL))
+);
+CREATE INDEX hunt_help_requests_hunt_idx ON hunt_help_requests(hunt_id, status, created_at);
+
+-- Migration 039: custom Hunt requests.
+CREATE TABLE custom_hunt_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  submitted_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  contact_name TEXT NOT NULL CHECK (length(contact_name) BETWEEN 1 AND 120),
+  contact_email TEXT NOT NULL CHECK (length(contact_email) BETWEEN 3 AND 254),
+  organization_name TEXT CHECK (organization_name IS NULL OR length(organization_name) <= 160),
+  city TEXT CHECK (city IS NULL OR length(city) <= 120),
+  preferred_date DATE,
+  participant_count INTEGER CHECK (participant_count IS NULL OR participant_count BETWEEN 1 AND 100000),
+  details TEXT NOT NULL CHECK (length(details) BETWEEN 1 AND 4000),
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_review', 'closed')),
+  admin_note TEXT CHECK (admin_note IS NULL OR length(admin_note) <= 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX custom_hunt_requests_status_idx ON custom_hunt_requests(status, created_at DESC);
+
+-- Migration 040: Independent Organizer workspaces and email confirmation codes.
+ALTER TABLE organizations ADD COLUMN independent BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE email_verification_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN ('independent_organizer')),
+  code_hash TEXT NOT NULL CHECK (code_hash ~ '^[0-9a-f]{64}$'),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX email_verification_codes_lookup_idx ON email_verification_codes(email, purpose, created_at DESC);
+
+-- Migration 041: Platform Settings and privileged-action Audit Log.
+CREATE TABLE platform_settings (
+  key TEXT PRIMARY KEY CHECK (key ~ '^[a-z][a-zA-Z]*\.[a-z][a-zA-Z]*$'),
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE audit_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_label TEXT,
+  actor_roles TEXT[] NOT NULL DEFAULT '{}',
+  action TEXT NOT NULL CHECK (action ~ '^[a-z_]+\.[a-z_]+$'),
+  category TEXT NOT NULL CHECK (category IN ('users', 'applications', 'templates', 'hunts', 'safety', 'settings', 'requests', 'account')),
+  target_type TEXT,
+  target_id TEXT,
+  summary TEXT NOT NULL CHECK (length(summary) BETWEEN 1 AND 500),
+  details JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX audit_events_occurred_idx ON audit_events(occurred_at DESC, id DESC);
+CREATE INDEX audit_events_category_idx ON audit_events(category, occurred_at DESC);
+CREATE INDEX audit_events_actor_idx ON audit_events(actor_user_id, occurred_at DESC);
+CREATE FUNCTION protect_audit_events() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+  -- Account deletion may only null the actor reference; history itself is immutable.
+  IF TG_OP = 'UPDATE' AND ROW(NEW.id, NEW.occurred_at, NEW.actor_label, NEW.actor_roles, NEW.action, NEW.category,
+    NEW.target_type, NEW.target_id, NEW.summary, NEW.details) IS NOT DISTINCT FROM ROW(OLD.id, OLD.occurred_at,
+    OLD.actor_label, OLD.actor_roles, OLD.action, OLD.category, OLD.target_type, OLD.target_id, OLD.summary, OLD.details)
+    AND NEW.actor_user_id IS NULL THEN RETURN NEW; END IF;
+  RAISE EXCEPTION 'Audit events are append-only' USING ERRCODE = '23514';
+END $$;
+CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events
+  FOR EACH ROW EXECUTE FUNCTION protect_audit_events();

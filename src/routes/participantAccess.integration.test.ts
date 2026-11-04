@@ -181,7 +181,8 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     await verify('1').expect(404);
     const before = await state();
     for (const cp of points.slice(1)) await verify(cp).expect(409, { error: 'checkpoint_not_eligible' });
-    await verify(points[0]).expect(422, { error: 'proximity_policy_unresolved' });
+    // Pilot policy (pilot-solo-2026-11): a fresh reading outside the effective radius never grants.
+    await verify(points[0], { ...obs(), latitude: 46.01 }).expect(422, { error: 'proximity_outside_radius' });
     expect(await state()).toEqual(before);
     await request(app).get(`/api/hunts/${hunt}/checkpoints/${points.at(-1)}/access`).set('Authorization', auth()).expect(200);
     await request(app).post(`/api/hunts/${hunt}/checkpoints/${points[0]}/challenges/personal/attempts`).set('Authorization', auth()).send({ response: {} }).expect(404);
@@ -196,8 +197,8 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     ];
     for (const body of invalid) await verify(points[0], body).expect(400);
     // Syntactically valid stale/future/inaccurate observations cannot grant access either.
-    for (const body of [{ ...obs(), observedAt: '2020-01-01T00:00:00.000Z' }, { ...obs(), observedAt: '2099-01-01T00:00:00.000Z' }, { ...obs(), accuracyMeters: 9999 }])
-      await verify(points[0], body).expect(422, { error: 'proximity_policy_unresolved' });
+    for (const [body, error] of [[{ ...obs(), observedAt: '2020-01-01T00:00:00.000Z' }, 'proximity_stale'], [{ ...obs(), observedAt: '2099-01-01T00:00:00.000Z' }, 'proximity_stale'], [{ ...obs(), accuracyMeters: 9999 }, 'proximity_inaccurate']] as const)
+      await verify(points[0], body).expect(422, { error });
     expect((await state()).every(s => s.state !== 'proximity_verified' && s.verified_at === null)).toBe(true);
   });
   it('rechecks lifecycle on rejoin, context and proximity without granting on pause or terminal states', async () => {
@@ -234,11 +235,12 @@ suite('Task 5A authenticated Express and disposable PostgreSQL access foundation
     const freshApp = (await import('../app.js')).createApp();
     try {
       const r = await request(freshApp).get(`/api/hunts/${hunt}/participants/me`).set('Authorization', auth()).expect(200);
-      expect(r.body.checkpoints[0]).toMatchObject({ accessState: 'proximity_verified', gameplayCompleted: false, mayAccessGameplay: false });
+      expect(r.body.checkpoints[0]).toMatchObject({ accessState: 'proximity_verified', gameplayCompleted: false, mayAccessGameplay: true });
       expect(r.body.checkpoints[0].verifiedAt).toEqual(expect.any(String));
       expect(r.body.checkpoints[1].accessState).toBe('not_yet_accessible');
       await verify(points[1]).expect(409);
-      await verify(points[0]).expect(422);
+      // An existing grant is idempotent; it is never re-evaluated into a second grant.
+      await verify(points[0]).expect(200);
     } finally { freshApp.locals.stopAbuseProtection(); }
   });
   it('retains Organizer and Admin authorization boundaries', async () => {

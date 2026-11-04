@@ -60,12 +60,9 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
     const field = hunt.format !== 'team' && hunt.format !== 'solo' ? 'format' : !validParticipationConfiguration(hunt.format, hunt.teamSize) ? 'teamSize' : 'accessMode';
     add({ section: 'options', field, message: 'Save Participants & access' });
   }
-  // Keep the historical Team/four path. Saved mode/size is not a gameplay capability.
-  // No approved activity/collective binding permits dropping required Personal or Team work.
-  if (hunt.format === 'solo') {
-    add({ section: 'template', field: 'templateSnapshot',
-      message: 'Solo gameplay compatibility is not yet supported; required Team content cannot be discarded (D5)' });
-  } else if (hunt.format === 'team' && hunt.teamSize !== null && hunt.teamSize !== 4) {
+  // Pilot Solo gameplay plays every Personal and Team stage for each participant, so Solo
+  // discards no required content. Variable Team sizes still need D2/D5 membership approval.
+  if (hunt.format === 'team' && hunt.teamSize !== null && hunt.teamSize !== 4) {
     add({ section: 'options', field: 'teamSize',
       message: 'Variable Team-size gameplay readiness requires approved membership and content compatibility (D2/D5)' });
   }

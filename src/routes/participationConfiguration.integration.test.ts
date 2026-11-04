@@ -88,7 +88,8 @@ type Actor = { id: string; auth: string };
       country:'Romania', city:'Cluj', startDate:'2027-01-01', startTime:'10:00', timezone:'Europe/Bucharest',
       durationMinutes:60, capacity:24, contactName:'Contact', accessMode:'invitation_only', difficulty:'easy', checkpointOrder:'recommended' }).expect(200);
     const snapshot = (await get(id)).body.templateSnapshot;
-    for (const config of [{format:'solo',teamSize:null}, {format:'team',teamSize:3}]) {
+    // Pilot Solo gameplay (pilot-solo-2026-11) plays every stage for each participant, so only variable Team sizes stay gated.
+    for (const config of [{format:'team',teamSize:3}]) {
       await patch(id, config).expect(200);
       expect((await get(id)).body.templateSnapshot).toEqual(snapshot);
       const denied = await request(app).post(`/api/hunts/${id}/publish`).set('Authorization',owner.auth).expect(422);

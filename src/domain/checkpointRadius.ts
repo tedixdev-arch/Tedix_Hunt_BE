@@ -1,6 +1,10 @@
 import { record } from './participantAccess.js';
+import { setting } from './platformSettings.js';
 
+/** Historical default for snapshots saved before radii were written. Never changes. */
 export const DEFAULT_RADIUS_METERS = 25;
+/** Applied at the Template write boundary only (Platform Settings: checkpoints.defaultRadiusMeters). */
+const writeDefaultRadius = () => setting<number>('checkpoints.defaultRadiusMeters');
 // Retain the existing compatibility envelope. Proposed 10–100 m awaits Owner approval.
 export const validRadius = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 5 && value <= 500;
@@ -16,11 +20,11 @@ export function withRadiusDefaults<T>(content: T, previous?: unknown): T {
     const matches = Array.isArray(prior.checkpointPositions)
       ? prior.checkpointPositions.filter((p: any) => p.checkpointNumber === point.checkpointNumber) : [];
     point.radiusMeters = matches.length === 1 && validRadius(matches[0].radiusMeters)
-      ? matches[0].radiusMeters : DEFAULT_RADIUS_METERS;
+      ? matches[0].radiusMeters : writeDefaultRadius();
   }
   if (record(config.finishPoint) && config.finishPoint.radiusMeters === undefined) {
     config.finishPoint.radiusMeters = record(prior.finishPoint) && validRadius(prior.finishPoint.radiusMeters)
-      ? prior.finishPoint.radiusMeters : DEFAULT_RADIUS_METERS;
+      ? prior.finishPoint.radiusMeters : writeDefaultRadius();
   }
   return copy;
 }

@@ -4,8 +4,17 @@ import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { normalizeHuntAccessCode } from '../domain/huntAccess.js';
 import { ParticipantAccessError, record, validObservation } from '../domain/participantAccess.js';
 import { ParticipantAccess } from '../models/ParticipantAccess.js';
+import { Gameplay } from '../models/Gameplay.js';
+import { validAnswerBody } from '../domain/gameplay.js';
+import { setting } from '../domain/platformSettings.js';
 
 const admissionBuckets = new TokenBuckets(10000);
+const gameplayBuckets = new TokenBuckets(10000);
+const limited = (key: string, capacity: number, res: express.Response) => {
+  const retry = gameplayBuckets.consume(key, { capacity, windowMs: 60000 });
+  if (retry) { res.set('Retry-After', String(retry)); res.status(429).json({ error: 'rate_limited' }); }
+  return !!retry;
+};
 const router = express.Router({ mergeParams: true });
 router.use(requireAuth);
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -31,8 +40,8 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *         checkpointId: { type: string, format: uuid }
  *         kind: { type: string, enum: [regular, finish] }
  *         accessState: { type: string, enum: [not_yet_accessible, eligible_for_proximity, proximity_verified] }
- *         gameplayCompleted: { type: boolean, enum: [false] }
- *         mayAccessGameplay: { type: boolean, enum: [false] }
+ *         gameplayCompleted: { type: boolean }
+ *         mayAccessGameplay: { type: boolean }
  *         verifiedAt: { type: string, format: date-time, nullable: true }
  *     ParticipantHuntAccessContext:
  *       type: object
@@ -45,7 +54,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *         huntStatus: { type: string, enum: [published, active, paused] }
  *         templateVersion: { type: integer, minimum: 1 }
  *         enrollmentPolicy: { type: string, enum: [organizer_invitation] }
- *         proximityPolicy: { type: string, enum: [unresolved] }
+ *         proximityPolicy: { type: string, enum: [pilot-solo-2026-11] }
  *         checkpoints:
  *           type: array
  *           items: { $ref: '#/components/schemas/ParticipantCheckpointAccessStatus' }
@@ -77,7 +86,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *     tags: [Participant access]
  *     security: [{ bearerAuth: [] }]
  *     summary: Retrieve durable caller-scoped Hunt access context
- *     description: Returns participantId, joinedAt, huntStatus, templateVersion, policy status and checkpoint statuses. No snapshot or challenge definitions. First checkpoint is eligible for proximity; later checkpoints stay locked. No gameplay completion or GPS grants are enabled.
+ *     description: Returns participantId, joinedAt, huntStatus, templateVersion, policy status and checkpoint statuses. No snapshot or challenge definitions. The first incomplete checkpoint is eligible for proximity; later checkpoints unlock as earlier ones are completed.
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
  *     responses:
  *       200: { description: Caller-scoped Hunt context, content: { application/json: { schema: { $ref: '#/components/schemas/ParticipantHuntAccessContext' } } } }
@@ -89,7 +98,7 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *     tags: [Participant access]
  *     security: [{ bearerAuth: [] }]
  *     summary: Retrieve checkpoint access status including playable FinishPoint
- *     description: Server-generated snapshot-scoped checkpointId. Returns accessState (not_yet_accessible, eligible_for_proximity or proximity_verified), verifiedAt, kind, gameplayCompleted=false and mayAccessGameplay=false. Reading status does not grant access.
+ *     description: Server-generated snapshot-scoped checkpointId. Returns accessState (not_yet_accessible, eligible_for_proximity or proximity_verified), verifiedAt, kind, gameplayCompleted and mayAccessGameplay. Reading status does not grant access.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
  *       - { in: path, name: checkpointId, required: true, schema: { type: string, format: uuid } }
@@ -102,8 +111,8 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *   post:
  *     tags: [Participant access]
  *     security: [{ bearerAuth: [] }]
- *     summary: Validate a proximity request (grants disabled pending policy approval)
- *     description: Strict numeric coordinates, nonnegative accuracyMeters and canonical UTC millisecond observedAt. Checks membership, lifecycle and checkpoint eligibility. Missing snapshot GPS is 422 checkpoint_geography_unavailable; otherwise 422 proximity_policy_unresolved. No successful GPS grant exists yet. Client GPS is spoofable and is not proof of presence.
+ *     summary: Verify arrival at the current checkpoint
+ *     description: Strict numeric coordinates, nonnegative accuracyMeters and canonical UTC millisecond observedAt. Checks membership, lifecycle and checkpoint eligibility. Pilot policy, see docs/Participant_Gameplay_Pilot.md. The observation must be at most GAMEPLAY_PROXIMITY_MAX_AGE_MS old (default 30 s), accuracy at most GAMEPLAY_PROXIMITY_MAX_ACCURACY_METERS (default 20 m), inside the pinned effective radius. Failures are 422 proximity_stale, proximity_inaccurate, proximity_outside_radius or checkpoint_geography_unavailable. Client GPS is spoofable and is not proof of presence; Organizers can confirm arrival instead.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
  *       - { in: path, name: checkpointId, required: true, schema: { type: string, format: uuid } }
@@ -125,7 +134,8 @@ const handle = (handler: RequestHandler): RequestHandler => async (req, res, nex
  *       401: { description: Authentication required }
  *       404: { description: Inaccessible Hunt or checkpoint }
  *       409: { description: Hunt inactive, future checkpoint, or snapshot conflict }
- *       422: { description: Geography unavailable or proximity policy unresolved; no state changes }
+ *       200: { description: Arrival verified; checkpoint gameplay unlocked }
+ *       422: { description: Geography unavailable or observation rejected; no state changes }
  */
 router.post('/participants/enroll', handle(async (req: AuthRequest, res) => {
   const retry = admissionBuckets.consume(req.user!.id, { capacity: 60, windowMs: 60000 });
@@ -148,6 +158,89 @@ router.get('/checkpoints/:checkpointId/access', handle(async (req: AuthRequest, 
 router.post('/checkpoints/:checkpointId/proximity', handle(async (req: AuthRequest, res) => {
   if (!uuid.test(String(req.params.checkpointId))) { res.status(404).json({ error: 'not_found' }); return; }
   if (!validObservation(req.body)) { res.status(400).json({ error: 'invalid_input' }); return; }
-  res.json(await ParticipantAccess.verify(String(req.params.id), req.user!.id, String(req.params.checkpointId)));
+  if (limited(`proximity:${req.user!.id}`, 60, res)) return;
+  res.json(await ParticipantAccess.verify(String(req.params.id), req.user!.id, String(req.params.checkpointId), req.body));
+}));
+
+/**
+ * @openapi
+ * /api/hunts/{id}/participants/me/play:
+ *   get:
+ *     tags: [Participant gameplay]
+ *     security: [{ bearerAuth: [] }]
+ *     summary: Current pilot Solo gameplay state
+ *     description: Returns mission, score, checkpoint progress and the current stage (navigate, personal, team, waiting or finished). Challenge content is delivered only after arrival is verified and never includes answers, hints or solutions.
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     responses:
+ *       200: { description: Caller-scoped gameplay state }
+ *       401: { description: Authentication required }
+ *       404: { description: No Hunt membership }
+ *       409: { description: Ineligible lifecycle or snapshot conflict }
+ * /api/hunts/{id}/checkpoints/{checkpointId}/answer:
+ *   post:
+ *     tags: [Participant gameplay]
+ *     security: [{ bearerAuth: [] }]
+ *     summary: Submit a personal or team-stage answer for the current checkpoint
+ *     description: The server checks the answer against the pinned Hunt snapshot. Wrong answers return correct=false without revealing expected values.
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *       - { in: path, name: checkpointId, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - { type: object, required: [stage, answers], properties: { stage: { type: string, enum: [personal] }, answers: { type: object, additionalProperties: { type: string, maxLength: 200 } } } }
+ *               - { type: object, required: [stage, answer], properties: { stage: { type: string, enum: [team] }, answer: { type: string, maxLength: 200 } } }
+ *     responses:
+ *       200: { description: Result and refreshed gameplay state }
+ *       400: { description: Invalid body }
+ *       409: { description: Hunt not active, checkpoint not current or verified, or stage already solved }
+ *       422: { description: Challenge content is not supported by pilot gameplay }
+ *       429: { description: Too many attempts }
+ * /api/hunts/{id}/participants/me/help:
+ *   post:
+ *     tags: [Participant gameplay]
+ *     security: [{ bearerAuth: [] }]
+ *     summary: Ask the Organizer for help or report an emergency
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [kind], properties: { kind: { type: string, enum: [help, emergency] }, message: { type: string, maxLength: 500 } } }
+ *     responses:
+ *       201: { description: Help request recorded }
+ * /api/hunts/{id}/leaderboard:
+ *   get:
+ *     tags: [Participant gameplay]
+ *     security: [{ bearerAuth: [] }]
+ *     summary: Hunt leaderboard for members, Organizers and supervisors
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+ *     responses:
+ *       200: { description: Ranked entries with display names only }
+ *       404: { description: Not a member or staff of this Hunt }
+ */
+router.get('/participants/me/play', handle(async (req: AuthRequest, res) => {
+  res.json(await Gameplay.state(String(req.params.id), req.user!.id));
+}));
+router.post('/checkpoints/:checkpointId/answer', handle(async (req: AuthRequest, res) => {
+  if (!uuid.test(String(req.params.checkpointId))) { res.status(404).json({ error: 'not_found' }); return; }
+  if (!validAnswerBody(req.body)) { res.status(400).json({ error: 'invalid_input' }); return; }
+  if (limited(`answer:${req.user!.id}`, setting<number>('gameplay.answerAttemptsPerMinute'), res)) return;
+  res.json(await Gameplay.answer(String(req.params.id), req.user!.id, String(req.params.checkpointId), req.body));
+}));
+router.post('/participants/me/help', handle(async (req: AuthRequest, res) => {
+  const body = req.body;
+  if (!record(body) || !['help', 'emergency'].includes(body.kind) || Object.keys(body).some(k => k !== 'kind' && k !== 'message')
+    || (body.message !== undefined && (typeof body.message !== 'string' || body.message.length > 500))) {
+    res.status(400).json({ error: 'invalid_input' }); return;
+  }
+  if (limited(`help:${req.user!.id}`, 10, res)) return;
+  res.status(201).json(await Gameplay.requestHelp(String(req.params.id), req.user!.id, body.kind, (body.message ?? '').trim()));
+}));
+router.get('/leaderboard', handle(async (req: AuthRequest, res) => {
+  res.json(await Gameplay.leaderboard(String(req.params.id), req.user!.id));
 }));
 export const participantAccessRouter = router;
