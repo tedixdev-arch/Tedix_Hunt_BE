@@ -1,3 +1,5 @@
+import { ContentReview } from '../models/ContentReview.js';
+import { emptyContentBody } from './contentReview.js';
 import { Router, type RequestHandler } from 'express';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import { ContentError, uuid } from '../domain/contentLibrary.js';
@@ -14,7 +16,8 @@ router.param('id',(_req,res,next,id)=>uuid(id)?next():res.status(400).json({erro
 router.get('/',handle(async(req:AuthRequest,res)=>{
  const limit=req.query.limit===undefined?50:Number(req.query.limit),after=req.query.after;
  if (!Number.isInteger(limit)||limit<1||limit>100||(req.query.limit!==undefined&&typeof req.query.limit!=='string')||(after!==undefined&&!uuid(after))) return res.status(400).json({error:'invalid_pagination'});
- return res.json(await ContentLibrary.list(req.user!.id,limit,after as string|undefined));
+ if(req.query.view!==undefined && req.query.view!=='all') throw new ContentError('invalid_view');
+ return res.json(await ContentLibrary.list(req.user!.id,limit,after as string|undefined,req.query.view==='all'));
 }));
 router.post('/',handle(async(req:AuthRequest,res)=>{
  if(req.body && Object.hasOwn(req.body,'baseRevisionId')) throw new ContentError('invalid_content');
@@ -24,6 +27,11 @@ router.get('/:id',handle(async(req:AuthRequest,res)=>res.json(await ContentLibra
 router.get('/:id/revisions/:revisionId',handle(async(req:AuthRequest,res)=>{
  if(!uuid(req.params.revisionId)) throw new ContentError('invalid_revision_id');
  return res.json(await ContentLibrary.get(req.user!.id,req.params.id as string,req.params.revisionId));
+}));
+router.post('/:id/revisions/:revisionId/submit',handle(async(req:AuthRequest,res)=>{
+ if(!uuid(req.params.revisionId)) throw new ContentError('invalid_revision_id');
+ emptyContentBody(req.body);
+ return res.json(await ContentReview.transition(req.user!.id,req.params.id as string,req.params.revisionId,'submitted'));
 }));
 router.put('/:id',handle(async(req:AuthRequest,res)=>{
  if(!uuid(req.body?.baseRevisionId)) throw new ContentError('invalid_base_revision_id');
@@ -142,6 +150,7 @@ export const creatorContentRouter=router;
  *       - exercise
  *       - createdAt
  *       - updatedAt
+ *       - reviewEvents
  *       - category
  *       - curriculum
  *       - geography
@@ -172,6 +181,11 @@ export const creatorContentRouter=router;
  *           - approved
  *           - changes_requested
  *           - archived
+ *         reviewEvents:
+ *           type: array
+ *           description: Ordered immutable events for this exact revision
+ *           items:
+ *             $ref: '#/components/schemas/LibraryReviewEvent'
  *         exercise:
  *           $ref: '#/components/schemas/LibraryExercise'
  *         category:
@@ -247,7 +261,7 @@ export const creatorContentRouter=router;
  *     get:
  *       tags:
  *       - Content Library
- *       summary: List own draft heads
+ *       summary: List own draft heads; view=all includes submitted and reviewed current heads
  *       security:
  *       - bearerAuth: []
  *       responses:
@@ -303,6 +317,12 @@ export const creatorContentRouter=router;
  *               schema:
  *                 $ref: '#/components/schemas/Error'
  *       parameters:
+ *       - in: query
+ *         name: view
+ *         description: Omit for compatible draft-only list; all includes every own current head. Retrieve old feedback by exact revision route.
+ *         schema:
+ *           type: string
+ *           enum: [all]
  *       - in: query
  *         name: limit
  *         schema:

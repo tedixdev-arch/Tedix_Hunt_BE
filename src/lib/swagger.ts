@@ -3,6 +3,16 @@ import { checkpointGameplayTypes } from '../domain/checkpointGameplay.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { environment } from '../config/environment.js';
 
+// The canonical validator accepts an empty required list; OpenAPI 3.0 does not.
+// Normalize only the documentation projection, without changing exercise schemas.
+const libraryOpenApiSchema = (value: unknown): any => {
+  if (Array.isArray(value)) return value.map(libraryOpenApiSchema);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+    .filter(([key,v]) => !(key === 'required' && Array.isArray(v) && v.length === 0))
+    .map(([key,v]) => [key,libraryOpenApiSchema(v)]));
+  return value;
+};
+
 const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.3',
@@ -27,7 +37,7 @@ const options: swaggerJsdoc.Options = {
           oneOf: Object.keys(mechanics).map(type => {
             const schema = exerciseSchema(type as keyof typeof mechanics);
             const { id: _id, owner: _owner, ...properties } = schema.properties!;
-            return { ...schema, properties };
+            return libraryOpenApiSchema({ ...schema, properties });
           }),
         },
         CustomExercise: {

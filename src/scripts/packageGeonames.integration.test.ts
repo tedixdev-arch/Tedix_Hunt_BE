@@ -89,7 +89,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
   const direct = await snapshot();
   const metadata = (await db.query('SELECT source,dataset,sha256,attribution,row_count FROM geographic_imports')).rows;
   expect(metadata[0].row_count).toBe('501');
-  await db.query('TRUNCATE library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
   await execute(sql);
   expect(await snapshot()).toEqual(direct);
   expect((await db.query('SELECT source,dataset,sha256,attribution,row_count FROM geographic_imports')).rows).toEqual(metadata);
@@ -130,7 +130,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
  });
  it('filters mixed-country input before SQL generation, preserving RO semantics on first/repeat import', async () => {
   await db.query(`GRANT DELETE ON geographic_city_names TO "${role}"`);
-  await db.query('TRUNCATE library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
   const foreign = [...source]; foreign[0]='901'; foreign[8]='HU'; foreign[1]='Foreign city';
   // Missing foreign-country metadata/coordinates cannot prevent an RO package.
   const excluded = [...foreign]; excluded[0]='902'; excluded[8]='ZZ'; excluded[4]='';
@@ -146,7 +146,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
    await c.query('COMMIT');
   } finally { c.release(); }
   const direct = await snapshot();
-  await db.query('TRUNCATE library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
   await execute(sql);
   expect(await snapshot()).toEqual(direct);
   await execute(sql);
