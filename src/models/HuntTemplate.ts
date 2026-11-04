@@ -1,3 +1,4 @@
+import { allocateLibraryContent, hasLibraryAllocations } from './TemplateContentAllocation.js';
 import { inheritedRadii, type CheckpointRadii, withRadiusDefaults } from '../domain/checkpointRadius.js';
 import { allocateCustomExercises, validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
 import type { PoolClient } from 'pg';
@@ -408,7 +409,6 @@ export const HuntTemplates = {
       if (!isTemplateContent(content, key, nextVersion) || !hasValidLearningConfiguration(content)) {
         throw new InvalidHuntTemplateContentError();
       }
-      content = allocateCustomExercises(withRadiusDefaults(content, versionResult.rows[0]?.content), key, nextVersion, versionResult.rows[0]?.content);
       if (template.category === 'local' && template.status === 'approved' && template.localApprovedVersion == null) {
         const evidence = await client.query(`SELECT v.version FROM hunt_template_versions v
           JOIN hunt_template_reviews r ON r.template_id=v.template_id AND r.version=v.version
@@ -420,6 +420,10 @@ export const HuntTemplates = {
         template.localApprovedVersion = template.submittedVersion;
       }
       const binding = await resolveLocalityBinding(client, template.category, localityId, versionResult.rows[0]);
+      if (template.category === 'local' && binding.localityId && hasLibraryAllocations(content))
+        await validateLocality(client, { locality_id: binding.localityId, locality_snapshot: binding.localitySnapshot });
+      content = await allocateLibraryContent(client, content, template.category, binding.localityId, versionResult.rows[0]?.content);
+      content = allocateCustomExercises(withRadiusDefaults(content, versionResult.rows[0]?.content), key, nextVersion, versionResult.rows[0]?.content);
       // Versions are complete immutable snapshots; existing rows are never updated.
       const inserted = await client.query(
         `INSERT INTO hunt_template_versions
@@ -455,7 +459,6 @@ export const HuntTemplates = {
     if (customIssues.length) throw new CustomExerciseValidationError(customIssues);
     if ((category !== undefined && category !== 'universal' && category !== 'local')
       || !isTemplateContent(content, key, 1) || !hasValidLearningConfiguration(content)) throw new InvalidHuntTemplateContentError();
-    content = allocateCustomExercises(withRadiusDefaults(content), key, 1);
     const client = await pool.connect();
     try {
       // Identity and immutable version 1 are one persistence operation: neither may exist alone.
@@ -467,6 +470,10 @@ export const HuntTemplates = {
       );
       const template = mapTemplate(templateResult.rows[0]);
       const binding = await resolveLocalityBinding(client, template.category, localityId);
+      if (template.category === 'local' && binding.localityId && hasLibraryAllocations(content))
+        await validateLocality(client, { locality_id: binding.localityId, locality_snapshot: binding.localitySnapshot });
+      content = await allocateLibraryContent(client, content, template.category, binding.localityId);
+      content = allocateCustomExercises(withRadiusDefaults(content), key, 1);
       const versionResult = await client.query(
         `INSERT INTO hunt_template_versions
            (template_id, version, content, origin, created_by_user_id, category, locality_id, locality_snapshot)

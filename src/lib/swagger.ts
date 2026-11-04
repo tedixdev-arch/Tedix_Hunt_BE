@@ -281,6 +281,41 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        TemplateLibraryAllocation: {
+          type: 'object', additionalProperties: false, required: ['mode'],
+          oneOf: [
+            { required: ['contentId','revisionId'], properties: { mode: { enum: ['specific'] } }, not: { required: ['filters'] } },
+            { properties: { mode: { enum: ['random'] } }, not: { anyOf: ['contentId','revisionId','version','classification','type'].map(key => ({ required: [key] })) } },
+            { required: ['contentId','revisionId'], properties: { mode: { enum: ['random'] } } },
+          ],
+          description: 'Specific requires exact Content and Revision UUIDs. New Random omits IDs and resolves once during this immutable version save. Echo a saved Random allocation unchanged at the same checkpoint/slot to retain it on a new version. Frozen payload is in customExercises; no runtime Library lookup. Full contract: docs/Template_Content_Allocation.md.',
+          properties: {
+            mode: { type: 'string', enum: ['specific', 'random'] },
+            contentId: { type: 'string', format: 'uuid' },
+            revisionId: { type: 'string', format: 'uuid' },
+            version: { type: 'integer', minimum: 1, description: 'Approved source version, returned by save. Must match if echoed.' },
+            classification: { type: 'string', enum: ['personal','team'] },
+            type: { type: 'string', description: 'Canonical source mechanic; returned by save.' },
+            filters: {
+              type: 'object', additionalProperties: false,
+              description: 'Random only; narrows authoritative Template context. Geography derives from the persisted locality mapping. Latest approved revision per Content identity is selected before filtering.',
+              properties: {
+                classification: { type: 'string', enum: ['personal','team'] },
+                type: { type: 'string', description: 'Canonical Personal or Team mechanic, matching the slot.' },
+                category: { type: 'string', enum: ['Mathematics','History','Science','Mixed'] },
+                grade: { type: 'string', enum: ['unspecified','5','6','7','8','9','10','11','12'] },
+              },
+            },
+          },
+        },
+        CheckpointLibraryAllocations: {
+          type: 'object', additionalProperties: false, minProperties: 1,
+          description: 'One allocation per classification slot, including the existing terminal FinishPoint. Personal uniqueness is by Content ID across all checkpoints; Team repetition remains supported. Save errors include incorrect_revision_identity, unapproved_revision, allocation_classification_mismatch, allocation_geography_mismatch, allocation_category_mismatch, allocation_grade_mismatch, empty_random_pool, duplicate_personal_exercise, insufficient_distinct_exercises and invalid_checkpoint_assignment, with actionable details paths.',
+          properties: {
+            personal: { $ref: '#/components/schemas/TemplateLibraryAllocation' },
+            team: { $ref: '#/components/schemas/TemplateLibraryAllocation' },
+          },
+        },
         CreatorTemplateContent: {
           type: 'object',
           required: ['key', 'version', 'displayName', 'theme', 'mission', 'configuration', 'scoring', 'checkpoints'],
@@ -293,6 +328,9 @@ const options: swaggerJsdoc.Options = {
             configuration: {
               type: 'object', minProperties: 1, additionalProperties: true,
               properties: {
+                category: { type: 'string', enum: ['Mathematics','History','Science','Mixed'], description: 'Authoritative academic category; required for Library allocation. Mixed matches Mixed Content exactly; no cross-category policy is inferred.' },
+                curriculum: { type: 'string', enum: ['mixed','math'] },
+                grade: { type: 'string', enum: ['mixed','9','10','11','12'], description: 'Specific Template grades require explicit equal Content grade. Omitted or mixed does not restrict grade.' },
                 normalCheckpointCount: {
                   type: 'integer', minimum: 1, maximum: 20,
                   description: 'Number of normal route checkpoints; FinishPoint is separate Feature 6.',
@@ -336,6 +374,7 @@ const options: swaggerJsdoc.Options = {
                 type: 'object', additionalProperties: true,
                 properties: {
                   customExercises: { $ref: '#/components/schemas/CheckpointCustomExercises' },
+                  libraryAllocations: { $ref: '#/components/schemas/CheckpointLibraryAllocations' },
                   role: { type: 'string', enum: ['normal', 'terminal'] },
                   checkpoint: { type: 'integer', description: 'Existing normal gameplay number; required at geographic submission, unique and in 1..normalCheckpointCount. Matches geographic checkpointNumber; forbidden on terminal entries.' },
                   kind: { type: 'string', enum: [...checkpointGameplayTypes.kind] },

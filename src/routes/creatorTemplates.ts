@@ -1,3 +1,4 @@
+import { AllocationError } from '../models/TemplateContentAllocation.js';
 import { validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
 import { copyPublishedUniversal, UniversalCopyForbiddenError, UniversalCopySourceNotFoundError, UniversalCopyStaleError } from '../models/PublishedUniversal.js';
 import express from 'express';
@@ -367,6 +368,7 @@ router.post('/', requireAuth, requireRole('creator'), async (req: AuthRequest, r
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof AllocationError) return res.status(error.status).json({ error: error.code, details: error.details });
     if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
     if (error instanceof InvalidHuntTemplateContentError) return res.status(400).json({ error: 'invalid_input' });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });
@@ -427,6 +429,7 @@ router.post('/:key/versions', requireAuth, requireRole('creator'), async (req: A
       localitySnapshot: result.version.localitySnapshot,
     });
   } catch (error) {
+    if (error instanceof AllocationError) return res.status(error.status).json({ error: error.code, details: error.details });
     if (error instanceof CustomExerciseValidationError) return res.status(400).json({ error: 'invalid_custom_exercises', details: error.details });
     if (error instanceof TemplateApprovalEvidenceError) return res.status(409).json({ error: 'template_approval_evidence_required' });
     if (error instanceof TemplateLocalityError) return res.status(error.status).json({ error: error.code });

@@ -35,14 +35,14 @@ const testUrl=process.env.TEST_DATABASE_URL;
    await expect(reviewMigration.up(c)).rejects.toThrow('Reconcile legacy non-draft Content');
    await c.query('ROLLBACK');
    expect((await c.query("SELECT to_regclass('library_content_review_events') name")).rows[0].name).toBeNull();
-   expect(await runMigrations(c,migrations)).toEqual(['043_content_review','044_approved_content_discovery']);
+   expect(await runMigrations(c,migrations)).toEqual(['043_content_review','044_approved_content_discovery','045_template_content_allocation']);
    expect(await runMigrations(c,migrations)).toEqual([]);
    expect((await c.query('SELECT to_jsonb(r) row FROM library_content_revisions r')).rows).toEqual(before);
    const inspect=async()=>({
     columns:(await c.query(`SELECT table_name,column_name,data_type,column_default,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'library_content%' ORDER BY table_name,ordinal_position`)).rows,
     constraints:(await c.query(`SELECT t.relname,pg_get_constraintdef(k.oid) def FROM pg_constraint k JOIN pg_class t ON t.oid=k.conrelid WHERE t.relname LIKE 'library_content%' ORDER BY 1,2`)).rows,
-    triggers:(await c.query(`SELECT pg_get_triggerdef(g.oid) def FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid WHERE t.relname LIKE 'library_content%' AND NOT g.tgisinternal ORDER BY 1`)).rows,
-    functions:(await c.query(`SELECT proname,prosrc FROM pg_proc WHERE proname IN ('protect_library_revision','protect_library_identity','guard_library_review_event','apply_library_review_event') ORDER BY 1`)).rows,
+    triggers:(await c.query(`SELECT pg_get_triggerdef(g.oid) def FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid WHERE (t.relname LIKE 'library_content%' OR g.tgname='hunt_template_versions_library_allocations') AND NOT g.tgisinternal ORDER BY 1`)).rows,
+    functions:(await c.query(`SELECT proname,prosrc FROM pg_proc WHERE proname IN ('protect_library_revision','protect_library_identity','guard_library_review_event','apply_library_review_event','protect_template_library_allocations') ORDER BY 1`)).rows,
    });
    const indexes=async()=>(await c.query("SELECT indexname,indexdef FROM pg_indexes WHERE tablename LIKE 'library_content%' ORDER BY indexname")).rows;
    const upgradedIndexes=await indexes();
