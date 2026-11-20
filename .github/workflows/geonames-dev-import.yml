@@ -1,0 +1,65 @@
+name: GeoNames dev import (Romania)
+# Manual, dev-only. Connects to the dev API server with the existing deploy key and uses that
+# server's own .env, so database credentials never leave the server or appear in logs.
+# check  = read-only connection/migration/permission checks and current region labels.
+# import = runs the pre-tested Romania-only package (run 44717227422) once, then verifies.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: check is read-only; import runs the tested import.sql once
+        type: choice
+        options: [check, import]
+        default: check
+      confirm:
+        description: Required for import — type import-romania-into-tedix-hunt-dev
+        type: string
+        required: false
+permissions:
+  contents: read
+  actions: read
+concurrency: geonames-dev-import
+jobs:
+  dev:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: tedixhunt-be-dev.anainfo.ai
+      DEPLOY_USER: deploy
+      DEPLOY_PATH: /var/www/Tedix_Hunt_BE
+      PACKAGE_RUN_ID: '44717227422'
+      PACKAGE_NAME: geonames-pgadmin-romania-only-44717227422-1
+      PACKAGE_SHA256: 1d1dfc1c60aabc9ec8496875ed5cbe5b5ff29d80f28c03867f8f4f4277c9362f
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Require explicit confirmation for import
+        if: inputs.mode == 'import' && inputs.confirm != 'import-romania-into-tedix-hunt-dev'
+        run: |
+          echo "::error::Import mode requires confirm=import-romania-into-tedix-hunt-dev"
+          exit 1
+      - uses: actions/checkout@v4
+      - name: Download tested Romania package
+        if: inputs.mode == 'import'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          run-id: ${{ env.PACKAGE_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: package
+      - name: Verify package checksum
+        if: inputs.mode == 'import'
+        run: echo "$PACKAGE_SHA256  package/import.sql" | sha256sum -c -
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      - name: Run on dev server
+        run: |
+          work="/tmp/tedix-geonames-${GITHUB_RUN_ID}"
+          ssh="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes $DEPLOY_USER@$DEPLOY_HOST"
+          $ssh "mkdir -m 700 -p $work"
+          files=scripts/ci/dev-geonames.mjs
+          if [ "$MODE" = import ]; then files="$files package/import.sql"; fi
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes $files "$DEPLOY_USER@$DEPLOY_HOST:$work/"
+          $ssh "cd $DEPLOY_PATH && node $work/dev-geonames.mjs $MODE $work/import.sql tedix_hunt; rc=\$?; rm -rf $work; exit \$rc"
