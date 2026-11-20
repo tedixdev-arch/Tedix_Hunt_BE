@@ -167,19 +167,30 @@ try {
       assert.equal((await pool.query("SELECT count(*) FROM geographic_cities WHERE country_code <> 'RO'")).rows[0].count, '0');
       assert.equal((await pool.query("SELECT count(*) FROM geographic_city_names WHERE country_code <> 'RO'")).rows[0].count, '0');
       let sourceCount = 0;
+      const sourceRegions = new Set();
       // Check every Romanian source record, including admin labels and all aliases.
       for await (const city of readGeonames(dir + '/cities500.txt', dir + '/countryInfo.txt', dir + '/admin1CodesASCII.txt', dir + '/admin2Codes.txt', 'RO')) {
         const actual = (await pool.query(`SELECT geoname_id::text AS id, country_code AS country,
           name, administrative_context AS context, admin1_code AS admin1, admin2_code AS admin2,
           latitude, longitude, population::text, source_modified::text AS modified
           FROM geographic_cities WHERE geoname_id=$1`, [city.id])).rows[0];
-        const { countryName, aliases, ...expected } = city;
+        const { countryName, aliases, admin1Name, ...expected } = city;
         assert.deepEqual(actual, { ...expected, population: String(city.population) });
+        // County labels live in geographic_regions (migration 037), not on the city row.
+        if (admin1Name !== undefined) {
+          const region = (await pool.query('SELECT display_name FROM geographic_regions WHERE country_code=$1 AND admin1_code=$2',
+            [city.country, city.admin1])).rows[0];
+          assert.equal(region?.display_name, admin1Name, 'Region label differs from official admin1 dictionary');
+          sourceRegions.add(city.admin1);
+        }
         const names = (await pool.query('SELECT normalized_name FROM geographic_city_names WHERE geoname_id=$1', [city.id])).rows.map(row => row.normalized_name).sort();
         assert.deepEqual(names, [...new Set([city.name, ...aliases].map(normalizeCityName).filter(Boolean))].sort());
         sourceCount++;
       }
       assert.equal(count, sourceCount);
+      const storedRegions = (await pool.query("SELECT admin1_code FROM geographic_regions WHERE country_code='RO' ORDER BY admin1_code")).rows.map(row => row.admin1_code);
+      assert.deepEqual(storedRegions, [...sourceRegions].sort(), 'Stored RO regions differ from labelled source regions');
+      report('PASS (' + phase + '): ' + storedRegions.length + ' Romanian admin1 region labels stored, each matching admin1CodesASCII.txt.');
       const manifest = JSON.parse(readFileSync(dir + '/package/manifest.json', 'utf8'));
       assert.equal(manifest.scope, 'romania');
       assert.equal(manifest.countryCode, 'RO');
