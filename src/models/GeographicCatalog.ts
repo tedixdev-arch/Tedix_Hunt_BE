@@ -31,7 +31,7 @@ async function present(rows: any[]) {
   const ids = rows.flatMap(r => r.localityId ? [r.localityId] : []);
   const available = new Set<string>();
   if (ids.length) {
-    const artifacts = await pool.query(`${artifactSelect} WHERE t.origin='creator' AND t.category='local' AND v.locality_id=ANY($1::uuid[])`, [ids]);
+    const artifacts = await pool.query(`${artifactSelect} WHERE t.origin='creator' AND t.category='local' AND t.custom_request_id IS NULL AND v.locality_id=ANY($1::uuid[])`, [ids]);
     for (const row of artifacts.rows) {
       const { artifact } = resolveLocalArtifact(row);
       if (artifact) available.add(`${artifact.localitySnapshot.countryCode}:${artifact.localityId}`);

@@ -120,7 +120,7 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
     const a=await approved();const h=await hunt();const before=await state(h);
     const rows=(await list().expect(200)).body.templates;expect(rows.find((v:any)=>v.key===a.key)).toMatchObject({...a,localityId:place});
     const preview=await detail(a).expect(200);expect(preview.headers['cache-control']).toBe('private, no-store');
-    expect(Object.keys(preview.body).sort()).toEqual(['configuration','currentLocality','displayName','key','localityId','localitySnapshot','templateId','theme','version']);
+    expect(Object.keys(preview.body).sort()).toEqual(['configuration','currentLocality','displayName','exclusive','key','localityId','localitySnapshot','templateId','theme','version']);
     expect(JSON.stringify(preview.body)).not.toMatch(/private|answer|review|provenance|suspension/);
     await select(h,a).expect(200);const after=await state(h);
     expect(after).toMatchObject({template_id:a.templateId,template_key:a.key,template_version:1,template_snapshot:content(a.key),template_locality_id:place});
