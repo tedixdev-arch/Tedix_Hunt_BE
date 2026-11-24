@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrate.js';
+import { applyRemainingMigrations } from '../test/migrateRemaining.js';
 import proposalMigration from './migrations/025_locality_proposals.js';
 import type { Migration } from './migrations/types.js';
 
@@ -67,6 +68,9 @@ suite('Manual locality proposals against PostgreSQL', () => {
       expect(await runMigrations(client, migrations)).toEqual(['025_locality_proposals']);
       expect(await runMigrations(client, migrations)).toEqual([]);
       expect(await history()).toEqual(historical);
+      await applyRemainingMigrations(client, migrations);
+      // Later migrations add columns; proposal actions below must still leave this history unchanged.
+      historical = await history();
     } finally { client.release(); }
     const { environment } = await import('../config/environment.js'); environment.databaseUrl = url.toString();
     const postgres = await import('../lib/postgres.js'); closePool = () => postgres.pool.end();
@@ -261,5 +265,41 @@ suite('Manual locality proposals against PostgreSQL', () => {
       await client.query(await readFile(new URL('./schema.sql', import.meta.url), 'utf8'));
       expect(await inspect()).toEqual(upgraded);
     } finally { await client.query('ROLLBACK'); client.release(); }
+  });
+
+  it('is only for places missing from the GeoNames list, requires a catalog region and copies it to the Locality', async () => {
+    const run = (await db.query(`INSERT INTO geographic_imports(source,dataset,sha256,attribution)
+      VALUES('geonames','proposal fixture',repeat('b',64),'GeoNames (CC BY 4.0)') RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO geographic_regions(country_code,admin1_code,display_name,import_id)
+      VALUES('RO','31','Proposal County',$1),('RO','32','Second County',$1)`, [run]);
+    await db.query(`INSERT INTO geographic_cities(geoname_id,country_code,name,administrative_context,admin1_code,admin2_code,latitude,longitude,population,source_modified,import_id)
+      VALUES(990001,'RO','Listed Town','Proposal County','31','',46,23,600,'2026-01-01',$1)`, [run]);
+    await db.query(`INSERT INTO geographic_city_names(geoname_id,country_code,normalized_name) VALUES(990001,'RO','listed town')`);
+    try {
+      // Once the country has catalog regions, the proposal must name one of them.
+      expect((await submit(input('Unlisted Hamlet')).expect(400)).body).toEqual({ error: 'region_required' });
+      await submit({ ...input('Unlisted Hamlet'), admin1Code: '99' }).expect(400, { error: 'invalid_input' });
+      await submit({ ...input('Unlisted Hamlet'), admin1Code: '00' }).expect(400, { error: 'invalid_input' });
+      // A place already in the list (any spelling/punctuation variant) must be registered by an Admin instead.
+      for (const name of ['Listed Town', 'listed-town', 'LISTED  TOWN'])
+        await submit({ ...input(name), admin1Code: '31' }).expect(409, { error: 'catalog_city_exists' });
+      // The same name in another county is a different place and may be proposed.
+      const elsewhere = (await submit({ ...input('Listed Town'), admin1Code: '32' }).expect(201)).body;
+      expect(elsewhere).toMatchObject({ admin1Code: '32', regionDisplayName: 'Second County', status: 'pending' });
+      const hamlet = (await submit({ ...input('Unlisted Hamlet'), admin1Code: '31' }).expect(201)).body;
+      const approved = (await decide(hamlet.id).expect(200)).body;
+      expect((await db.query('SELECT admin1_code,provider FROM localities WHERE id=$1', [approved.localityId])).rows)
+        .toEqual([{ admin1_code: '31', provider: null }]);
+      // If the catalog gains the place before review, approval is refused and the proposal stays pending.
+      await db.query(`INSERT INTO geographic_cities(geoname_id,country_code,name,administrative_context,admin1_code,admin2_code,latitude,longitude,population,source_modified,import_id)
+        VALUES(990002,'RO','Listed Town','Second County','32','',46.1,23.1,600,'2026-01-01',$1)`, [run]);
+      await db.query(`INSERT INTO geographic_city_names(geoname_id,country_code,normalized_name) VALUES(990002,'RO','listed town')`);
+      await decide(elsewhere.id).expect(409, { error: 'catalog_city_exists' });
+      expect((await db.query('SELECT status FROM locality_proposals WHERE id=$1', [elsewhere.id])).rows).toEqual([{ status: 'pending' }]);
+      await decide(elsewhere.id, 'rejected', 'admin', 'Already in the GeoNames list; register that city.').expect(200);
+    } finally {
+      await db.query('DELETE FROM geographic_city_names WHERE geoname_id IN (990001,990002)');
+      await db.query('DELETE FROM geographic_cities WHERE geoname_id IN (990001,990002)');
+    }
   });
 });

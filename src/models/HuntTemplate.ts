@@ -33,7 +33,8 @@ export interface PersistedHuntTemplate extends Partial<LocalApprovalState> {
   updatedAt: Date;
 }
 
-export type LocalitySnapshot = Omit<Locality, 'active'>;
+// The frozen snapshot contract is unchanged: catalog-link and region read fields are never snapshotted.
+export type LocalitySnapshot = Omit<Locality, 'active' | 'geographicId' | 'admin1Code' | 'regionDisplayName'>;
 interface LocalityBinding {
   localityId: string | null;
   localitySnapshot: LocalitySnapshot | null;

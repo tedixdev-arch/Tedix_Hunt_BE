@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrate.js';
+import { applyRemainingMigrations } from '../test/migrateRemaining.js';
 import foundation from './migrations/024_country_locality.js';
 import kosovo from './migrations/034_geonames_kosovo_country.js';
 import type { Migration } from './migrations/types.js';
@@ -66,6 +67,7 @@ suite('Country/Locality foundation', () => {
       await client.query('DELETE FROM localities WHERE id=$1',[existingLocality.id]);
       expect(await runMigrations(client, migrations)).toEqual([]);
       expect(await history()).toEqual(before);
+      await applyRemainingMigrations(client, migrations);
     } finally { client.release(); }
     const { environment } = await import('../config/environment.js');
     environment.databaseUrl = url.toString();

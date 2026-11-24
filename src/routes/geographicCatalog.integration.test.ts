@@ -8,6 +8,7 @@ import { importCities, readGeonames, type CityImport } from '../scripts/importGe
 import catalogMigration from '../db/migrations/032_geographic_catalog.js';
 import completionMigration from '../db/migrations/033_geographic_import_completion.js';
 import regionsMigration from '../db/migrations/037_geographic_regions.js';
+import localityRegionMigration from '../db/migrations/046_locality_regions.js';
 import kosovoMigration from '../db/migrations/034_geonames_kosovo_country.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
@@ -33,7 +34,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);await localityRegionMigration.up(c);expect(await history()).toEqual(before);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;
@@ -54,7 +55,8 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await get('/api/geography/regions?countryCode=RO').expect(503,unavailable);
   await get('/api/geography/cities/681290').expect(503,unavailable);
   await post('/api/geography/cities/681290/resolve').expect(503,unavailable);
-  await post('/api/geography/cities/681290/registration',{create:true,reason:'not imported'},'admin').expect(503,unavailable);
+  // The former Admin registration endpoint no longer exists.
+  await post('/api/geography/cities/681290/registration',{create:true,reason:'removed'},'admin').expect(404);
   const client=await db.connect();
   try {
    await client.query('BEGIN');
@@ -118,25 +120,25 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await get('/api/geography/cities/abc').expect(400);await get('/api/geography/cities/999999').expect(404);
   await post('/api/geography/cities/101/resolve',{latitude:1}).expect(400);
  });
- it('authorizes persisted roles before city lookup and separates Admin writes',async()=>{
+ it('authorizes persisted roles before city lookup; only Creators and Admins select (resolve) cities',async()=>{
   await request(app).get('/api/geography/cities?countryCode=RO&q=cluj').expect(401);
   for(const role of ['participant','guest','revoked'])await get('/api/geography/cities?countryCode=RO&q=cluj',role).expect(403);
   await get('/api/geography/cities?countryCode=RO&q=cluj','blocked').expect(401);
-  await post('/api/geography/cities/101/registration',{create:true,reason:'x'}).expect(403);
   await post('/api/geography/cities/101/resolve',{},'organizer').expect(403);
   await get('/api/geography/cities?countryCode=RO&q=cluj','organizer').expect(200);
-  await post('/api/geography/cities/101/registration',{create:true,reason:'not admin'},'organizer').expect(403);
   const catalog=(await import('../models/GeographicCatalog.js')).GeographicCatalog;
-  await expect(catalog.resolve('101',users.creator,{create:true,reason:'direct call'})).rejects.toMatchObject({code:'forbidden',status:403});
   await expect(catalog.resolve('101',users.organizer)).rejects.toMatchObject({code:'forbidden',status:403});
   await expect(catalog.resolve('101',users.revoked)).rejects.toMatchObject({code:'forbidden',status:403});
   await expect(catalog.resolve('101',users.blocked)).rejects.toMatchObject({code:'unauthorized',status:401});
  });
- it('keeps unregistered cities explicit and uses no Creator coordinate or evidence input',async()=>{
-  expect((await post('/api/geography/cities/101/resolve').expect(200)).body).toMatchObject({localityId:null,registrationState:'registration_required',nextAction:'request_registration'});
-  const r=await post('/api/geography/cities/101/registration',{create:true,reason:'Reviewed official catalog'},'admin').expect(200);
-  expect(r.body.registrationState).toBe('registered');expect(r.body.hasApprovedLocalTemplate).toBe(false);
-  const l=(await db.query('SELECT * FROM localities WHERE id=$1',[r.body.localityId])).rows[0];expect(l.provider_id).toBe('101');expect(l.provenance).toContain('CC BY 4.0');
+ it('selecting any city creates its Locality automatically (no Admin registration) and uses no Creator coordinate or evidence input',async()=>{
+  expect((await get('/api/geography/cities/101').expect(200)).body).toMatchObject({localityId:null,registrationState:'not_linked',nextAction:'resolve_city'});
+  const r=await post('/api/geography/cities/101/resolve').expect(200);
+  expect(r.body).toMatchObject({registrationState:'registered',nextAction:'bind_locality',registeredActive:true,hasApprovedLocalTemplate:false});
+  const l=(await db.query('SELECT * FROM localities WHERE id=$1',[r.body.localityId])).rows[0];expect(l.provider_id).toBe('101');expect(l.provenance).toContain('CC BY 4.0');expect(l.provenance).toContain('created automatically');
+  expect((await db.query('SELECT reconciled_by,reconciliation_reason FROM geographic_cities WHERE geoname_id=101')).rows[0]).toEqual({reconciled_by:users.creator,reconciliation_reason:'Locality created automatically when the city was selected'});
+  // Selecting again reuses the same Locality.
+  expect((await post('/api/geography/cities/101/resolve').expect(200)).body.localityId).toBe(r.body.localityId);
  });
  it('keeps catalog registration separate from Creator binding and C7 approval authority',async()=>{
   const registered=(await get('/api/geography/cities/101').expect(200)).body;
@@ -147,7 +149,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await post('/api/creator/templates',{key,content,category:'local',localityId:registered.geographicId}).expect(400);
   await db.query('UPDATE localities SET active=false WHERE id=$1',[registered.localityId]);
   const r=await post('/api/geography/cities/101/resolve').expect(200);
-  expect(r.body).toMatchObject({registrationState:'registered_inactive',nextAction:'contact_admin',hasApprovedLocalTemplate:false});
+  expect(r.body).toMatchObject({registrationState:'registered_inactive',nextAction:'unavailable',hasApprovedLocalTemplate:false});
   await post('/api/creator/templates',{key,content,category:'local',localityId:registered.localityId}).expect(409);
   await db.query('UPDATE localities SET active=true WHERE id=$1',[registered.localityId]);
   await post('/api/creator/templates',{key,content,category:'local',localityId:registered.localityId}).expect(201);
@@ -155,27 +157,62 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   await post(`/api/admin/templates/review/${key}/approve`,{version:1},'creator').expect(403);
   expect((await get('/api/geography/cities/101').expect(200)).body.hasApprovedLocalTemplate).toBe(false);
  });
+ it('browses a whole region for dropdowns, lists manual Localities beside catalog cities and keeps region data on Localities',async()=>{
+  await ingest([city('700','Browse Alpha',{aliases:[],admin1:'21',admin1Name:'Browse County'}),city('701','Browse Beta',{aliases:[],admin1:'21',admin1Name:'Browse County'}),
+   city('702','Browse Other',{aliases:[],admin1:'22',admin1Name:'Other County'})]);
+  // Without q, admin1Code is required; an empty q is still rejected.
+  await get('/api/geography/cities?countryCode=RO').expect(400);
+  await get('/api/geography/cities?countryCode=RO&q=&admin1Code=21').expect(400);
+  const browse=(await get('/api/geography/cities?countryCode=RO&admin1Code=21&limit=1').expect(200)).body;
+  expect(browse.cities.map((c:any)=>c.geographicId)).toEqual(['700']);expect(browse.nextAfter).toBe('700');
+  const next=(await get(`/api/geography/cities?countryCode=RO&admin1Code=21&limit=1&after=${browse.nextAfter}`).expect(200)).body;
+  expect(next.cities.map((c:any)=>c.geographicId)).toEqual(['701']);expect(next.registryLocalities).toEqual([]);
+  // A manual Locality (approved proposal) in county 21 is a usable place in that county, not a GeoNames city.
+  const manual=(await db.query(`INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance,admin1_code)
+    VALUES('RO','Browse Hamlet','Browse County',46.5,23.5,'Manual proposal test',$1) RETURNING id`,['21'])).rows[0].id;
+  const first=(await get('/api/geography/cities?countryCode=RO&admin1Code=21').expect(200)).body;
+  expect(first.registryLocalities).toEqual([expect.objectContaining({geographicId:null,localityId:manual,name:'Browse Hamlet',admin1Code:'21',
+    regionDisplayName:'Browse County',regionStatus:'resolved',source:'registry',attribution:null,registrationState:'registered',nextAction:'bind_locality'})]);
+  expect((await get('/api/geography/cities?countryCode=RO&admin1Code=22').expect(200)).body.registryLocalities).toEqual([]);
+  expect((await get('/api/geography/cities?countryCode=RO&admin1Code=21&q=browse%20h').expect(200)).body.registryLocalities.map((c:any)=>c.localityId)).toEqual([manual]);
+  expect((await get('/api/geography/cities?countryCode=RO&admin1Code=21&q=alpha').expect(200)).body.registryLocalities).toEqual([]);
+  expect((await get(`/api/geography/localities/${manual}`).expect(200)).body).toMatchObject({geographicId:null,admin1Code:'21',regionDisplayName:'Browse County'});
+  // Selecting a catalog city stores its region on the new Locality and Locality reads expose the catalog link.
+  const registered=(await post('/api/geography/cities/702/resolve').expect(200)).body;
+  expect(registered).toMatchObject({registrationState:'registered',admin1Code:'22'});
+  expect((await db.query('SELECT admin1_code FROM localities WHERE id=$1',[registered.localityId])).rows).toEqual([{admin1_code:'22'}]);
+  expect((await get(`/api/geography/localities/${registered.localityId}`).expect(200)).body).toMatchObject({geographicId:'702',admin1Code:'22',regionDisplayName:'Other County'});
+  // The region list follows the same standard for every country.
+  const regions=(await get('/api/geography/regions?countryCode=RO').expect(200)).body;
+  expect(regions.regionLabel).toBe('County');
+  expect(regions.regions).toEqual(expect.arrayContaining([expect.objectContaining({admin1Code:'21',displayName:'Browse County',labelStatus:'resolved'}),expect.objectContaining({admin1Code:'22',displayName:'Other County'})]));
+  await db.query('UPDATE localities SET active=false WHERE id=$1',[manual]);
+  expect((await get('/api/geography/cities?countryCode=RO&admin1Code=21').expect(200)).body.registryLocalities[0]).toMatchObject({registeredActive:false,registrationState:'registered_inactive',nextAction:'unavailable'});
+ });
  it('preserves Cluj canonical UUID without competing records or Signal changes',async()=>{
   const before=await history();const r=await post('/api/geography/cities/681290/resolve').expect(200);
   expect(r.body.localityId).toBe(canonical);expect((await db.query("SELECT id FROM localities WHERE name='Cluj-Napoca'")).rows).toEqual([{id:canonical}]);expect(await history()).toEqual(before);
   expect(signalClujNapocaV1.key).toContain('cluj');
  });
- it('requires explicit reconciliation for ambiguous names and never silently creates duplicates',async()=>{
+ it('never guesses between ambiguous same-name Localities; the selected city gets its own Locality',async()=>{
   await ingest([city('300','Ambiguous',{aliases:[]})]);
-  for(const context of ['Region A','Region B'])await db.query("INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance) VALUES('RO','Ambiguous',$1,46,23,'test')",[context]);
-  expect((await post('/api/geography/cities/300/resolve').expect(200)).body.registrationState).toBe('reconciliation_required');
-  await post('/api/geography/cities/300/registration',{create:true,reason:'No guess'},'admin').expect(409);
-  const id=(await db.query("SELECT id FROM localities WHERE name='Ambiguous' ORDER BY id LIMIT 1")).rows[0].id;
-  expect((await post('/api/geography/cities/300/registration',{localityId:id,reason:'Identity confirmed independently'},'admin').expect(200)).body.localityId).toBe(id);
+  const existing=[] as string[]
+  for(const context of ['Region A','Region B'])existing.push((await db.query("INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance) VALUES('RO','Ambiguous',$1,46,23,'test') RETURNING id",[context])).rows[0].id);
+  const r=(await post('/api/geography/cities/300/resolve').expect(200)).body;
+  expect(r.registrationState).toBe('registered');expect(existing).not.toContain(r.localityId);
+  expect((await db.query('SELECT provider_id FROM localities WHERE id=$1',[r.localityId])).rows[0].provider_id).toBe('300');
  });
- it('blocks punctuation variants from duplicate creation',async()=>{
+ it('a punctuation variant never takes over the canonical Locality of another city',async()=>{
   await ingest([city('301','Cluj Napoca',{aliases:[]})]);
-  await post('/api/geography/cities/301/registration',{create:true,reason:'duplicate candidate'},'admin').expect(409);
+  const r=(await post('/api/geography/cities/301/resolve').expect(200)).body;
+  expect(r.localityId).not.toBe(canonical);
+  expect((await db.query('SELECT locality_id FROM geographic_cities WHERE geoname_id=681290')).rows[0].locality_id).toBe(canonical);
  });
- it('serializes concurrent registration to one canonical identity',async()=>{
+ it('serializes concurrent selections of one city to one Locality',async()=>{
   await ingest([city('302','Race City',{aliases:[]})]);
-  const r=await Promise.all([post('/api/geography/cities/302/registration',{create:true,reason:'one'},'admin'),post('/api/geography/cities/302/registration',{create:true,reason:'two'},'admin')]);
-  expect(r.map(x=>x.status).sort()).toEqual([200,409]);expect((await db.query("SELECT count(*) FROM localities WHERE provider='geonames' AND provider_id='302'")).rows[0].count).toBe('1');
+  const r=await Promise.all([post('/api/geography/cities/302/resolve'),post('/api/geography/cities/302/resolve')]);
+  expect(r.map(x=>x.status)).toEqual([200,200]);expect(r[0].body.localityId).toBe(r[1].body.localityId);
+  expect((await db.query("SELECT count(*) FROM localities WHERE provider='geonames' AND provider_id='302'")).rows[0].count).toBe('1');
   await expect(db.query("UPDATE geographic_cities SET reconciliation_reason=NULL WHERE geoname_id=302")).rejects.toMatchObject({code:'23514'});
  });
  it('preserves approval and Organizer eligibility and historical Hunt snapshots across imports',async()=>{
@@ -234,7 +271,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const rows=[];for await(const row of readGeonames(...files as [string,string,string,string]))rows.push(row);
    await ingest(rows);await ingest(rows);
    const response=await get('/api/geography/regions?countryCode=RO').expect(200);
-   expect(response.body).toMatchObject({regionLabel:'County',regions:expect.arrayContaining([{countryCode:'RO',admin1Code:'13',displayName:'Cluj',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}])});
+   expect(response.body).toMatchObject({regionLabel:'County',regions:expect.arrayContaining([{countryCode:'RO',admin1Code:'13',displayName:'Cluj',source:'geonames',attribution:'GeoNames (CC BY 4.0)',labelStatus:'resolved'}])});
    expect(response.body.regions.filter((r:any)=>r.admin1Code==='13')).toHaveLength(1);
    expect((await search('cluj','&admin1Code=13').expect(200)).body.cities.find((c:any)=>c.geographicId==='681290')).toMatchObject({geographicId:'681290',localityId:canonical,admin1Code:'13',regionDisplayName:'Cluj',regionStatus:'resolved'});
    await writeFile(files[2],'');const partial=[];for await(const row of readGeonames(...files as [string,string,string,string]))partial.push(row);
@@ -252,7 +289,9 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    city('403','Same Town',{aliases:[],admin1:'MISSING'}),city('404','Same Town',{aliases:[],admin1:''}),city('405','Same Town',{aliases:[],admin1:'00'})]);
   expect((await search('same','&admin1Code=B&limit=1').expect(200)).body).toMatchObject({cities:[{geographicId:'401',regionDisplayName:'Second'}],nextAfter:null});
   expect((await get('/api/geography/cities?countryCode=US&q=same&admin1Code=A').expect(200)).body.cities.map((c:any)=>c.geographicId)).toEqual(['402']);
-  expect((await search('same','&admin1Code=MISSING').expect(200)).body.cities).toEqual([]);
+  // Standard: a region without an official label is still selectable (shown as "Region <code>").
+  expect((await search('same','&admin1Code=MISSING').expect(200)).body.cities.map((c:any)=>c.geographicId)).toEqual(['403']);
+  expect((await search('same','&admin1Code=unspecified').expect(200)).body.cities.map((c:any)=>c.geographicId).sort()).toEqual(['404','405']);
   expect((await search('same','&admin1Code=UNKNOWN').expect(200)).body.cities).toEqual([]);
   const rows=(await search('same').expect(200)).body.cities;
   expect(rows.find((c:any)=>c.geographicId==='403').regionStatus).toBe('missing_label');
@@ -261,7 +300,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   expect(page.metadataStatus).toBe('incomplete');expect(page.regions).toHaveLength(1);expect(page.nextAfter).toBeTruthy();
   const next=(await get(`/api/geography/regions?countryCode=RO&limit=1&after=${page.nextAfter}`).expect(200)).body;
   expect(next.regions[0].admin1Code).not.toBe(page.regions[0].admin1Code);
-  expect((await get('/api/geography/regions?countryCode=US').expect(200)).body.regionLabel).toBe('State / Region');
+  expect((await get('/api/geography/regions?countryCode=US').expect(200)).body.regionLabel).toBe('State');
   await db.query("INSERT INTO countries(code,display_name) VALUES('CA','Canada') ON CONFLICT DO NOTHING");
   expect((await get('/api/geography/regions?countryCode=CA').expect(200)).body).toMatchObject({regions:[],metadataStatus:'ready',nextAfter:null});
   for(const qs of ['countryCode=ro','countryCode=ZZ','countryCode=RO&limit=51','countryCode=RO&after=00','countryCode=RO&after=A&after=B','countryCode=RO&x=1'])await get(`/api/geography/regions?${qs}`).expect(400);
@@ -278,8 +317,8 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
   const found=(await get('/api/geography/cities?countryCode=XK&q=prishtina').expect(200)).body.cities;
   expect(found).toHaveLength(1);
   expect(found[0]).toMatchObject({geographicId:row.id,countryCode:'XK',countryDisplayName:'Kosovo'});
-  expect((await post(`/api/geography/cities/${row.id}/resolve`).expect(200)).body.registrationState).toBe('registration_required');
-  const registered=(await post(`/api/geography/cities/${row.id}/registration`,{create:true,reason:'Reviewed synthetic Kosovo fixture'},'admin').expect(200)).body;
+  const registered=(await post(`/api/geography/cities/${row.id}/resolve`).expect(200)).body;
+  expect(registered.registrationState).toBe('registered');
   const locality=(await db.query('SELECT * FROM localities WHERE id=$1',[registered.localityId])).rows[0];
   expect(locality.country_code).toBe('XK');
   await ingest([row]);

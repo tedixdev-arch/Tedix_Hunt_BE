@@ -443,7 +443,10 @@ suite('C7 Organizer Local selection against disposable PostgreSQL',()=>{
       expect.objectContaining({regionId:'RO:unknown',labelStatus:'unspecified'})]));
     const page=await get(`${path}/cities?countryCode=RO&regionId=RO:admin1:13&limit=1`).expect(200);
     expect(page.body.cities.map((c:any)=>c.localityId)).toEqual([ids[0]]);expect(page.body.nextCursor).not.toBeNull();
-    expect((await get(`${path}/cities?countryCode=RO&regionId=RO:unknown`).expect(200)).body.cities.map((c:any)=>c.localityId)).toEqual([ids[2]]);
+    const unknown=(await get(`${path}/cities?countryCode=RO&regionId=RO:unknown`).expect(200)).body.cities;
+    expect(unknown.filter((c:any)=>c.source==='geonames').map((c:any)=>c.localityId)).toEqual([ids[2]]);
+    // Active Localities without a GeoNames city (manual, no region) are listed under the unspecified region.
+    expect(unknown.filter((c:any)=>c.source==='registry').every((c:any)=>c.geographicId===null&&c.attribution===null&&c.registeredActive)).toBe(true);
     await db.query('UPDATE localities SET active=false WHERE id=$1',[ids[1]]);
     // A forged cross-country mapping must not leak the otherwise eligible HU artifact.
     await db.query("UPDATE geographic_cities SET country_code='RO' WHERE locality_id=$1",[ids[3]]);

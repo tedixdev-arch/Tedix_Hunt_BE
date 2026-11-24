@@ -45,8 +45,8 @@ describe('Organizer catalog geography',()=>{
     vi.mocked(pool.query).mockResolvedValue({rows:[row('1','RO',null),row('2'),{...row('3','RO','14'),regionDisplayName:'Cluj'}]} as never);
     const r=await get('/regions?countryCode=RO').expect(200);
     expect(r.body.regions).toEqual(expect.arrayContaining([
-      expect.objectContaining({regionId:'RO:unknown',regionCode:null,labelStatus:'unspecified'}),
-      expect.objectContaining({regionId:'RO:admin1:13',label:'13',labelStatus:'missing_label'}),
+      expect.objectContaining({regionId:'RO:unknown',regionCode:null,label:'Other (region not specified)',labelStatus:'unspecified',levelLabel:'County'}),
+      expect.objectContaining({regionId:'RO:admin1:13',label:'Region 13',labelStatus:'missing_label'}),
       expect.objectContaining({regionId:'RO:admin1:14',label:'Cluj',labelStatus:'resolved'})]));
     expect((await get('/cities?countryCode=RO&regionId=RO:unknown')).body.cities).toHaveLength(1);
   });

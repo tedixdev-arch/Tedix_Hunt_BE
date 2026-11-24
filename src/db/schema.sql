@@ -1238,3 +1238,10 @@ BEGIN
 END $$;
 CREATE TRIGGER hunt_template_versions_library_allocations BEFORE INSERT OR UPDATE ON hunt_template_versions
  FOR EACH ROW EXECUTE FUNCTION protect_template_library_allocations();
+
+-- Region for manual Localities and proposals (migration 046). Linked Localities derive it from the catalog.
+ALTER TABLE localities ADD COLUMN admin1_code TEXT
+  CHECK (admin1_code ~ '^[A-Za-z0-9-]{1,40}$' AND admin1_code NOT IN ('00','unspecified'));
+CREATE INDEX localities_region_idx ON localities (country_code, admin1_code);
+ALTER TABLE locality_proposals ADD COLUMN admin1_code TEXT
+  CHECK (admin1_code ~ '^[A-Za-z0-9-]{1,40}$' AND admin1_code NOT IN ('00','unspecified'));
