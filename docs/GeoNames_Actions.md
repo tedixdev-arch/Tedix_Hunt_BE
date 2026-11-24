@@ -47,3 +47,21 @@ Real-data acceptance must run manually on GitHub Actions after merge. The Codex
 environment cannot reach its configured network proxy or use the local Docker
 socket, so implementation-time checks do not claim a successful worldwide import.
 A green backend PR test run alone is not official-data acceptance.
+
+## Dev database: worldwide import
+
+The dev database starts with the Romania-only package. To add every GeoNames country, region and city
+(`cities500`), use the two existing manual workflows. Nothing runs automatically.
+
+1. **Actions → GeoNames pgAdmin Import Package → Run workflow**, scope **Worldwide**. It builds `import.sql`
+   with the tested importer, runs it twice on a disposable database and checks idempotency. Note the run id,
+   the run attempt, and the sha256 in `import.sql.sha256` of the `geonames-pgadmin-worldwide-<run>-<attempt>`
+   artifact. The artifact expires after 7 days.
+2. **Actions → GeoNames dev import → Run workflow** with mode `check` (read-only preflight).
+3. Run it again with mode `import`, scope `worldwide`, the run id, attempt and sha256 from step 1, and
+   confirm `import-worldwide-into-tedix-hunt-dev`.
+
+The dev script (`scripts/ci/dev-geonames.mjs`) runs the package in one transaction and commits only if the
+number of Localities and every existing city-to-Locality link (including canonical Cluj-Napoca) are unchanged
+and no Romanian city disappears. Otherwise it rolls back (exit 5). The import updates existing catalog rows in
+place, so rerunning the same package creates no duplicates; each run adds one `geographic_imports` record.
