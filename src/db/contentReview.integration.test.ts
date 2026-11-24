@@ -35,7 +35,7 @@ const testUrl=process.env.TEST_DATABASE_URL;
    await expect(reviewMigration.up(c)).rejects.toThrow('Reconcile legacy non-draft Content');
    await c.query('ROLLBACK');
    expect((await c.query("SELECT to_regclass('library_content_review_events') name")).rows[0].name).toBeNull();
-   expect(await runMigrations(c,migrations)).toEqual(['043_content_review','044_approved_content_discovery','045_template_content_allocation','046_locality_regions']);
+   expect(await runMigrations(c,migrations)).toEqual(['043_content_review','044_approved_content_discovery','045_template_content_allocation','046_custom_hunt_workflow','046_locality_regions']);
    expect(await runMigrations(c,migrations)).toEqual([]);
    expect((await c.query('SELECT to_jsonb(r) row FROM library_content_revisions r')).rows).toEqual(before);
    const inspect=async()=>({

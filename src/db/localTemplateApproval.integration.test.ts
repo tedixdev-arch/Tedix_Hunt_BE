@@ -5,6 +5,8 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from './migrate.js';
 import approvalMigration from './migrations/027_local_template_approval.js';
+import customRequestsMigration from './migrations/039_custom_hunt_requests.js';
+import customWorkflowMigration from './migrations/046_custom_hunt_workflow.js';
 import type { Migration } from './migrations/types.js';
 
 const testUrl = process.env.TEST_DATABASE_URL;
@@ -122,6 +124,8 @@ suite('C6b-5 Local approval continuity against disposable PostgreSQL', () => {
       expect((await db.query('SELECT * FROM hunt_template_reviews ORDER BY template_id,version')).rows).toEqual(reviewHistory.rows);
       expect((await db.query('SELECT * FROM hunts ORDER BY id')).rows).toEqual(historicalHunts);
       expect((await db.query('SELECT count(*) FROM hunt_templates WHERE local_approved_version IS NOT NULL OR local_suspended_at IS NOT NULL')).rows[0].count).toBe('0');
+      // Migration 046 adds hunt_templates.custom_request_id (in schema.sql too); apply it so the fresh-schema comparison matches.
+      await customRequestsMigration.up(client); await customWorkflowMigration.up(client);
     } finally { client.release(); }
     const {environment}=await import('../config/environment.js');environment.databaseUrl=url.toString();
     appPool=(await import('../lib/postgres.js')).pool;
