@@ -86,9 +86,29 @@ try {
     if (problems.length) { console.log('ABORTED: preflight failed; nothing executed.'); process.exitCode = 3; }
     else {
       const sql = readFileSync(sqlPath, 'utf8');
+      // Existing Localities and city-to-Locality links (e.g. canonical Cluj-Napoca) must survive unchanged.
+      const snapshot = async () => (await q(`SELECT (SELECT count(*) FROM localities)::int AS localities,
+        (SELECT md5(coalesce(string_agg(geoname_id || ':' || locality_id, ',' ORDER BY geoname_id), '')) FROM geographic_cities WHERE locality_id IS NOT NULL) AS links,
+        (SELECT count(*) FROM geographic_cities WHERE locality_id IS NOT NULL)::int AS linked_cities,
+        (SELECT count(*) FROM geographic_cities WHERE country_code='RO')::int AS ro_cities`))[0];
       const started = Date.now();
-      await client.query(sql); // One atomic DO statement; any error rolls everything back.
-      console.log(`IMPORT: completed in ${Date.now() - started} ms`);
+      await client.query('BEGIN');
+      const before = await snapshot();
+      await client.query(sql); // One atomic DO statement from the tested importer.
+      const after = await snapshot();
+      console.log('Preservation check (before → after):'); console.table([before, after]);
+      if (after.localities !== before.localities || after.links !== before.links || after.ro_cities < before.ro_cities) {
+        await client.query('ROLLBACK');
+        console.log('ABORTED: existing Localities or city links would change; rolled back, nothing imported.'); process.exitCode = 5;
+      } else {
+        await client.query('COMMIT');
+        console.log(`IMPORT: committed in ${Date.now() - started} ms`);
+        console.table(await q(`SELECT (SELECT count(*) FROM countries)::int AS countries,
+          (SELECT count(DISTINCT country_code) FROM geographic_cities)::int AS countries_with_cities,
+          (SELECT count(*) FROM geographic_regions)::int AS regions, (SELECT count(*) FROM geographic_cities)::int AS cities`));
+      }
+    }
+    if (process.exitCode === undefined) {
       const regions = await q("SELECT admin1_code, display_name FROM geographic_regions WHERE country_code='RO' ORDER BY admin1_code");
       console.log(`geographic_regions RO rows: ${regions.length}`); console.table(regions);
       console.table(await q('SELECT dataset, row_count, completed_at FROM geographic_imports ORDER BY imported_at DESC LIMIT 1'));
