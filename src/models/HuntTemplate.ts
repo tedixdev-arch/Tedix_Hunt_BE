@@ -1,3 +1,4 @@
+import { CustomHuntRequests } from './CustomHuntRequest.js';
 import { allocateLibraryContent, hasLibraryAllocations } from './TemplateContentAllocation.js';
 import { inheritedRadii, type CheckpointRadii, withRadiusDefaults } from '../domain/checkpointRadius.js';
 import { allocateCustomExercises, validateCustomExercises, CustomExerciseValidationError } from '../domain/customExercises.js';
@@ -281,6 +282,9 @@ export const HuntTemplates = {
 
       // ON DELETE CASCADE removes all unused draft versions. The deferred review
       // reference is safe even for changes_requested: both ends disappear together.
+      // A deleted custom draft returns its request to "assigned" so the Creator can link a new one.
+      if (template.custom_request_id) await client.query(
+        `UPDATE custom_hunt_requests SET status='assigned', updated_at=now() WHERE id=$1 AND status='in_progress'`, [template.custom_request_id]);
       await client.query('DELETE FROM hunt_templates WHERE id = $1', [template.id]);
       await client.query('COMMIT');
     } catch (error) {
@@ -605,6 +609,8 @@ export const HuntTemplates = {
          VALUES ($1, $2, $3, 'approved')`,
         [row.id, row.submitted_version, reviewerUserId],
       );
+      // A linked custom Hunt request completes in the same commit and queues the Organizer email.
+      if (row.category === 'local' && row.custom_request_id) await CustomHuntRequests.completeForApprovedTemplate(client, row.id);
       const state = row.category === 'local' ? await readLocalState(client, row.id) : {};
       await client.query('COMMIT');
       return { ...mapAdminReview({ ...reviewResult.rows[0], status: 'approved' }), ...state, status: 'approved' };

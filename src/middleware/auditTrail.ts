@@ -40,7 +40,9 @@ const rules: Rule[] = [
   { method: 'PATCH', path: new RegExp(`^/api/hunts/${id}/checkpoint-radii$`), action: 'hunt.radii_changed', category: 'hunts', targetType: 'hunt', summary: () => 'Changed Hunt detection radii', keep: ['checkpointPositions', 'finishPoint'] },
   { method: 'POST', path: new RegExp(`^/api/hunts/${id}/participants/${id}/checkpoints/${id}/check-in$`), action: 'safety.arrival_confirmed', category: 'safety', targetType: 'hunt', summary: () => 'Organizer confirmed participant arrival (GPS fallback)' },
   { method: 'POST', path: new RegExp(`^/api/hunts/${id}/help-requests/${id}/resolve$`), action: 'safety.help_resolved', category: 'safety', targetType: 'hunt', summary: () => 'Resolved participant help request' },
-  { method: 'PATCH', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}$`), action: 'custom_request.updated', category: 'requests', targetType: 'custom_hunt_request', summary: (_m, b) => b.status ? `Custom Hunt request set to ${b.status}` : 'Updated custom Hunt request note', keep: ['status'] },
+  { method: 'PATCH', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}$`), action: 'custom_request.updated', category: 'requests', targetType: 'custom_hunt_request', summary: (_m, b) => b.status ? `Custom Hunt request set to ${b.status}` : 'Updated custom Hunt request notes', keep: ['status'] },
+  { method: 'POST', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}/assign$`), action: 'custom_request.assigned', category: 'requests', targetType: 'custom_hunt_request', summary: () => 'Assigned custom Hunt request to a Creator', keep: ['creatorUserId'] },
+  { method: 'POST', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}/reject$`), action: 'custom_request.rejected', category: 'requests', targetType: 'custom_hunt_request', summary: () => 'Rejected custom Hunt request' },
   { method: 'POST', path: /^\/api\/auth\/change-password$/, action: 'account.password_changed', category: 'account', targetType: 'user', summary: () => 'Changed own password' },
 ];
 

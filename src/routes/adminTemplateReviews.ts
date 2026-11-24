@@ -1,6 +1,7 @@
 import { validRadiusPatch } from '../domain/checkpointRadius.js';
 import { HuntTemplateNotEditableError, HuntTemplateNotFoundError, HuntTemplateVersionNotLatestError } from '../models/HuntTemplate.js';
 import express from 'express';
+import { flushMail } from '../lib/mail.js';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import { HuntTemplateNotReviewableError, HuntTemplateSelfApprovalError, HuntTemplates, TemplateLocalityError, InvalidHuntTemplateContentError, TemplateEligibilityConflictError } from '../models/HuntTemplate.js';
 
@@ -61,6 +62,7 @@ router.post('/:key/approve', requireAuth, requireRole('admin'), async (request: 
     const approved = await HuntTemplates.approveSubmittedCreator(
       key, request.user!.id, ...(body?.version === undefined ? [] : [body.version]),
     );
+    if (approved) void flushMail();
     return approved
       ? response.json(approved)
       : response.status(404).json({ error: 'not_found' });

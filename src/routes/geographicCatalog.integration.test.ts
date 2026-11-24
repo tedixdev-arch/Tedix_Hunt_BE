@@ -9,6 +9,8 @@ import catalogMigration from '../db/migrations/032_geographic_catalog.js';
 import completionMigration from '../db/migrations/033_geographic_import_completion.js';
 import regionsMigration from '../db/migrations/037_geographic_regions.js';
 import kosovoMigration from '../db/migrations/034_geonames_kosovo_country.js';
+import customRequestsMigration from '../db/migrations/039_custom_hunt_requests.js';
+import customWorkflowMigration from '../db/migrations/046_custom_hunt_workflow.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
 const city=(id: string,name='Cluj-Napoca',extra: Partial<CityImport>={}): CityImport=>({id,country:'RO',countryName:'Romania',name,
@@ -33,7 +35,10 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);
+   expect(await history()).toEqual(before);
+   // Local template discovery reads the custom Hunt link (exclusive templates).
+   await customRequestsMigration.up(c);await customWorkflowMigration.up(c);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;

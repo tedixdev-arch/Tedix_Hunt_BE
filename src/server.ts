@@ -4,6 +4,7 @@ import { environment } from './config/environment.js';
 import { connectPostgres, disconnectPostgres } from './lib/postgres.js';
 import { createGracefulShutdown } from './lib/shutdown.js';
 import { PlatformSettings } from './models/PlatformSettings.js';
+import { flushMail } from './lib/mail.js';
 
 const start = async () => {
   await connectPostgres();
@@ -14,6 +15,10 @@ const start = async () => {
   await refreshSettings();
   const settingsRefresh = setInterval(() => void refreshSettings(), 30_000);
   settingsRefresh.unref();
+  // Deliver queued email (custom Hunt notifications) and retry earlier failures.
+  const mailRetry = setInterval(() => void flushMail(), 60_000);
+  mailRetry.unref();
+  void flushMail();
 
   const app = createApp();
   const server = app.listen(environment.port, environment.host, () => {
