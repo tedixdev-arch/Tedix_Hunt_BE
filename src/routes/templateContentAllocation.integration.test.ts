@@ -155,6 +155,14 @@ type Actor={id:string;auth:string};
   const r=await source(exerciseFixtures[0],{geography:{scope:'city',countryCode:'RO',geographicId:'990001'}});
   expect((await save(content([{personal:specific(r)},null]),{category:'local',localityId:unknown}).expect(400)).body.error).toBe('allocation_geography_mismatch');
  });
+ it('a manual Locality (approved proposal) uses its own region for region content but never matches a city',async()=>{
+  const manual=(await db.query("INSERT INTO localities(country_code,name,administrative_context,latitude,longitude,provenance,admin1_code) VALUES ('RO','Manual hamlet','Test',46,23,'Manual proposal test','ALLOC') RETURNING id")).rows[0].id;
+  for(const [geography,eligible] of [[{scope:'region',countryCode:'RO',admin1Code:'ALLOC'},true],[{scope:'region',countryCode:'RO',admin1Code:'OTHER'},false],
+    [{scope:'city',countryCode:'RO',geographicId:'990001'},false]] as const){
+   const r=await source(exerciseFixtures[0],{geography});const res=await save(content([{personal:specific(r)},null]),{category:'local',localityId:manual}).expect(eligible?201:400);
+   if(!eligible)expect(res.body.error).toBe('allocation_geography_mismatch');
+  }
+ });
  it('rejects invalid checkpoint assignment, conflicting own exercise and fabricated Random pins',async()=>{
   const r=await source(),c=content([{personal:specific(r)},null]);c.checkpoints[0].checkpoint=99;
   expect((await save(c).expect(400)).body.error).toBe('invalid_checkpoint_assignment');

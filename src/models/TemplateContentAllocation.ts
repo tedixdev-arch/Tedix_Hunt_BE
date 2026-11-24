@@ -90,8 +90,10 @@ export async function allocateLibraryContent(client: PoolClient, input: unknown,
   // Restrict random candidates by authoritative category/grade before returning payloads.
   // Exact selections are also returned when invalid so errors distinguish identity/approval/eligibility.
   const rows = (await client.query(`WITH location AS MATERIALIZED (
-    SELECT l.country_code,g.geoname_id,g.admin1_code,
-      EXISTS(SELECT 1 FROM geographic_regions rg WHERE rg.country_code=g.country_code AND rg.admin1_code=g.admin1_code) AS region_known
+    -- Region from the linked GeoNames city; a manual Locality (approved proposal) uses its own region (migration 046).
+    SELECT l.country_code,g.geoname_id,CASE WHEN g.geoname_id IS NULL THEN l.admin1_code ELSE g.admin1_code END AS admin1_code,
+      EXISTS(SELECT 1 FROM geographic_regions rg WHERE rg.country_code=l.country_code
+        AND rg.admin1_code=CASE WHEN g.geoname_id IS NULL THEN l.admin1_code ELSE g.admin1_code END) AS region_known
     FROM localities l LEFT JOIN geographic_cities g ON g.locality_id=l.id AND g.country_code=l.country_code
     WHERE l.id=$3
   ), approved AS MATERIALIZED (

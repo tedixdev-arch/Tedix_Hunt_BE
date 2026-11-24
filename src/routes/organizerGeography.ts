@@ -3,6 +3,7 @@ import { requireAuth, requireAnyRole, type AuthRequest } from '../middleware/aut
 import { TokenBuckets } from '../middleware/abuseProtection.js';
 import { catalogCities, catalogRegions } from '../models/OrganizerGeography.js';
 import { Geography } from '../models/Geography.js';
+import { UNSPECIFIED_REGION, regionDisplayName, regionLabel } from '../domain/geographicRegions.js';
 import { LocalSelectionError } from '../models/OrganizerLocalTemplate.js';
 
 export const organizerGeographyRouter = Router();
@@ -91,9 +92,14 @@ router.get(['/countries','/regions','/cities'],async(req,res,next)=>{
       for(const c of await Geography.countries())items.set(c.code,{countryCode:c.code,displayName:c.displayName});
     } else if(kind==='regions') {
       for(const c of await catalogRegions(countryCode as string))items.set(region(c),{regionId:region(c),countryCode:c.countryCode,regionCode:c.regionCode,
-        label:c.regionCode===null?'Unknown region':c.regionDisplayName ?? c.regionCode,labelStatus:c.regionCode===null?'unspecified':c.regionDisplayName===null?'missing_label':'resolved',level:'admin1'});
+        label:regionDisplayName(c.regionCode ?? UNSPECIFIED_REGION,c.regionDisplayName),labelStatus:c.regionCode===null?'unspecified':c.regionDisplayName===null?'missing_label':'resolved',
+        level:'admin1',levelLabel:regionLabel(c.countryCode)});
     } else {
-      for(const c of await catalogCities(countryCode as string))if(region(c)===regionId)items.set(c.geographicId,{...c,regionId:region(c),source:'geonames',attribution:'GeoNames (CC BY 4.0)'});
+      for(const c of await catalogCities(countryCode as string))if(region(c)===regionId){
+        // Manual Localities have no GeoNames ID; their stable key is the Locality UUID.
+        const registry=c.source==='registry';
+        items.set(registry?`registry:${c.localityId}`:c.geographicId!,{...c,regionId:region(c),source:registry?'registry':'geonames',attribution:registry?null:'GeoNames (CC BY 4.0)'});
+      }
     }
     const sorted=[...items].sort(([a],[b])=>compare(a,b)).filter(([id])=>after===null||compare(id,after)>0);
     const page=sorted.slice(0,Number(limit));

@@ -75,8 +75,8 @@ suite('development Cluj seed against PostgreSQL', () => {
     expect((await db.query("SELECT count(*) FROM hunt_templates WHERE category='local' AND status='approved'")).rows[0].count).toBe('0');
     const beforeDiscovery = await snapshot();
     await get('/api/organizer/geography/countries','organizer').expect(200,{countries:[{countryCode:'RO',displayName:'Romania'}],nextCursor:null});
-    await get('/api/organizer/geography/regions?countryCode=RO','organizer').expect(200,{regions:[{regionId:'RO:admin1:13',countryCode:'RO',regionCode:'13',label:'Cluj',labelStatus:'resolved',level:'admin1'}],nextCursor:null});
-    await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13','organizer').expect(200,{cities:[{geographicId:'681290',countryCode:'RO',countryDisplayName:'Romania',localityId:results[0].localityId,name:'Cluj-Napoca',administrativeContext:'Cluj',regionCode:'13',regionDisplayName:'Cluj',regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
+    await get('/api/organizer/geography/regions?countryCode=RO','organizer').expect(200,{regions:[{regionId:'RO:admin1:13',countryCode:'RO',regionCode:'13',label:'Cluj',labelStatus:'resolved',level:'admin1',levelLabel:'County'}],nextCursor:null});
+    await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13','organizer').expect(200,{cities:[{geographicId:'681290',countryCode:'RO',countryDisplayName:'Romania',localityId:results[0].localityId,name:'Cluj-Napoca',administrativeContext:'Cluj',regionCode:'13',regionDisplayName:'Cluj',registeredActive:true,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
     await get(`/api/organizer/local-templates?countryCode=RO&localityId=${results[0].localityId}`,'organizer').expect(200,{templates:[],nextCursor:null});
     expect(await snapshot()).toEqual(beforeDiscovery);
   });
@@ -90,7 +90,7 @@ suite('development Cluj seed against PostgreSQL', () => {
     const countries = (await get('/api/organizer/geography/countries','organizer').expect(200)).body.countries;
     expect(countries).toContainEqual({countryCode:'HU',displayName:'Hungary'});
     const regions = (await get('/api/organizer/geography/regions?countryCode=RO','organizer').expect(200)).body.regions;
-    expect(regions).toContainEqual({regionId:'RO:admin1:99',countryCode:'RO',regionCode:'99',label:'Empty county',labelStatus:'resolved',level:'admin1'});
+    expect(regions).toContainEqual({regionId:'RO:admin1:99',countryCode:'RO',regionCode:'99',label:'Empty county',labelStatus:'resolved',level:'admin1',levelLabel:'County'});
     expect((await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13','organizer').expect(200)).body.cities).toContainEqual(expect.objectContaining({geographicId:'681290',localityId:null}));
     expect((await get('/api/geography/cities?countryCode=RO&admin1Code=13&q=cluj').expect(200)).body.cities).toContainEqual(expect.objectContaining({geographicId:'681290',localityId:null}));
     await get(`/api/organizer/local-templates?countryCode=RO&localityId=${seeded.localityId}`,'organizer').expect(200,{templates:[],nextCursor:null});
