@@ -4,6 +4,7 @@ import { Pool, type PoolClient } from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from './migrate.js';
+import { applyRemainingMigrations } from '../test/migrateRemaining.js';
 import approvalMigration from './migrations/027_local_template_approval.js';
 import bindingMigration from './migrations/026_template_locality_binding.js';
 import type { Migration } from './migrations/types.js';
@@ -91,6 +92,7 @@ suite('C6b-4 version locality binding against disposable PostgreSQL', () => {
       expect(await history()).toEqual(before);
       expect((await db.query('SELECT DISTINCT locality_id,locality_snapshot FROM hunt_template_versions')).rows).toEqual([{ locality_id: null, locality_snapshot: null }]);
       migrations.push(approvalMigration); await runMigrations(client, migrations);
+      await applyRemainingMigrations(client, migrations);
     } finally { client.release(); }
     const { environment } = await import('../config/environment.js'); environment.databaseUrl = url.toString();
     appPool = (await import('../lib/postgres.js')).pool;

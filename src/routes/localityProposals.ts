@@ -1,19 +1,21 @@
 import { Router, type ErrorRequestHandler } from 'express';
 import { requireAuth, requireRole, type AuthRequest } from '../middleware/auth.js';
 import { LocalityProposals, ProposalError, type ProposalInput } from '../models/LocalityProposal.js';
+import { isAdmin1Code } from '../domain/geographicRegions.js';
 
 const only = (value: unknown, fields: string[]): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
   && Object.keys(value).every(key => fields.includes(key));
 const text = (value: unknown, min: number, max: number): value is string =>
   typeof value === 'string' && value.trim().length >= min && value.length <= max && !/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value);
-const fields = ['countryCode','name','administrativeContext','latitude','longitude','explanation','evidenceReference'];
+const fields = ['countryCode','name','administrativeContext','latitude','longitude','explanation','evidenceReference','admin1Code'];
 /**
  * @openapi
  * /api/geography/locality-proposals:
  *   post:
  *     tags: [Geography]
- *     summary: Submit a missing locality for independent Admin review (Creator only)
+ *     summary: Submit a place missing from the GeoNames city list for independent Admin review (Creator only)
+ *     description: Proposals are only for places absent from the catalog. A same-name catalog city in the same region (or in the country when it has no regions) returns 409 catalog_city_exists; that city must be registered by an Admin instead.
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -31,9 +33,11 @@ const fields = ['countryCode','name','administrativeContext','latitude','longitu
  *               longitude: { type: number, minimum: -180, maximum: 180 }
  *               explanation: { type: string, minLength: 20, maxLength: 1000 }
  *               evidenceReference: { type: string, minLength: 20, maxLength: 1000, description: Independent source URL or retrievable citation supporting place and coordinates; Mapbox evidence forbidden }
+ *               admin1Code: { type: string, pattern: '^[A-Za-z0-9-]{1,40}$', description: GeoNames admin1 region of the place. Required when the country has catalog regions; copied to the approved Locality }
  *     responses:
  *       201: { description: Complete pending proposal; no Locality created }
- *       400: { description: Invalid fields, unsupported country or restricted evidence }
+ *       400: { description: invalid_input (fields, unsupported country/region, restricted evidence) or region_required }
+ *       409: { description: catalog_city_exists — the place is already in the GeoNames list; ask an Admin to register it }
  *       401: { description: Authentication required }
  *       403: { description: Active non-guest persisted Creator capability required }
  * /api/geography/locality-proposals/mine:
@@ -78,7 +82,7 @@ const fields = ['countryCode','name','administrativeContext','latitude','longitu
  *       401: { description: Authentication required }
  *       403: { description: Admin required or self-review forbidden }
  *       404: { description: Unknown proposal }
- *       409: { description: proposal_not_reviewable or locality_duplicate_conflict; duplicate remains pending for Admin resolution }
+ *       409: { description: proposal_not_reviewable, locality_duplicate_conflict or catalog_city_exists; the proposal remains pending for Admin resolution }
  */
 export const localityProposalsRouter = Router();
 localityProposalsRouter.use(requireAuth, requireRole('creator'));
@@ -90,7 +94,8 @@ localityProposalsRouter.post('/', async (req: AuthRequest, res, next) => {
     || !text(body.evidenceReference, 20, 1000) || /mapbox/i.test(body.evidenceReference) || /mapbox/i.test(body.explanation)
     || !/[\p{L}]{3}/u.test(body.evidenceReference)
     || typeof body.latitude !== 'number' || !Number.isFinite(body.latitude) || Math.abs(body.latitude) > 90
-    || typeof body.longitude !== 'number' || !Number.isFinite(body.longitude) || Math.abs(body.longitude) > 180) {
+    || typeof body.longitude !== 'number' || !Number.isFinite(body.longitude) || Math.abs(body.longitude) > 180
+    || (body.admin1Code !== undefined && !isAdmin1Code(body.admin1Code))) {
     return res.status(400).json({ error: 'invalid_input' });
   }
   const input = Object.fromEntries(Object.entries(body).map(([key,value]) => [key, typeof value === 'string' ? value.trim() : value])) as unknown as ProposalInput;
