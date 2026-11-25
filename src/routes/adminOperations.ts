@@ -16,18 +16,12 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
  *     security: [{ bearerAuth: [] }]
  *     summary: Platform metrics and pending work counts
  *     responses: { 200: { description: Dashboard metrics } }
- * /api/admin/hunts:
- *   get:
- *     tags: [Admin operations]
- *     security: [{ bearerAuth: [] }]
- *     summary: All Hunts across organizations with participant counts
- *     parameters: [{ in: query, name: status, schema: { type: string, enum: [draft, published, active, paused, cancelled, finished] } }]
- *     responses: { 200: { description: Hunt list } }
  * /api/admin/alerts:
  *   get:
  *     tags: [Admin operations]
  *     security: [{ bearerAuth: [] }]
  *     summary: Participant help and emergency requests across all Hunts
+ *     parameters: [{ in: query, name: huntId, schema: { type: string, format: uuid }, description: Only this Hunt's requests }]
  *     responses: { 200: { description: Alerts, open first } }
  * /api/admin/settings:
  *   get:
@@ -83,25 +77,13 @@ adminOperationsRouter.get('/dashboard', ...admin, async (_req, res) => {
   });
 });
 
-const huntStatuses = new Set(['draft', 'published', 'active', 'paused', 'cancelled', 'finished']);
-adminOperationsRouter.get('/hunts', ...admin, async (req, res) => {
-  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-  if (status !== undefined && !huntStatuses.has(status)) return res.status(400).json({ error: 'invalid_input' });
-  const { rows } = await pool.query(`SELECT h.id, h.name, h.status, h.city, h.country, to_char(h.start_date,'YYYY-MM-DD') AS start_date, h.start_time, h.capacity, h.created_at,
-      h.template_snapshot->>'displayName' AS template_name, o.id AS organization_id, o.name AS organization_name, o.independent,
-      (SELECT count(*) FROM hunt_participants p WHERE p.hunt_id=h.id)::int AS participants,
-      (SELECT count(*) FROM hunt_participants p WHERE p.hunt_id=h.id AND p.finished_at IS NOT NULL)::int AS finished,
-      (SELECT count(*) FROM hunt_help_requests r WHERE r.hunt_id=h.id AND r.status='open')::int AS open_alerts
-    FROM hunts h JOIN organizations o ON o.id=h.organization_id
-    WHERE ($1::text IS NULL OR h.status=$1) ORDER BY h.created_at DESC LIMIT 500`, [status ?? null]);
-  return res.json({ hunts: rows.map(r => ({ id: r.id, name: r.name, status: r.status, city: r.city, country: r.country,
-    startDate: r.start_date, startTime: r.start_time, capacity: r.capacity, createdAt: r.created_at, templateName: r.template_name,
-    organization: { id: r.organization_id, name: r.organization_name, independent: r.independent },
-    participants: r.participants, finished: r.finished, openAlerts: r.open_alerts })) });
-});
-
-adminOperationsRouter.get('/alerts', ...admin, async (_req, res) => {
-  res.json({ alerts: await Gameplay.openAlerts() });
+adminOperationsRouter.get('/alerts', ...admin, async (req, res) => {
+  const huntId = req.query.huntId;
+  if (Object.keys(req.query).some(k => k !== 'huntId') || (huntId !== undefined
+    && (typeof huntId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(huntId)))) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  res.json({ alerts: await Gameplay.openAlerts(typeof huntId === 'string' ? huntId : undefined) });
 });
 
 adminOperationsRouter.get('/settings', ...admin, (_req, res) => {

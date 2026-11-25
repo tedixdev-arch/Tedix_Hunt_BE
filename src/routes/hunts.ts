@@ -4,23 +4,16 @@ import { validRadiusPatch } from '../domain/checkpointRadius.js';
 import { projectHuntForReader } from '../domain/customExercises.js';
 import express from 'express';
 import { requireAnyRole, requireAuth, type AuthRequest } from '../middleware/auth.js';
-import { Hunt, type HuntStatus, type UpdateHuntGeneralSetupInput } from '../models/Hunt.js';
+import { Hunt, type UpdateHuntGeneralSetupInput } from '../models/Hunt.js';
 import { HuntRoles } from '../models/HuntRole.js';
 import { Organization } from '../models/Organization.js';
 import { HuntTemplates } from '../models/HuntTemplate.js';
 import { validTeamSize, supportedHuntOptionValues } from '../domain/huntOptions.js';
 import { validateHuntForPublish } from '../domain/huntReadiness.js';
+import { isLifecycleAction, lifecycleActions } from '../domain/huntLifecycle.js';
 
 const router = express.Router();
 
-const lifecycleActions: Record<string, { from: readonly HuntStatus[]; to: HuntStatus }> = {
-  publish: { from: ['draft'], to: 'published' },
-  start: { from: ['published'], to: 'active' },
-  pause: { from: ['active'], to: 'paused' },
-  resume: { from: ['paused'], to: 'active' },
-  cancel: { from: ['draft', 'published', 'active', 'paused'], to: 'cancelled' },
-  finish: { from: ['active', 'paused'], to: 'finished' },
-};
 
 const updateFields = new Set([
   'name', 'country', 'region', 'city', 'startDate', 'startTime', 'timezone',
@@ -453,8 +446,9 @@ for (const regenerate of [false, true]) {
  */
 router.post('/:id/:action', requireAuth, async (req: AuthRequest, res) => {
   const id = String(req.params.id);
-  const action = lifecycleActions[String(req.params.action)];
-  if (!action) return res.status(404).json({ error: 'not_found' });
+  const actionName = String(req.params.action);
+  if (!isLifecycleAction(actionName)) return res.status(404).json({ error: 'not_found' });
+  const action = lifecycleActions[actionName];
   const hunt = await Hunt.findById(id);
   if (!hunt) return res.status(404).json({ error: 'not_found' });
   if (!(await HuntRoles.hasRole(id, req.user!.id, 'organizer'))) {

@@ -254,12 +254,13 @@ export const Gameplay = {
     return rows[0] ? { id: rows[0].id, status: rows[0].status, resolvedAt: rows[0].resolved_at } : fail(404, 'not_found');
   },
 
-  /** Platform-wide open help requests for the Admin Safety Alerts view. */
-  async openAlerts() {
+  /** Platform-wide help requests (open first) for the Admin Safety Alerts view, optionally for one Hunt. */
+  async openAlerts(huntId?: string) {
     const { rows } = await pool.query(`SELECT r.id, r.hunt_id, h.name AS hunt_name, r.kind, r.message, r.status, r.created_at, r.resolved_at,
         COALESCE(NULLIF(trim(u.name),''), split_part(u.email,'@',1), 'Participant') AS display_name
       FROM hunt_help_requests r JOIN hunts h ON h.id=r.hunt_id JOIN hunt_participants hp ON hp.id=r.participant_id JOIN users u ON u.id=hp.user_id
-      ORDER BY (r.status='open') DESC, r.created_at DESC LIMIT 200`);
+      WHERE ($1::uuid IS NULL OR r.hunt_id=$1::uuid)
+      ORDER BY (r.status='open') DESC, r.created_at DESC LIMIT 200`, [huntId ?? null]);
     return rows.map(r => ({ id: r.id, huntId: r.hunt_id, huntName: r.hunt_name, displayName: r.display_name, kind: r.kind,
       message: r.message, status: r.status, createdAt: r.created_at, resolvedAt: r.resolved_at }));
   },
