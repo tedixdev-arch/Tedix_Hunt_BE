@@ -113,7 +113,12 @@ suite('Admin Hunt management against disposable PostgreSQL', () => {
     expect((await q(`organizationId=${orgB}`)).total).toBe(2);
     expect((await q(`organizerId=${organizer.id}`)).total).toBe(4);
     expect((await q('createdFrom=2026-03-01&createdTo=2026-04-01')).total).toBe(2);
-    expect((await q('sort=name&order=asc')).hunts[0].name).toBe('=cmd cancelled');
+    // Name sorting follows the database collation; punctuation ('=cmd …') ranks differently on Windows and Linux,
+    // so assert the order of the letter-only names, which every collation agrees on.
+    const letters = (rows: any[]) => rows.map(h => h.name).filter((n: string) => /^[A-Za-z]/.test(n));
+    const byName = ['Active trail', 'Draft trail', 'Finished Iasi', 'Paused Brasov', 'Published "quote", trail'];
+    expect(letters((await q('sort=name&order=asc')).hunts)).toEqual(byName);
+    expect(letters((await q('sort=name&order=desc')).hunts)).toEqual([...byName].reverse());
     const page2 = await q('pageSize=10&page=1&sort=created&order=asc');
     expect(page2.hunts[0].id).toBe(hunts.draft);
     const tiny = await q('pageSize=10&page=2');
