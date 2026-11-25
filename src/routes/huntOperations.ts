@@ -59,7 +59,8 @@ const staff = (roles: Array<'organizer' | 'supervisor'>, allowAdmin = false): Re
 router.get('/monitor', ...staff(['organizer', 'supervisor'], true), handle(async (req, res) => {
   res.json(await Gameplay.monitor(String(req.params.id)));
 }));
-router.post('/participants/:participantId/checkpoints/:checkpointId/check-in', ...staff(['organizer']), handle(async (req: AuthRequest, res) => {
+// Admins may confirm arrivals across Hunts (GPS fallback); the action is audited like an Organizer's.
+router.post('/participants/:participantId/checkpoints/:checkpointId/check-in', ...staff(['organizer'], true), handle(async (req: AuthRequest, res) => {
   const { participantId, checkpointId } = req.params as Record<string, string>;
   if (!uuid.test(participantId) || !uuid.test(checkpointId)) { res.status(404).json({ error: 'not_found' }); return; }
   res.json(await Gameplay.checkIn(String(req.params.id), participantId, checkpointId, req.user!.id));

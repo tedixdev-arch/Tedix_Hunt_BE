@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import type { AuthRequest } from './auth.js';
 import { Audit, type AuditCategory } from '../models/Audit.js';
+import { lifecycleActions, type HuntLifecycleAction } from '../domain/huntLifecycle.js';
 
 /**
  * L6/L1.6: records successful privileged actions after the response is sent. Rules match the
@@ -37,7 +38,15 @@ const rules: Rule[] = [
   { method: 'POST', path: new RegExp(`^/api/admin/locality-proposals/${id}/decision$`), action: 'locality_proposal.decided', category: 'templates', targetType: 'locality_proposal', summary: (_m, b) => `Decided locality proposal${b.decision ? `: ${b.decision}` : ''}`, keep: ['decision', 'reason'] },
   { method: 'POST', path: new RegExp(`^/api/hunts/${id}/(publish|start|pause|resume|cancel|finish)$`), action: 'hunt.lifecycle', category: 'hunts', targetType: 'hunt', summary: m => `Hunt ${({ publish: 'published', start: 'started', pause: 'paused', resume: 'resumed', cancel: 'cancelled', finish: 'finished' } as Record<string, string>)[m[2]]}` },
   { method: 'PATCH', path: new RegExp(`^/api/hunts/${id}/checkpoint-radii$`), action: 'hunt.radii_changed', category: 'hunts', targetType: 'hunt', summary: () => 'Changed Hunt detection radii', keep: ['checkpointPositions', 'finishPoint'] },
-  { method: 'POST', path: new RegExp(`^/api/hunts/${id}/participants/${id}/checkpoints/${id}/check-in$`), action: 'safety.arrival_confirmed', category: 'safety', targetType: 'hunt', summary: () => 'Organizer confirmed participant arrival (GPS fallback)' },
+  { method: 'POST', path: /^\/api\/hunts$/, action: 'hunt.created', category: 'hunts', targetType: 'hunt', summary: (_m, b) => `Created Hunt draft${b.name ? ` "${String(b.name).slice(0, 120)}"` : ''}`, keep: ['name', 'organizationId'] },
+  { method: 'PATCH', path: new RegExp(`^/api/hunts/${id}$`), action: 'hunt.updated', category: 'hunts', targetType: 'hunt', summary: (_m, b) => `Updated Hunt setup: ${Object.keys(b).join(', ') || 'no fields'}`,
+    keep: ['name', 'country', 'region', 'city', 'startDate', 'startTime', 'timezone', 'durationMinutes', 'capacity', 'contactName', 'templateKey', 'format', 'teamSize', 'accessMode', 'difficulty', 'checkpointOrder'] },
+  { method: 'PUT', path: new RegExp(`^/api/hunts/${id}/local-template$`), action: 'hunt.template_selected', category: 'hunts', targetType: 'hunt', summary: () => 'Selected Local Hunt template', keep: ['templateId', 'version', 'countryCode', 'localityId'] },
+  { method: 'POST', path: new RegExp(`^/api/hunts/${id}/access$`), action: 'hunt.access_created', category: 'hunts', targetType: 'hunt', summary: () => 'Created participant access code' },
+  { method: 'POST', path: new RegExp(`^/api/hunts/${id}/access/regenerate$`), action: 'hunt.access_regenerated', category: 'hunts', targetType: 'hunt', summary: () => 'Regenerated participant access code' },
+  { method: 'DELETE', path: new RegExp(`^/api/hunts/${id}/access$`), action: 'hunt.access_disabled', category: 'hunts', targetType: 'hunt', summary: () => 'Disabled participant access code' },
+  { method: 'POST', path: new RegExp(`^/api/admin/hunts/${id}/access$`), action: 'hunt.access_created', category: 'hunts', targetType: 'hunt', summary: () => 'Admin created participant access code' },
+  { method: 'POST', path: new RegExp(`^/api/hunts/${id}/participants/${id}/checkpoints/${id}/check-in$`), action: 'safety.arrival_confirmed', category: 'safety', targetType: 'hunt', summary: () => 'Confirmed participant arrival (GPS fallback)' },
   { method: 'POST', path: new RegExp(`^/api/hunts/${id}/help-requests/${id}/resolve$`), action: 'safety.help_resolved', category: 'safety', targetType: 'hunt', summary: () => 'Resolved participant help request' },
   { method: 'PATCH', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}$`), action: 'custom_request.updated', category: 'requests', targetType: 'custom_hunt_request', summary: (_m, b) => b.status ? `Custom Hunt request set to ${b.status}` : 'Updated custom Hunt request notes', keep: ['status'] },
   { method: 'POST', path: new RegExp(`^/api/admin/custom-hunt-requests/${id}/assign$`), action: 'custom_request.assigned', category: 'requests', targetType: 'custom_hunt_request', summary: () => 'Assigned custom Hunt request to a Creator', keep: ['creatorUserId'] },
@@ -45,10 +54,10 @@ const rules: Rule[] = [
   { method: 'POST', path: /^\/api\/auth\/change-password$/, action: 'account.password_changed', category: 'account', targetType: 'user', summary: () => 'Changed own password' },
 ];
 
-const extraDetails = (rule: Rule, m: string[]): Record<string, string> =>
+const extraDetails = (rule: Rule, m: string[]): Record<string, string | undefined> =>
   rule.action === 'safety.arrival_confirmed' ? { participantId: m[2], checkpointId: m[3] }
     : rule.action === 'safety.help_resolved' ? { helpRequestId: m[2] }
-    : rule.action === 'hunt.lifecycle' ? { transition: m[2] } : {};
+    : rule.action === 'hunt.lifecycle' ? { transition: m[2], newStatus: lifecycleActions[m[2] as HuntLifecycleAction]?.to } : {};
 
 // Unit tests mock individual queries; opt in explicitly (AUDIT_TRAIL=on) where a test covers auditing.
 const enabled = () => process.env.NODE_ENV !== 'test' || process.env.AUDIT_TRAIL === 'on';
@@ -60,13 +69,17 @@ export const auditTrail: RequestHandler = (req: AuthRequest, res, next) => {
   // Only the created identity's id is read from the response; tokens in it are never stored.
   let createdId: string | undefined;
   const json = res.json.bind(res);
-  res.json = (payload: any) => { if (typeof payload?.user?.id === 'string') createdId = payload.user.id; return json(payload); };
+  res.json = (payload: any) => {
+    if (typeof payload?.user?.id === 'string') createdId = payload.user.id;
+    else if (rule.action === 'hunt.created' && typeof payload?.id === 'string') createdId = payload.id;
+    return json(payload);
+  };
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 300 || !req.user) return;
     const match = rule.path.exec(path)!;
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Record<string, any> : {};
     const kept = Object.fromEntries((rule.keep ?? []).filter(k => body[k] !== undefined).map(k => [k, body[k]]));
-    const targetId = rule.action === 'user.provisioned' || rule.action === 'admin.provisioned' ? createdId : match[1];
+    const targetId = ['user.provisioned', 'admin.provisioned', 'hunt.created'].includes(rule.action) ? createdId : match[1];
     Audit.record({ actor: req.user, action: rule.action, category: rule.category, targetType: rule.targetType, targetId,
       summary: rule.summary(match, body), details: { ...kept, ...extraDetails(rule, match) } })
       .catch(error => console.error('Audit event could not be recorded', rule.action, error instanceof Error ? error.message : error));
