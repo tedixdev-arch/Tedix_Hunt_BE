@@ -181,7 +181,7 @@ router.post('/checkpoints/:checkpointId/proximity', handle(async (req: AuthReque
  *     tags: [Participant gameplay]
  *     security: [{ bearerAuth: [] }]
  *     summary: Submit a personal or team-stage answer for the current checkpoint
- *     description: The server checks the answer against the pinned Hunt snapshot. Wrong answers return correct=false without revealing expected values.
+ *     description: The server checks the answer against the pinned Hunt snapshot. Wrong answers return correct=false without revealing expected values. Custom (Creator or Library) exercises take `response`, shaped like the exercise answer without authoring flags (docs/Custom_Exercise_Gameplay.md); predefined content keeps `answers` / `answer`.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
  *       - { in: path, name: checkpointId, required: true, schema: { type: string, format: uuid } }
@@ -193,11 +193,12 @@ router.post('/checkpoints/:checkpointId/proximity', handle(async (req: AuthReque
  *             oneOf:
  *               - { type: object, required: [stage, answers], properties: { stage: { type: string, enum: [personal] }, answers: { type: object, additionalProperties: { type: string, maxLength: 200 } } } }
  *               - { type: object, required: [stage, answer], properties: { stage: { type: string, enum: [team] }, answer: { type: string, maxLength: 200 } } }
+ *               - { type: object, required: [stage, response], properties: { stage: { type: string, enum: [personal, team] }, response: { type: object, description: 'Custom exercise response, at most 8000 JSON characters' } } }
  *     responses:
  *       200: { description: Result and refreshed gameplay state }
- *       400: { description: Invalid body }
+ *       400: { description: Invalid body, or a body shaped for the other content source (custom vs predefined) }
  *       409: { description: Hunt not active, checkpoint not current or verified, or stage already solved }
- *       422: { description: Challenge content is not supported by pilot gameplay }
+ *       422: { description: The checkpoint has neither a predefined nor a custom challenge }
  *       429: { description: Too many attempts }
  * /api/hunts/{id}/participants/me/help:
  *   post:

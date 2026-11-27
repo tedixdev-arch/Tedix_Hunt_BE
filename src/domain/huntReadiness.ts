@@ -1,5 +1,5 @@
 import { validParticipationConfiguration } from './huntOptions.js';
-import { hasCustomExercises } from './customExercises.js';
+import { hasCustomExercises, validateCustomExercises } from './customExercises.js';
 import type { IHunt } from '../models/Hunt.js';
 
 export interface HuntReadinessIssue {
@@ -40,8 +40,10 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
   if (!hasText(hunt.contactName)) add({ section: 'general', field: 'contactName', message: 'Add a local contact' });
 
   const snapshot = hunt.templateSnapshot;
-  if (hasCustomExercises(snapshot)) add({ section: 'template', field: 'templateSnapshot',
-    message: 'Custom exercise gameplay is not yet supported; this Hunt cannot be published' });
+  // Custom and Library exercises are played by participant gameplay (docs/Custom_Exercise_Gameplay.md);
+  // the snapshot must still satisfy the exercise schemas it was approved under.
+  if (hasCustomExercises(snapshot) && validateCustomExercises(snapshot).length) add({ section: 'template', field: 'templateSnapshot',
+    message: 'This Hunt template has exercises that are no longer valid; ask the Creator to fix and resubmit the template' });
   const usableSnapshot = snapshot !== null && typeof snapshot === 'object'
     && hasText(snapshot.key) && Number.isInteger(snapshot.version) && (snapshot.version as number) >= 1
     && hasText(snapshot.displayName) && hasText(snapshot.theme)

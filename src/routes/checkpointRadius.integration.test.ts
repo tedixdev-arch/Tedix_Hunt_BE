@@ -183,7 +183,7 @@ suite('Task 5B real authenticated Express/PostgreSQL radius configuration', () =
     const h = (await db.query("INSERT INTO hunts(organization_id,created_by_user_id,name,status,template_key,template_version,template_snapshot) VALUES($1,$2,'History','published',$3,1,$4) RETURNING id", [org,users.organizer,signalClujNapocaV1.key,signalClujNapocaV1])).rows[0].id;
     expect((await state(h)).checkpoint_radius_configuration).toBeNull(); expect((await state(h)).template_snapshot).toEqual(signalClujNapocaV1);
   });
-  it('retains the custom gameplay publication guard after radius customization', async () => {
+  it('publishes a custom-exercise Hunt after radius customization', async () => {
     const key = `radius-custom-${randomUUID()}`;
     const c = customTemplateFixture(key, 1, exerciseFixtures.slice(0, 1));
     c.configuration.checkpointPositions = [{ checkpointNumber: 1, name: 'Start', latitude: 46, longitude: 23, radiusMeters: 25 }];
@@ -193,8 +193,8 @@ suite('Task 5B real authenticated Express/PostgreSQL radius configuration', () =
     await approve(key); const h = await hunt({ key, id });
     await override(h,key,point(1,30)).expect(200);
     await patch(`/api/hunts/${h}`, { country: 'Romania', region: 'County', city: 'Square', startDate: '2027-01-01', startTime: '10:00', timezone: 'Europe/Bucharest', durationMinutes: 60, capacity: 12, contactName: 'Contact', format: 'team', teamSize: 4, accessMode: 'invitation_only', difficulty: 'easy', checkpointOrder: 'recommended' }).expect(200);
-    const r = await post(`/api/hunts/${h}/publish`, {}, 'organizer').expect(422);
-    expect(r.body.issues.some((issue: any) => issue.message.includes('custom') || issue.message.includes('Custom'))).toBe(true);
-    expect((await state(h)).status).toBe('draft');
+    // Custom exercises are playable (docs/Custom_Exercise_Gameplay.md), so they no longer block publication.
+    await post(`/api/hunts/${h}/publish`, {}, 'organizer').expect(200);
+    expect((await state(h)).status).toBe('published');
   });
 });
