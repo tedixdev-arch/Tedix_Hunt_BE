@@ -5,6 +5,8 @@ export interface CatalogCity {
   /** Catalog cities have a GeoNames ID; manual Localities from approved proposals have null. */
   geographicId: string | null;
   localityId: string | null; name: string; administrativeContext: string; regionCode: string | null; regionDisplayName: string | null;
+  /** Official admin2 subdivision; null when none matches (and always for manual Localities). */
+  subregionCode: string | null; subregionDisplayName: string | null;
   registeredActive?: boolean; source?: 'geonames' | 'registry';
 }
 
@@ -14,15 +16,17 @@ export async function catalogCities(countryCode: string): Promise<CatalogCity[]>
     g.country_code AS "countryCode",c.display_name AS "countryDisplayName",
     l.id AS "localityId",g.name,g.administrative_context AS "administrativeContext",
     CASE WHEN g.admin1_code IN ('','00') THEN NULL ELSE g.admin1_code END AS "regionCode",
-    r.display_name AS "regionDisplayName",COALESCE(l.active,false) AS "registeredActive",NULL::text AS "source"
+    r.display_name AS "regionDisplayName",s.admin2_code AS "subregionCode",s.display_name AS "subregionDisplayName",
+    COALESCE(l.active,false) AS "registeredActive",NULL::text AS "source"
     FROM geographic_cities g JOIN countries c ON c.code=g.country_code
     LEFT JOIN localities l ON l.id=g.locality_id AND l.country_code=g.country_code
     LEFT JOIN geographic_regions r ON r.country_code=g.country_code AND r.admin1_code=g.admin1_code
+    LEFT JOIN geographic_subregions s ON s.country_code=g.country_code AND s.admin1_code=g.admin1_code AND s.admin2_code=g.admin2_code
     WHERE g.country_code=$1
     UNION ALL
     -- Manual Localities (approved proposals) are not GeoNames cities but are usable places in their region.
     SELECT NULL,l.country_code,c.display_name,l.id,l.name,l.administrative_context,l.admin1_code,
-      r.display_name,l.active,'registry'
+      r.display_name,NULL,NULL,l.active,'registry'
     FROM localities l JOIN countries c ON c.code=l.country_code
     LEFT JOIN geographic_regions r ON r.country_code=l.country_code AND r.admin1_code=l.admin1_code
     WHERE l.country_code=$1 AND l.active AND NOT EXISTS(SELECT 1 FROM geographic_cities g WHERE g.locality_id=l.id)`, [countryCode])).rows;
@@ -38,4 +42,19 @@ export async function catalogRegions(countryCode: string): Promise<Pick<CatalogC
     CASE WHEN codes.admin1_code IN ('','00') THEN NULL ELSE codes.admin1_code END AS "regionCode",
     r.display_name AS "regionDisplayName"
     FROM codes LEFT JOIN geographic_regions r ON r.country_code=codes.country_code AND r.admin1_code=codes.admin1_code`, [countryCode])).rows;
+}
+
+/**
+ * Official admin2 subdivisions of one region, plus `unspecified` (null code) when some cities or active manual
+ * Localities match none. Empty when the region has no named subdivisions.
+ */
+export async function catalogSubregions(countryCode: string, regionCode: string): Promise<{ subregionCode: string | null; subregionDisplayName: string }[]> {
+  const rows = (await pool.query(`SELECT admin2_code AS "subregionCode",display_name AS "subregionDisplayName"
+    FROM geographic_subregions WHERE country_code=$1 AND admin1_code=$2`, [countryCode, regionCode])).rows;
+  if (!rows.length) return [];
+  const other = (await pool.query(`SELECT EXISTS(SELECT 1 FROM geographic_cities g WHERE g.country_code=$1 AND g.admin1_code=$2
+      AND NOT EXISTS(SELECT 1 FROM geographic_subregions s WHERE s.country_code=g.country_code AND s.admin1_code=g.admin1_code AND s.admin2_code=g.admin2_code))
+    OR EXISTS(SELECT 1 FROM localities l WHERE l.country_code=$1 AND l.admin1_code=$2 AND l.active
+      AND NOT EXISTS(SELECT 1 FROM geographic_cities g WHERE g.locality_id=l.id)) AS other`, [countryCode, regionCode])).rows[0].other;
+  return other ? [...rows, { subregionCode: null, subregionDisplayName: '' }] : rows;
 }

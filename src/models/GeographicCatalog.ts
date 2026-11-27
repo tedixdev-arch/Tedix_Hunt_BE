@@ -3,7 +3,7 @@ import { pool } from '../lib/postgres.js';
 import { artifactSelect, resolveLocalArtifact } from './OrganizerLocalTemplate.js';
 
 import { normalizeCityName } from '../domain/geographicNames.js';
-import { UNSPECIFIED_REGION, isAdmin1Code, placeIdentity, regionDisplayName, regionLabel } from '../domain/geographicRegions.js';
+import { UNSPECIFIED_REGION, UNSPECIFIED_SUBREGION, UNSPECIFIED_SUBREGION_LABEL, isAdmin1Code, placeIdentity, regionDisplayName, regionLabel, subregionLabel } from '../domain/geographicRegions.js';
 export { normalizeCityName } from '../domain/geographicNames.js';
 export class CatalogError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
@@ -11,9 +11,14 @@ export class CatalogError extends Error {
 const projection = `g.geoname_id::text AS "geographicId",g.country_code AS "countryCode",c.display_name AS "countryDisplayName",
  g.admin1_code AS "admin1Code",r.display_name AS "regionDisplayName",
  CASE WHEN g.admin1_code IN ('','00') THEN 'unspecified' WHEN r.admin1_code IS NULL THEN 'missing_label' ELSE 'resolved' END AS "regionStatus",
+ CASE WHEN s.admin2_code IS NULL THEN '${UNSPECIFIED_SUBREGION}' ELSE s.admin2_code END AS "admin2Code",s.display_name AS "subregionDisplayName",
  g.name,g.administrative_context AS "administrativeContext",g.latitude,g.longitude,
  g.locality_id AS "localityId",COALESCE(l.active AND l.country_code=g.country_code,false) AS "registeredActive"`;
-const joins = `FROM geographic_cities g JOIN countries c ON c.code=g.country_code LEFT JOIN localities l ON l.id=g.locality_id LEFT JOIN geographic_regions r ON r.country_code=g.country_code AND r.admin1_code=g.admin1_code`;
+const joins = `FROM geographic_cities g JOIN countries c ON c.code=g.country_code LEFT JOIN localities l ON l.id=g.locality_id LEFT JOIN geographic_regions r ON r.country_code=g.country_code AND r.admin1_code=g.admin1_code
+ LEFT JOIN geographic_subregions s ON s.country_code=g.country_code AND s.admin1_code=g.admin1_code AND s.admin2_code=g.admin2_code`;
+// A city belongs to the unspecified subregion group when no official subdivision record matches it.
+const noSubregion = (alias: string) => `NOT EXISTS(SELECT 1 FROM geographic_subregions sx
+ WHERE sx.country_code=${alias}.country_code AND sx.admin1_code=${alias}.admin1_code AND sx.admin2_code=${alias}.admin2_code)`;
 
 // Completion and catalog rows must both be committed before reads can claim availability.
 async function catalogReady(db: Pick<PoolClient, 'query'> = pool): Promise<boolean> {
@@ -63,6 +68,7 @@ async function registryLocalities(country: string, normalizedQuery: string | nul
   const rows = (await pool.query(`SELECT NULL::text AS "geographicId",l.country_code AS "countryCode",c.display_name AS "countryDisplayName",
       COALESCE(l.admin1_code,'${UNSPECIFIED_REGION}') AS "admin1Code",r.display_name AS "regionDisplayName",
       CASE WHEN l.admin1_code IS NULL THEN 'unspecified' WHEN r.admin1_code IS NULL THEN 'missing_label' ELSE 'resolved' END AS "regionStatus",
+      '${UNSPECIFIED_SUBREGION}' AS "admin2Code",NULL::text AS "subregionDisplayName",
       l.name,l.administrative_context AS "administrativeContext",l.latitude,l.longitude,l.id AS "localityId",l.active AS "registeredActive",
       'registry' AS source
     FROM localities l JOIN countries c ON c.code=l.country_code
@@ -103,15 +109,41 @@ export const GeographicCatalog = {
       metadataStatus:missing?'incomplete':'ready'};
   },
   /**
+   * Official admin2 subdivisions of one region, plus an explicit `unspecified` group when some cities (or manual
+   * Localities) of the region match none. Empty when the region has no named subdivisions: clients then skip
+   * the level. Never paged: the largest regions have a few hundred subdivisions.
+   */
+  async subregions(country: string, admin1Code: string) {
+    await requireCatalogReady();
+    const rows = (await pool.query(`SELECT s.admin2_code AS "admin2Code",s.display_name AS "displayName"
+      FROM geographic_subregions s WHERE s.country_code=$1 AND s.admin1_code=$2
+      ORDER BY lower(s.display_name),s.admin2_code LIMIT 5000`, [country, admin1Code])).rows;
+    const other = rows.length > 0 && (await pool.query(`SELECT EXISTS(SELECT 1 FROM geographic_cities g
+        WHERE g.country_code=$1 AND g.admin1_code=$2 AND ${noSubregion('g')})
+      OR EXISTS(SELECT 1 FROM localities l WHERE l.country_code=$1 AND l.admin1_code=$2
+        AND NOT EXISTS(SELECT 1 FROM geographic_cities g WHERE g.locality_id=l.id)) AS other`, [country, admin1Code])).rows[0].other;
+    return {
+      subregions: [
+        ...rows.map(r => ({ countryCode: country, admin1Code, admin2Code: r.admin2Code, displayName: r.displayName, labelStatus: 'resolved' })),
+        ...(other ? [{ countryCode: country, admin1Code, admin2Code: UNSPECIFIED_SUBREGION, displayName: UNSPECIFIED_SUBREGION_LABEL, labelStatus: 'unspecified' }] : []),
+      ],
+      regionLabel: regionLabel(country), subregionLabel: subregionLabel(country),
+    };
+  },
+  /**
    * City choices for one country. With a query, prefix-matches names and aliases; without a query (region
    * required by the route) lists every city of the region. Pages use stable GeoNames ID order.
    * The first page also returns active and inactive manual Localities (approved proposals that are not
    * GeoNames cities) as `registryLocalities`, in the same shape with a null geographicId.
    */
-  async search(country: string, query: string | undefined, limit: number, after: string, admin1Code?: string) {
+  async search(country: string, query: string | undefined, limit: number, after: string, admin1Code?: string, admin2Code?: string) {
     await requireCatalogReady();
-    const region = admin1Code === UNSPECIFIED_REGION ? `(filtered.admin1_code IN ('','00') AND $5::text IS NULL)`
-      : `($5::text IS NULL OR filtered.admin1_code=$5)`;
+    // Optional subregion filter (the route requires a concrete region with it): one subdivision, or the cities
+    // matching no official subdivision ("unspecified").
+    const subregion = admin2Code === UNSPECIFIED_SUBREGION ? `($6::text IS NULL AND ${noSubregion('filtered')})`
+      : `($6::text IS NULL OR filtered.admin2_code=$6)`;
+    const region = (admin1Code === UNSPECIFIED_REGION ? `(filtered.admin1_code IN ('','00') AND $5::text IS NULL)`
+      : `($5::text IS NULL OR filtered.admin1_code=$5)`) + ` AND ${subregion}`;
     const regionParam = admin1Code === UNSPECIFIED_REGION ? null : admin1Code ?? null;
     const normalized = query === undefined ? null : normalizeCityName(query);
     const pattern = normalized === null ? null : normalized.replace(/[\\%_]/g, '\\$&') + '%';
@@ -125,9 +157,11 @@ export const GeographicCatalog = {
           ORDER BY n.geoname_id LIMIT $4`;
     const rows = (await pool.query(`WITH matches AS MATERIALIZED (${matches})
       SELECT ${projection} ${joins} JOIN matches m ON m.geoname_id=g.geoname_id ORDER BY g.geoname_id`,
-      [country,pattern,after,limit+1,regionParam])).rows;
+      [country,pattern,after,limit+1,regionParam,admin2Code === UNSPECIFIED_SUBREGION ? null : admin2Code ?? null])).rows;
     const more = rows.length > limit; rows.splice(limit);
-    const registry = after === '0' ? await registryLocalities(country, normalized, admin1Code) : [];
+    // Manual Localities have no subdivision: listed for the whole region and in its unspecified group only.
+    const registry = after === '0' && (admin2Code === undefined || admin2Code === UNSPECIFIED_SUBREGION)
+      ? await registryLocalities(country, normalized, admin1Code) : [];
     return { cities: await present(rows), registryLocalities: await present(registry), nextAfter: more ? rows.at(-1).geographicId : null };
   },
   async get(id: string) {

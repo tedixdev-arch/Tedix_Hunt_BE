@@ -100,7 +100,7 @@ jobs:
           REVOKE CREATE ON SCHEMA public FROM PUBLIC;
           GRANT USAGE ON SCHEMA public TO geonames_package_app;
           GRANT SELECT ON schema_migrations TO geonames_package_app;
-          GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names,geographic_regions TO geonames_package_app;
+          GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names,geographic_regions,geographic_subregions TO geonames_package_app;
           SQL
       - name: Verify initial catalog state
         id: initial

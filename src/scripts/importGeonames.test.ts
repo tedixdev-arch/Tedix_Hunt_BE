@@ -23,7 +23,7 @@ async function parse(options:{ fields?:Record<number,string>; admin1?:string; ad
 describe('GeoNames optional administrative labels',()=>{
  it('preserves complete source records and administrative label order',async()=>{
   expect(await parse()).toEqual([{id:'900',country:'RO',countryName:'Romania',name:'Test Town',aliases:['Test Town','Tést Alias'],
-   context:'Municipality, Cluj County',admin1Name:'Cluj County',admin1:'13',admin2:'54975',latitude:46,longitude:23,population:1234,modified:'2026-10-01'}]);
+   context:'Municipality, Cluj County',admin1Name:'Cluj County',admin1:'13',admin2Name:'Municipality',admin2:'54975',latitude:46,longitude:23,population:1234,modified:'2026-10-01'}]);
  });
  it.each([
   ['missing admin1',{admin1:''},'Municipality'],
@@ -31,7 +31,8 @@ describe('GeoNames optional administrative labels',()=>{
   ['missing both',{admin1:'',admin2:''},'Romania'],
   ['blank labels',{admin1:'RO.13\t   \t\t1\n',admin2:'RO.13.54975\t\t\t2\n'},'Romania'],
  ] as const)('keeps identity and codes with %s',async(_name,options,context)=>{
-  const [complete]=await parse();expect(await parse(options)).toEqual([{...complete,context,admin1Name:context.includes('Cluj County')?'Cluj County':undefined}]);
+  // A subdivision record needs both official labels (admin2 under a named admin1 region).
+  const [complete]=await parse();expect(await parse(options)).toEqual([{...complete,context,admin1Name:context.includes('Cluj County')?'Cluj County':undefined,admin2Name:undefined}]);
  });
  it.each([
   ['no codes',{10:'',11:''},'Romania'],
@@ -39,7 +40,14 @@ describe('GeoNames optional administrative labels',()=>{
   ['no admin1 code',{10:''},'Romania'],
   ['unspecified admin1',{10:'00',11:''},'Romania'],
  ] as const)('retains incomplete source codes: %s',async(_name,fields,context)=>{
-  const [complete]=await parse();expect(await parse({fields})).toEqual([{...complete,admin1Name:context.includes('Cluj County')?'Cluj County':undefined,admin1:fields[10 as keyof typeof fields]??source[10],admin2:fields[11 as keyof typeof fields]??source[11],context}]);
+  const [complete]=await parse();expect(await parse({fields})).toEqual([{...complete,admin1Name:context.includes('Cluj County')?'Cluj County':undefined,admin2Name:undefined,admin1:fields[10 as keyof typeof fields]??source[10],admin2:fields[11 as keyof typeof fields]??source[11],context}]);
+ });
+ it.each([
+  ['the GeoNames 00 placeholder','00','RO.13.00\tPlaceholder\t\t1\n'],
+  ['a name used as a code','Itum-Kalinskiy Rayon','RO.13.Itum-Kalinskiy Rayon\tItum-Kalinskiy Rayon\t\t1\n'],
+ ] as const)('never makes a subdivision record from %s',async(_name,code,admin2)=>{
+  const [row]=await parse({fields:{11:code},admin2});
+  expect(row.admin2).toBe(code);expect(row.admin2Name).toBeUndefined();
  });
  it('does not resolve an admin2 label through an incomplete or another country/parent key',async()=>{
   const [row]=await parse({fields:{10:''},admin2:'RO..54975\tUnscoped\t\t1\nUS.13.54975\tOther country\t\t2\nRO.99.54975\tOther parent\t\t3\n'});

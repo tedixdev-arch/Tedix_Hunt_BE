@@ -65,3 +65,30 @@ The dev script (`scripts/ci/dev-geonames.mjs`) runs the package in one transacti
 number of Localities and every existing city-to-Locality link (including canonical Cluj-Napoca) are unchanged
 and no Romanian city disappears. Otherwise it rolls back (exit 5). The import updates existing catalog rows in
 place, so rerunning the same package creates no duplicates; each run adds one `geographic_imports` record.
+
+### Low-memory alternative on the dev server (`import-files`)
+
+The worldwide `import.sql` is one ~485 MB statement. PostgreSQL must hold all of it in memory, which can run a
+small server out of memory (the dev box: 4 GB RAM, no swap, PostgreSQL on the same machine). Instead,
+stream the four official files through the deployed importer, which reads `cities500.txt` line by line and
+writes in batches of 500, inside the same preservation-checked transaction:
+
+1. Run **GeoNames pgAdmin Import Package** with scope **Worldwide** and note `sha256` in its `manifest.json`
+   (the fingerprint of the four input files that CI just tested). GeoNames files change daily, so download
+   them on the server the same day.
+2. On the dev server, use a disk folder, not `/tmp` (tmpfs is held in RAM):
+   ```
+   mkdir -p /var/tmp/tedix-geonames && cd /var/tmp/tedix-geonames
+   for f in cities500.zip countryInfo.txt admin1CodesASCII.txt admin2Codes.txt; do
+     curl --fail --proto '=https' -sSO "https://download.geonames.org/export/dump/$f"; done
+   unzip -o cities500.zip cities500.txt && sha256sum *
+   ```
+   Compare the hashes with that run's `provenance.md`.
+3. Copy the reviewed `scripts/ci/dev-geonames.mjs` to `/var/tmp/tedix-geonames/`, then from the deploy directory:
+   ```
+   cd /var/www/Tedix_Hunt_BE
+   node /var/tmp/tedix-geonames/dev-geonames.mjs check
+   node /var/tmp/tedix-geonames/dev-geonames.mjs import-files /var/tmp/tedix-geonames <manifest sha256>
+   ```
+   It refuses to write unless the four files match the fingerprint (exit 6). It commits only if the Localities,
+   city links and Romanian cities are preserved; otherwise it rolls back (exit 5, or exit 1 on an importer error).

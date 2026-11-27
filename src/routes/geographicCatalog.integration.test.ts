@@ -9,6 +9,7 @@ import catalogMigration from '../db/migrations/032_geographic_catalog.js';
 import completionMigration from '../db/migrations/033_geographic_import_completion.js';
 import regionsMigration from '../db/migrations/037_geographic_regions.js';
 import localityRegionMigration from '../db/migrations/046_locality_regions.js';
+import subregionsMigration from '../db/migrations/047_geographic_subregions.js';
 import kosovoMigration from '../db/migrations/034_geonames_kosovo_country.js';
 import { signalClujNapocaV1 } from '../domain/templates/signalClujNapocaV1.js';
 const suite=process.env.TEST_DATABASE_URL?describe:describe.skip;
@@ -34,7 +35,7 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    const dir=new URL('../db/migrations/',import.meta.url);const migrations=[];
    for(const f of (await readdir(dir)).filter(f=>/^\d{3}_.*\.ts$/.test(f)&&f<'032').sort())migrations.push((await import(new URL(f,dir).href)).default);
    await runMigrations(c,migrations);
-   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);await localityRegionMigration.up(c);expect(await history()).toEqual(before);
+   const before=await history();await catalogMigration.up(c);await completionMigration.up(c);await kosovoMigration.up(c);await regionsMigration.up(c);await localityRegionMigration.up(c);await subregionsMigration.up(c);expect(await history()).toEqual(before);
   }finally{c.release();}
   for(const role of ['creator','admin','organizer','participant','blocked','guest','revoked']){
    users[role]=(await db.query("INSERT INTO users(email,role,account_status,is_guest) VALUES($1,'participant',$2,$3) RETURNING id",[`${role}@geo.invalid`,role==='blocked'?'blocked':'active',role==='guest'])).rows[0].id;
@@ -245,12 +246,12 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
    expect((await search('test alias').expect(200)).body.cities[0].geographicId).toBe('900');
    await writeFile(files[2],'');
    const partial=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))partial.push(row);
-   expect(partial).toEqual([{...rows[0],admin1Name:undefined,context:'Municipality'}]);await ingest(partial);
+   expect(partial).toEqual([{...rows[0],admin1Name:undefined,admin2Name:undefined,context:'Municipality'}]);await ingest(partial);
    expect((await db.query('SELECT administrative_context,admin1_code,admin2_code FROM geographic_cities WHERE geoname_id=900')).rows[0])
     .toEqual({administrative_context:'Municipality',admin1_code:'13',admin2_code:'54975'});
    await writeFile(files[3],'');
    const fallback=[];for await(const row of readGeonames(files[0],files[1],files[2],files[3]))fallback.push(row);
-   expect(fallback).toEqual([{...rows[0],admin1Name:undefined,context:'Romania'}]);const run=await ingest(fallback);
+   expect(fallback).toEqual([{...rows[0],admin1Name:undefined,admin2Name:undefined,context:'Romania'}]);const run=await ingest(fallback);
    expect(run.rows).toBe(1);
    expect((await db.query('SELECT country_code,admin1_code,admin2_code,latitude,longitude,import_id FROM geographic_cities WHERE geoname_id=900')).rows[0])
     .toEqual({country_code:'RO',admin1_code:'13',admin2_code:'54975',latitude:46,longitude:23,import_id:run.importId});
@@ -330,6 +331,53 @@ suite('GeoNames catalog against real PostgreSQL',()=>{
     await expect(ingest([city('999999','Invalid',{country})])).rejects.toBeDefined();
     await get(`/api/geography/cities?countryCode=${country}&q=pristina`).expect(400);
   }
+ });
+ it('imports official admin2 subdivisions and serves the optional Country → Region → Subregion → City level',async()=>{
+  const sub=(id: string,name: string,admin2: string,admin2Name?: string)=>city(id,name,{aliases:[],admin1:'31',admin1Name:'Sub County',admin2,...(admin2Name?{admin2Name}:{})});
+  const rows=[sub('950','Sub Alpha','9001','Comuna Alpha'),sub('951','Sub Beta','9001','Comuna Alpha'),sub('952','Sub Gamma','9002','Comuna Gamma'),
+   sub('953','Sub Delta',''),sub('954','Sub Epsilon','00'),sub('955','Sub Zeta','9003')];
+  await ingest(rows);
+  const stored=async()=>(await db.query("SELECT admin2_code,display_name FROM geographic_subregions WHERE country_code='RO' AND admin1_code='31' ORDER BY admin2_code")).rows;
+  // Only valid, officially named codes become records; blank, 00 and unnamed codes do not.
+  expect(await stored()).toEqual([{admin2_code:'9001',display_name:'Comuna Alpha'},{admin2_code:'9002',display_name:'Comuna Gamma'}]);
+  const list=(await get('/api/geography/subregions?countryCode=RO&admin1Code=31').expect(200)).body;
+  expect(list).toMatchObject({regionLabel:'County',subregionLabel:'Commune'});
+  expect(list.subregions.map((s:any)=>[s.admin2Code,s.displayName,s.labelStatus])).toEqual([['9001','Comuna Alpha','resolved'],['9002','Comuna Gamma','resolved'],['unspecified','Other (not specified)','unspecified']]);
+  const ids=async(query: string)=>(await get(`/api/geography/cities?countryCode=RO&admin1Code=31${query}`).expect(200)).body.cities.map((c:any)=>c.geographicId).sort();
+  expect(await ids('')).toEqual(['950','951','952','953','954','955']);
+  expect(await ids('&admin2Code=9001')).toEqual(['950','951']);
+  expect(await ids('&admin2Code=9002')).toEqual(['952']);
+  expect(await ids('&admin2Code=unspecified')).toEqual(['953','954','955']);
+  expect((await get('/api/geography/cities/950').expect(200)).body).toMatchObject({admin1Code:'31',admin2Code:'9001',subregionDisplayName:'Comuna Alpha'});
+  expect((await get('/api/geography/cities/955').expect(200)).body).toMatchObject({admin2Code:'unspecified',subregionDisplayName:null});
+  // A subregion needs a concrete region and a valid code; regions without named subdivisions return an empty list.
+  for(const bad of ['&admin2Code=9001','&admin1Code=unspecified&admin2Code=9001','&admin1Code=31&admin2Code=00','&admin1Code=31&admin2Code=bad%20code'])
+   await get(`/api/geography/cities?countryCode=RO${bad}`).expect(400);
+  await get('/api/geography/subregions?countryCode=RO').expect(400);
+  await get('/api/geography/subregions?countryCode=RO&admin1Code=31&extra=1').expect(400);
+  await ingest([city('960','No Sub Town',{aliases:[],admin1:'32',admin1Name:'Plain County',admin2:'7777'})]);
+  expect((await get('/api/geography/subregions?countryCode=RO&admin1Code=32').expect(200)).body).toMatchObject({subregions:[],subregionLabel:'Commune'});
+  // Organizer API: same level with opaque IDs and a per-country label.
+  const org=(await get('/api/organizer/geography/subregions?countryCode=RO&regionId=RO:admin1:31&limit=50','organizer').expect(200)).body.subregions;
+  expect(org.map((s:any)=>[s.subregionId,s.label,s.levelLabel])).toEqual([['RO:admin1:31:admin2:9001','Comuna Alpha','Commune'],
+   ['RO:admin1:31:admin2:9002','Comuna Gamma','Commune'],['RO:admin1:31:unspecified','Other (not specified)','Commune']]);
+  const orgCities=async(subregionId?: string)=>(await get(`/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:31&limit=50${subregionId?`&subregionId=${subregionId}`:''}`,'organizer').expect(200)).body.cities.map((c:any)=>c.geographicId).sort();
+  expect(await orgCities()).toEqual(['950','951','952','953','954','955']);
+  expect(await orgCities('RO:admin1:31:admin2:9001')).toEqual(['950','951']);
+  expect(await orgCities('RO:admin1:31:unspecified')).toEqual(['953','954','955']);
+  await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:31&subregionId=RO:admin1:13:admin2:9001','organizer').expect(400);
+  // Locality links and IDs survive a re-import; the same files create no duplicate subdivisions or cities.
+  const linked=(await post('/api/geography/cities/950/resolve').expect(200)).body;
+  expect((await get(`/api/geography/localities/${linked.localityId}`).expect(200)).body).toMatchObject({geographicId:'950',admin1Code:'31',admin2Code:'9001',subregionDisplayName:'Comuna Alpha'});
+  const counts=async()=>(await db.query("SELECT (SELECT count(*) FROM geographic_subregions)::int AS s,(SELECT count(*) FROM geographic_cities)::int AS c,(SELECT count(*) FROM localities)::int AS l")).rows[0];
+  const before=await counts();
+  await ingest(rows);
+  expect(await counts()).toEqual(before);
+  expect((await db.query('SELECT locality_id FROM geographic_cities WHERE geoname_id=950')).rows[0].locality_id).toBe(linked.localityId);
+  // An official rename updates the record in place.
+  await ingest([sub('950','Sub Alpha','9001','Comuna Alpha Nouă')]);
+  expect(await stored()).toEqual([{admin2_code:'9001',display_name:'Comuna Alpha Nouă'},{admin2_code:'9002',display_name:'Comuna Gamma'}]);
+  expect(await counts()).toEqual(before);
  });
  it('uses the prefix index and enforces bounded authenticated query budgets',async()=>{
   await db.query('SET enable_seqscan=off');const plan=(await db.query("EXPLAIN SELECT geoname_id FROM geographic_city_names WHERE country_code='RO' AND normalized_name LIKE 'cluj%'")).rows.map(r=>r['QUERY PLAN']).join('\n');expect(plan).toContain('geographic_city_names_prefix_idx');await db.query('RESET enable_seqscan');

@@ -76,7 +76,7 @@ suite('development Cluj seed against PostgreSQL', () => {
     const beforeDiscovery = await snapshot();
     await get('/api/organizer/geography/countries','organizer').expect(200,{countries:[{countryCode:'RO',displayName:'Romania'}],nextCursor:null});
     await get('/api/organizer/geography/regions?countryCode=RO','organizer').expect(200,{regions:[{regionId:'RO:admin1:13',countryCode:'RO',regionCode:'13',label:'Cluj',labelStatus:'resolved',level:'admin1',levelLabel:'County'}],nextCursor:null});
-    await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13','organizer').expect(200,{cities:[{geographicId:'681290',countryCode:'RO',countryDisplayName:'Romania',localityId:results[0].localityId,name:'Cluj-Napoca',administrativeContext:'Cluj',regionCode:'13',regionDisplayName:'Cluj',registeredActive:true,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
+    await get('/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:13','organizer').expect(200,{cities:[{geographicId:'681290',countryCode:'RO',countryDisplayName:'Romania',localityId:results[0].localityId,name:'Cluj-Napoca',administrativeContext:'Cluj',regionCode:'13',regionDisplayName:'Cluj',subregionCode:null,subregionDisplayName:null,subregionId:'RO:admin1:13:unspecified',registeredActive:true,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
     await get(`/api/organizer/local-templates?countryCode=RO&localityId=${results[0].localityId}`,'organizer').expect(200,{templates:[],nextCursor:null});
     expect(await snapshot()).toEqual(beforeDiscovery);
   });

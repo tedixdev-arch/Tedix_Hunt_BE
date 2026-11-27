@@ -1,11 +1,19 @@
 // Runs ON the dev API server from its deploy directory (cwd), using that server's own .env.
-// Never prints credentials. `check` is read-only; `import` runs a pre-tested GeoNames package once.
+// Never prints credentials. `check` is read-only; `import` runs a pre-tested GeoNames package once;
+// `import-files` streams the four official GeoNames files through the deployed importer (low memory).
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [mode, sqlPath, expectedDb = 'tedix_hunt'] = process.argv.slice(2);
-if (!['check', 'import'].includes(mode)) throw new Error('Usage: dev-geonames.mjs check|import [import.sql] [expectedDb]');
+const USAGE = 'Usage: dev-geonames.mjs check [ignored] [expectedDb] | import import.sql [expectedDb] | import-files <dir> <expectedInputSha256> [expectedDb]';
+const [mode, ...args] = process.argv.slice(2);
+if (!['check', 'import', 'import-files'].includes(mode)) throw new Error(USAGE);
+const [sqlPath, expectedDb = 'tedix_hunt'] = mode === 'import-files' ? [undefined, args[2]] : args;
+const [filesDir, expectedInputSha] = mode === 'import-files' ? args : [];
+// The importer's own inputs, in the order its fingerprint (manifest.json "sha256") is computed.
+const SOURCE_FILES = ['cities500.txt', 'countryInfo.txt', 'admin1CodesASCII.txt', 'admin2Codes.txt'];
+if (mode === 'import-files' && (!filesDir || !/^[a-f0-9]{64}$/.test(expectedInputSha ?? ''))) throw new Error(USAGE);
 const root = process.cwd() + '/';
 const require = createRequire(root);
 require('dotenv').config({ path: root + '.env', quiet: true });
@@ -19,7 +27,7 @@ const client = new Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const q = async (sql, params) => (await client.query(sql, params)).rows;
 
-const MIGRATIONS = ['032_geographic_catalog', '033_geographic_import_completion', '034_geonames_kosovo_country', '037_geographic_regions'];
+const MIGRATIONS = ['032_geographic_catalog', '033_geographic_import_completion', '034_geonames_kosovo_country', '037_geographic_regions', '047_geographic_subregions'];
 // Privileges the package needs (SELECT ... FOR UPDATE requires UPDATE).
 const REQUIRED = {
   schema_migrations: ['SELECT'],
@@ -28,6 +36,7 @@ const REQUIRED = {
   geographic_cities: ['SELECT', 'INSERT', 'UPDATE'],
   geographic_city_names: ['SELECT', 'INSERT', 'DELETE'],
   geographic_regions: ['SELECT', 'INSERT', 'UPDATE'],
+  geographic_subregions: ['SELECT', 'INSERT', 'UPDATE'],
 };
 
 async function regionsViaApiModel() {
@@ -85,27 +94,56 @@ try {
     const problems = await preflight();
     if (problems.length) { console.log('ABORTED: preflight failed; nothing executed.'); process.exitCode = 3; }
     else {
-      const sql = readFileSync(sqlPath, 'utf8');
       // Existing Localities and city-to-Locality links (e.g. canonical Cluj-Napoca) must survive unchanged.
       const snapshot = async () => (await q(`SELECT (SELECT count(*) FROM localities)::int AS localities,
         (SELECT md5(coalesce(string_agg(geoname_id || ':' || locality_id, ',' ORDER BY geoname_id), '')) FROM geographic_cities WHERE locality_id IS NOT NULL) AS links,
         (SELECT count(*) FROM geographic_cities WHERE locality_id IS NOT NULL)::int AS linked_cities,
         (SELECT count(*) FROM geographic_cities WHERE country_code='RO')::int AS ro_cities`))[0];
-      const started = Date.now();
-      await client.query('BEGIN');
-      const before = await snapshot();
-      await client.query(sql); // One atomic DO statement from the tested importer.
-      const after = await snapshot();
-      console.log('Preservation check (before → after):'); console.table([before, after]);
-      if (after.localities !== before.localities || after.links !== before.links || after.ro_cities < before.ro_cities) {
-        await client.query('ROLLBACK');
-        console.log('ABORTED: existing Localities or city links would change; rolled back, nothing imported.'); process.exitCode = 5;
-      } else {
+      // One transaction: commit only if every preservation condition holds; any error or failed check rolls back.
+      const preserved = async (work) => {
+        const started = Date.now();
+        await client.query('BEGIN');
+        try {
+          const before = await snapshot();
+          await work();
+          const after = await snapshot();
+          console.log('Preservation check (before → after):'); console.table([before, after]);
+          if (after.localities !== before.localities || after.links !== before.links || after.ro_cities < before.ro_cities) {
+            await client.query('ROLLBACK');
+            console.log('ABORTED: existing Localities or city links would change; rolled back, nothing imported.'); process.exitCode = 5;
+            return;
+          }
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.log('ABORTED: import failed and was rolled back; nothing imported. ' + (error?.message ?? error)); process.exitCode = 1;
+          return;
+        }
         await client.query('COMMIT');
         console.log(`IMPORT: committed in ${Date.now() - started} ms`);
         console.table(await q(`SELECT (SELECT count(*) FROM countries)::int AS countries,
           (SELECT count(DISTINCT country_code) FROM geographic_cities)::int AS countries_with_cities,
-          (SELECT count(*) FROM geographic_regions)::int AS regions, (SELECT count(*) FROM geographic_cities)::int AS cities`));
+          (SELECT count(*) FROM geographic_regions)::int AS regions, (SELECT count(*) FROM geographic_subregions)::int AS subregions,
+          (SELECT count(*) FROM geographic_cities)::int AS cities`));
+      };
+      if (mode === 'import') {
+        const sql = readFileSync(sqlPath, 'utf8');
+        await preserved(() => client.query(sql)); // One atomic DO statement from the tested importer.
+      } else {
+        // Low-memory path: the deployed importer streams cities500.txt line by line in batches of 500.
+        const files = SOURCE_FILES.map(name => join(filesDir, name));
+        const missing = files.filter(file => !existsSync(file));
+        const { hashGeonames, importCities, readGeonames } = await import(pathToFileURL(root + 'dist/scripts/importGeonames.js').href);
+        const actual = missing.length ? null : await hashGeonames(files);
+        if (missing.length) { console.log('ABORTED: missing source file(s): ' + missing.join(', ') + '; nothing executed.'); process.exitCode = 6; }
+        else if (actual !== expectedInputSha) {
+          console.log(`ABORTED: input fingerprint ${actual} does not match the expected ${expectedInputSha}; nothing executed.`); process.exitCode = 6;
+        } else {
+          console.log(`Input fingerprint matches the tested package: ${actual}`);
+          await preserved(async () => {
+            const result = await importCities(client, readGeonames(...files), { dataset: 'GeoNames cities500 + countryInfo + admin1CodesASCII + admin2Codes', sha256: actual });
+            console.log(`Importer accepted ${result.rows} cities (import ${result.importId}).`);
+          });
+        }
       }
     }
     if (process.exitCode === undefined) {
