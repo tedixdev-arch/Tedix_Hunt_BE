@@ -24,11 +24,15 @@ export interface ScoringPolicy {
 const integer = (value: unknown, fallback: number) => Number.isInteger(value) ? value as number : fallback;
 const numbers = (value: unknown) => Array.isArray(value) ? value.filter(Number.isInteger) as number[] : null;
 
-/** Authored Template scoring when present. Hint, solution and skip costs are excluded: assistance is unavailable (D4). */
+/**
+ * Authored Template scoring when present. Hint, solution and skip costs are excluded: assistance is unavailable (D4).
+ * Creator Studio saves `scoring: { model: 'platform' }`, meaning "use the Platform Settings defaults"; it is not an
+ * authored table of zero points.
+ */
 export const scoringPolicy = (snapshot: unknown): ScoringPolicy => {
   const scoring = record(snapshot) && record(snapshot.scoring) ? snapshot.scoring : null;
-  if (!scoring) {
-    return { startingScore: 0, failedVerifiedAttempt: 0, firstAttemptAccuracyBonus: 0, personalSolved: setting<number>('scoring.defaultPersonalPoints'),
+  if (!scoring || scoring.model === 'platform') {
+    return { startingScore: scoring ? integer(scoring.startingScore, 0) : 0, failedVerifiedAttempt: 0, firstAttemptAccuracyBonus: 0, personalSolved: setting<number>('scoring.defaultPersonalPoints'),
       solvedTeamChallenge: setting<number>('scoring.defaultTeamPoints'), finishPointPuzzle: 0, missionCompletion: 0, firstAttemptEligible: () => false, teamEligible: () => true };
   }
   const firstEligible = numbers(scoring.firstAttemptAccuracyEligibleCheckpoints);
@@ -138,9 +142,13 @@ export const checkTeamAnswer = (entry: Record<string, any>, answer: string) => {
   return normalizeAnswer(answer, entry.caseSensitive === true) === normalizeAnswer(expected, entry.caseSensitive === true);
 };
 
-export const validAnswerBody = (value: unknown): value is { stage: 'personal' | 'team'; answers?: Record<string, string>; answer?: string } => {
+/** Custom exercise responses are small structured objects; their per-mechanic shape is checked at answer time. */
+const boundedResponse = (value: unknown) => record(value) && JSON.stringify(value).length <= 8000;
+
+export const validAnswerBody = (value: unknown): value is { stage: 'personal' | 'team'; answers?: Record<string, string>; answer?: string; response?: Record<string, unknown> } => {
   if (!record(value) || !['personal', 'team'].includes(value.stage)) return false;
   const keys = Object.keys(value);
+  if (keys.includes('response')) return keys.every(k => k === 'stage' || k === 'response') && boundedResponse(value.response);
   if (value.stage === 'personal') {
     return keys.every(k => k === 'stage' || k === 'answers') && record(value.answers)
       && Object.keys(value.answers).length <= 10

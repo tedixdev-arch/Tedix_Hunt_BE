@@ -29,7 +29,9 @@ import { creatorTemplatesRouter } from './routes/creatorTemplates.js';
 import { adminTemplateEligibilityRouter } from './routes/adminTemplateEligibility.js';
 import { adminTemplateReviewsRouter } from './routes/adminTemplateReviews.js';
 import { huntOperationsRouter } from './routes/huntOperations.js';
-import { adminOperationsRouter, customHuntRequestsRouter } from './routes/adminOperations.js';
+import { adminOperationsRouter } from './routes/adminOperations.js';
+import { adminHuntsRouter } from './routes/adminHunts.js';
+import { adminCustomHuntRequestsRouter, creatorCustomHuntRequestsRouter, customHuntRequestsRouter } from './routes/customHuntRequests.js';
 import { independentOrganizerRouter } from './routes/independentOrganizer.js';
 import { auditTrail } from './middleware/auditTrail.js';
 
@@ -80,6 +82,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/auth', authRouter);
   app.use('/api/me', meRouter);
   app.use('/api/admin/users', adminUsersRouter);
+  app.use('/api/admin/custom-hunt-requests', adminCustomHuntRequestsRouter);
+  app.use('/api/admin/hunts', adminHuntsRouter);
   app.use('/api/admin', adminOperationsRouter);
   app.use('/api/admin/templates/review', adminTemplateReviewsRouter);
   app.use('/api/admin/templates', adminTemplateEligibilityRouter);
@@ -89,6 +93,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use('/api/creator/content', creatorContentRouter);
   app.use('/api/admin/content/review', adminContentReviewRouter);
   app.use('/api/creator/templates', creatorTemplatesRouter);
+  app.use('/api/creator/custom-requests', creatorCustomHuntRequestsRouter);
   app.use('/api/creator/universal-library', creatorUniversalLibraryRouter);
   app.use('/api/organizations', organizationsRouter);
   app.use('/api/custom-hunt-requests', customHuntRequestsRouter);

@@ -15,6 +15,8 @@ export interface LocalSelection {
 }
 export interface LocalArtifact {
   templateId: string; key: string; version: number; content: Record<string, unknown>;
+  /** Set for a custom Hunt: only this organization may discover or select it. */
+  exclusiveOrganizationId: string | null;
   localityId: string; localitySnapshot: LocalitySnapshot; currentLocality: Locality;
 }
 
@@ -22,7 +24,8 @@ export interface LocalArtifact {
 export const artifactSelect = `SELECT t.id AS "templateId",t.key,v.version,v.content,
  t.origin,t.category,t.created_by_user_id,v.origin AS version_origin,v.category AS version_category,
  v.created_by_user_id AS version_owner,t.local_suspended_at,
- r.decision,r.reviewer_user_id,v.locality_id AS "localityId",v.locality_snapshot AS "localitySnapshot",
+ r.decision,r.reviewer_user_id,v.locality_id AS "localityId",
+ t.custom_request_id AS "customRequestId",cr.organization_id AS "exclusiveOrganizationId",v.locality_snapshot AS "localitySnapshot",
  jsonb_build_object('id',l.id,'countryCode',l.country_code,'countryDisplayName',c.display_name,
  'name',l.name,'administrativeContext',l.administrative_context,'latitude',l.latitude,
  'longitude',l.longitude,'active',l.active) AS "currentLocality"
@@ -31,7 +34,8 @@ export const artifactSelect = `SELECT t.id AS "templateId",t.key,v.version,v.con
  LEFT JOIN hunt_template_versions v ON v.template_id=t.id AND v.version=COALESCE(t.local_approved_version,
    CASE WHEN t.status='approved' THEN t.submitted_version END)
  LEFT JOIN hunt_template_reviews r ON r.template_id=t.id AND r.version=v.version
- LEFT JOIN localities l ON l.id=v.locality_id LEFT JOIN countries c ON c.code=l.country_code`;
+ LEFT JOIN localities l ON l.id=v.locality_id LEFT JOIN countries c ON c.code=l.country_code
+ LEFT JOIN custom_hunt_requests cr ON cr.id=t.custom_request_id`;
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const validSnapshot = (s: unknown, id: string): s is LocalitySnapshot => record(s)
@@ -54,19 +58,26 @@ export function resolveLocalArtifact(row: any): { artifact: LocalArtifact | null
   if (live.id !== row.localityId || row.localitySnapshot.countryCode !== live.countryCode
     || row.localitySnapshot.latitude !== live.latitude || row.localitySnapshot.longitude !== live.longitude) return deny('locality_geography_changed');
   try { projectTemplateGeography(row.content); } catch { return deny(); }
+  // A custom template whose request lost its organization is visible to nobody.
+  if (row.customRequestId && !row.exclusiveOrganizationId) return deny();
   return { artifact: { templateId: row.templateId,key: row.key,version: row.version,content: row.content,
+    exclusiveOrganizationId: row.exclusiveOrganizationId ?? null,
     localityId: row.localityId,localitySnapshot: row.localitySnapshot,currentLocality: live }, error: '' };
 }
 
 export const artifactMetadata = (a: LocalArtifact) => ({ templateId:a.templateId,key:a.key,version:a.version,
-  displayName:a.content.displayName,theme:a.content.theme,localityId:a.localityId,localitySnapshot:a.localitySnapshot });
+  displayName:a.content.displayName,theme:a.content.theme,localityId:a.localityId,localitySnapshot:a.localitySnapshot,
+  exclusive:a.exclusiveOrganizationId !== null });
 
-export async function discoverLocalArtifacts(countryCode: string, localityId: string) {
+/** actorId limits custom (exclusive) templates to organizations the actor belongs to. */
+export async function discoverLocalArtifacts(countryCode: string, localityId: string, actorId: string) {
   const { rows } = await pool.query(`SELECT
     EXISTS(SELECT 1 FROM countries WHERE code=$1) AS country,
     (SELECT jsonb_build_object('countryCode',country_code,'active',active) FROM localities WHERE id=$2) AS locality,
     COALESCE((SELECT jsonb_agg(a ORDER BY a.key COLLATE "C",a."templateId") FROM (${artifactSelect}
-      WHERE t.origin='creator' AND t.category='local' AND v.locality_id=$2) a),'[]'::jsonb) AS artifacts`,[countryCode,localityId]);
+      WHERE t.origin='creator' AND t.category='local' AND v.locality_id=$2
+        AND (t.custom_request_id IS NULL OR cr.organization_id IN
+          (SELECT organization_id FROM organization_members WHERE user_id=$3))) a),'[]'::jsonb) AS artifacts`,[countryCode,localityId,actorId]);
   const context = rows[0];
   if (!context.country) throw new LocalSelectionError('invalid_input',400);
   if (!context.locality || context.locality.countryCode !== countryCode) throw new LocalSelectionError('not_found',404);
@@ -101,6 +112,9 @@ export async function selectLocalTemplate(huntId: string, actorId: string, expec
     const {artifact,error} = resolveLocalArtifact(row);
     if (!artifact) throw new LocalSelectionError(error);
     if (artifact.version !== expected.version) throw new LocalSelectionError('template_selection_stale');
+    // Custom Hunts are exclusive to the requesting organization; other organizations see "not eligible".
+    if (artifact.exclusiveOrganizationId !== null && artifact.exclusiveOrganizationId !== hunt.organization_id)
+      throw new LocalSelectionError('template_not_eligible');
     if (artifact.localityId !== expected.localityId.toLowerCase() || artifact.localitySnapshot.countryCode !== expected.countryCode)
       throw new LocalSelectionError('template_not_eligible');
     const result = await client.query(`UPDATE hunts SET template_id=$2,template_key=$3,template_version=$4,

@@ -3,9 +3,10 @@ import { pool } from '../lib/postgres.js';
 import { fail } from '../domain/participantAccess.js';
 import {
   checkPersonalAnswer, checkTeamAnswer, checkpointEntry, hasTeamStage, missionDto, navigationDto, personalChallengeDto,
-  personalRevealDto, playableEntry, scoringPolicy, teamChallengeDto, teamRevealDto, GAMEPLAY_POLICY_REVISION,
+  personalRevealDto, scoringPolicy, teamChallengeDto, teamRevealDto, GAMEPLAY_POLICY_REVISION,
 } from '../domain/gameplay.js';
 import { ParticipantAccess, type ParticipantHuntContext } from './ParticipantAccess.js';
+import { checkCustomAnswer, customExercise, customExerciseDto, customRevealDto, validCustomResponse, type CustomExercise } from '../domain/customGameplay.js';
 import { publicSettings, setting } from '../domain/platformSettings.js';
 
 interface ProgressRow {
@@ -49,6 +50,41 @@ const leaderboardRows = async (client: Pick<PoolClient, 'query'>, huntId: string
   return named.map((row, index) => ({ ...row, rank: index + 1 }));
 };
 
+/**
+ * Each checkpoint plays up to two stages. A stage is a custom exercise when its slot has one (Creator-authored or
+ * Library-allocated), otherwise the predefined content; Personal (when present) always precedes Team.
+ */
+type StageSource = CustomExercise | 'predefined' | null;
+const predefinedPersonal = (entry: Record<string, any> | null) => !!entry && Array.isArray(entry.answerKeys) && entry.answerKeys.length > 0
+  && !!entry.correctAnswers && typeof entry.correctAnswers === 'object'
+  && entry.answerKeys.every((key: unknown) => typeof key === 'string' && typeof entry.correctAnswers[key] === 'string');
+const stagesOf = (entry: Record<string, any> | null): { personal: StageSource; team: StageSource } => ({
+  personal: customExercise(entry, 'personal') ?? (predefinedPersonal(entry) ? 'predefined' : null),
+  team: customExercise(entry, 'team') ?? (entry && hasTeamStage(entry) ? 'predefined' : null),
+});
+const custom = (source: StageSource): source is CustomExercise => typeof source === 'object' && source !== null;
+/** Narrative around a custom Personal exercise; the predefined prompt/answers it replaces are not sent. */
+const storyOnly = (entry: Record<string, any>) => {
+  const story: Record<string, unknown> = { ...personalChallengeDto(entry), answerKeys: [] as string[] };
+  for (const key of ['kind', 'title', 'label', 'prompt', 'mistakeSegments']) delete story[key];
+  return story;
+};
+const personalReveal = (source: StageSource, entry: Record<string, any>) => custom(source) ? customRevealDto(source) : personalRevealDto(entry);
+const teamReveal = (source: StageSource, entry: Record<string, any>) => custom(source)
+  ? { storySuccess: source.feedback?.correct ?? (typeof entry.storySuccess === 'string' ? entry.storySuccess : undefined), teamAnswer: null }
+  : teamRevealDto(entry);
+
+/** Judges one stage against its own source; a body shaped for the other source is invalid input. */
+function judge(source: StageSource, entry: Record<string, any>, stage: 'personal' | 'team',
+  body: { answers?: Record<string, string>; answer?: string; response?: Record<string, unknown> }) {
+  if (custom(source)) {
+    if (!validCustomResponse(source.type, body.response)) return fail(400, 'invalid_input');
+    return checkCustomAnswer(source, body.response);
+  }
+  if (body.response !== undefined) return fail(400, 'invalid_input');
+  return stage === 'personal' ? checkPersonalAnswer(entry, body.answers ?? {}) : checkTeamAnswer(entry, body.answer ?? '');
+}
+
 function currentCheckpoint(context: ParticipantHuntContext) {
   return context.checkpoints.find(c => !c.gameplayCompleted) ?? null;
 }
@@ -65,27 +101,37 @@ async function buildState(context: ParticipantHuntContext, points: Map<string, a
     const ordinal = ordinalOf(current.checkpointId);
     const entry = checkpointEntry(scope.execution, ordinal);
     const row = progress.get(current.checkpointId);
+    const stages = stagesOf(entry);
+    const playable = !!entry && !!(stages.personal || stages.team);
     if (context.huntStatus !== 'active') stage = 'waiting';
     else if (current.accessState !== 'proximity_verified') stage = 'navigate';
-    else if (!row?.personal_solved_at) stage = 'personal';
+    else if (!playable || (stages.personal && !row?.personal_solved_at)) stage = 'personal';
     else stage = 'team';
+    const seed = `${scope.participant.id}:${current.checkpointId}`;
     detail = {
       checkpointId: current.checkpointId, ordinal, kind: current.kind,
       navigation: navigationDto(scope.execution, ordinal, points.get(current.checkpointId)?.point ?? null),
-      ...(stage === 'personal' || stage === 'team') && playableEntry(entry) ? {
-        story: personalChallengeDto(entry),
+      ...(stage === 'personal' || stage === 'team') && playable && entry ? {
+        story: stages.personal === 'predefined' ? personalChallengeDto(entry) : storyOnly(entry),
         personalAttempts: row?.personal_attempts ?? 0,
-        ...(stage === 'team' ? { personalReveal: personalRevealDto(entry), team: teamChallengeDto(entry), teamAttempts: row?.team_attempts ?? 0 } : {}),
+        ...(stage === 'personal' && custom(stages.personal) ? { personalExercise: customExerciseDto(stages.personal, seed) } : {}),
+        ...(stage === 'team' ? {
+          ...(stages.personal ? { personalReveal: personalReveal(stages.personal, entry) } : {}),
+          ...(custom(stages.team) ? { teamExercise: customExerciseDto(stages.team, seed) } : { team: teamChallengeDto(entry) }),
+          teamAttempts: row?.team_attempts ?? 0,
+        } : {}),
       } : {},
-      playable: playableEntry(entry),
+      playable,
     };
   }
   const history = context.checkpoints.filter(c => c.gameplayCompleted).map(c => {
     const entry = checkpointEntry(scope.execution, ordinalOf(c.checkpointId)) ?? {};
+    const stages = stagesOf(entry);
     return { checkpointId: c.checkpointId, ordinal: ordinalOf(c.checkpointId), kind: c.kind,
       location: typeof entry.location === 'string' ? entry.location : null,
       storyObjective: typeof entry.storyObjective === 'string' ? entry.storyObjective : null,
-      ...(hasTeamStage(entry) ? teamRevealDto(entry) : { storySuccess: typeof entry.successText === 'string' ? entry.successText : null }),
+      ...(stages.team ? teamReveal(stages.team, entry)
+        : { storySuccess: custom(stages.personal) ? stages.personal.feedback?.correct ?? null : typeof entry.successText === 'string' ? entry.successText : null }),
       completedAt: progress.get(c.checkpointId)?.completed_at ?? null };
   });
   return {
@@ -105,7 +151,7 @@ async function buildState(context: ParticipantHuntContext, points: Map<string, a
 export const Gameplay = {
   state: (huntId: string, userId: string) => ParticipantAccess.withExecution(huntId, userId, buildState),
 
-  answer: (huntId: string, userId: string, checkpointId: string, body: { stage: 'personal' | 'team'; answers?: Record<string, string>; answer?: string }) =>
+  answer: (huntId: string, userId: string, checkpointId: string, body: { stage: 'personal' | 'team'; answers?: Record<string, string>; answer?: string; response?: Record<string, unknown> }) =>
     ParticipantAccess.withExecution(huntId, userId, async (context, points, client, scope) => {
       if (context.huntStatus !== 'active') return fail(409, 'invalid_hunt_state');
       const current = currentCheckpoint(context);
@@ -113,7 +159,8 @@ export const Gameplay = {
       if (current.accessState !== 'proximity_verified') return fail(409, 'checkpoint_not_verified');
       const ordinal = context.checkpoints.findIndex(c => c.checkpointId === checkpointId) + 1;
       const entry = checkpointEntry(scope.execution, ordinal);
-      if (!playableEntry(entry)) return fail(422, 'challenge_unsupported');
+      const stages = stagesOf(entry);
+      if (!entry || (!stages.personal && !stages.team)) return fail(422, 'challenge_unsupported');
       const participantId = scope.participant.id as string;
       await client.query(`INSERT INTO participant_checkpoint_progress(hunt_id,participant_id,checkpoint_id) VALUES($1,$2,$3)
         ON CONFLICT DO NOTHING`, [huntId, participantId, checkpointId]);
@@ -122,11 +169,12 @@ export const Gameplay = {
       const policy = scoringPolicy(scope.execution);
       const finish = current.kind === 'finish';
       const authored = typeof entry.checkpoint === 'number' ? entry.checkpoint : ordinal;
-      const teamStage = hasTeamStage(entry);
+      const teamStage = !!stages.team;
       let correct: boolean;
       if (body.stage === 'personal') {
+        if (!stages.personal) return fail(409, 'stage_unavailable');
         if (row.personal_solved_at) return fail(409, 'stage_already_solved');
-        correct = checkPersonalAnswer(entry, body.answers ?? {});
+        correct = judge(stages.personal, entry, 'personal', body);
         const attempt = row.personal_attempts + 1;
         await client.query('UPDATE participant_checkpoint_progress SET personal_attempts=$3, personal_solved_at=CASE WHEN $4 THEN now() ELSE personal_solved_at END WHERE participant_id=$1 AND checkpoint_id=$2',
           [participantId, checkpointId, attempt, correct]);
@@ -137,9 +185,9 @@ export const Gameplay = {
         }
       } else {
         if (!teamStage) return fail(409, 'stage_unavailable');
-        if (!row.personal_solved_at) return fail(409, 'personal_stage_required');
+        if (stages.personal && !row.personal_solved_at) return fail(409, 'personal_stage_required');
         if (row.team_solved_at) return fail(409, 'stage_already_solved');
-        correct = checkTeamAnswer(entry, body.answer ?? '');
+        correct = judge(stages.team, entry, 'team', body);
         await client.query('UPDATE participant_checkpoint_progress SET team_attempts=team_attempts+1, team_solved_at=CASE WHEN $3 THEN now() ELSE team_solved_at END WHERE participant_id=$1 AND checkpoint_id=$2',
           [participantId, checkpointId, correct]);
         if (correct) {
@@ -169,8 +217,8 @@ export const Gameplay = {
       const participant = completes && !context.checkpoints[ordinal] ? { ...scope.participant, finished_at: new Date() } : scope.participant;
       return {
         correct, stage: body.stage, checkpointCompleted: completes,
-        ...(correct && body.stage === 'personal' ? { reveal: personalRevealDto(entry) } : {}),
-        ...(correct && body.stage === 'team' ? { reveal: teamRevealDto(entry) } : {}),
+        ...(correct && body.stage === 'personal' ? { reveal: personalReveal(stages.personal, entry) } : {}),
+        ...(correct && body.stage === 'team' ? { reveal: teamReveal(stages.team, entry) } : {}),
         state: await buildState(refreshed, points, client, { ...scope, participant }),
       };
     }),
@@ -254,12 +302,13 @@ export const Gameplay = {
     return rows[0] ? { id: rows[0].id, status: rows[0].status, resolvedAt: rows[0].resolved_at } : fail(404, 'not_found');
   },
 
-  /** Platform-wide open help requests for the Admin Safety Alerts view. */
-  async openAlerts() {
+  /** Platform-wide help requests (open first) for the Admin Safety Alerts view, optionally for one Hunt. */
+  async openAlerts(huntId?: string) {
     const { rows } = await pool.query(`SELECT r.id, r.hunt_id, h.name AS hunt_name, r.kind, r.message, r.status, r.created_at, r.resolved_at,
         COALESCE(NULLIF(trim(u.name),''), split_part(u.email,'@',1), 'Participant') AS display_name
       FROM hunt_help_requests r JOIN hunts h ON h.id=r.hunt_id JOIN hunt_participants hp ON hp.id=r.participant_id JOIN users u ON u.id=hp.user_id
-      ORDER BY (r.status='open') DESC, r.created_at DESC LIMIT 200`);
+      WHERE ($1::uuid IS NULL OR r.hunt_id=$1::uuid)
+      ORDER BY (r.status='open') DESC, r.created_at DESC LIMIT 200`, [huntId ?? null]);
     return rows.map(r => ({ id: r.id, huntId: r.hunt_id, huntName: r.hunt_name, displayName: r.display_name, kind: r.kind,
       message: r.message, status: r.status, createdAt: r.created_at, resolvedAt: r.resolved_at }));
   },

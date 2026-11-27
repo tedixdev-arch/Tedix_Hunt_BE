@@ -98,7 +98,7 @@ router.get(['/', '/:templateId/versions/:version'],async (req,res,next) => {
         after = decoded;
       } catch { throw new LocalSelectionError('invalid_input',400); }
     }
-    let artifacts = await discoverLocalArtifacts(countryCode,localityId.toLowerCase());
+    let artifacts = await discoverLocalArtifacts(countryCode,localityId.toLowerCase(),(req as AuthRequest).user!.id);
     if (detail) {
       const artifact = artifacts.find(a => a.templateId === String(req.params.templateId).toLowerCase() && a.version === Number(req.params.version));
       if (!artifact) throw new LocalSelectionError('not_found',404);

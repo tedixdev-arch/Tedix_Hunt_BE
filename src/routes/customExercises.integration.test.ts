@@ -186,7 +186,7 @@ type Actor = { id: string; auth: string };
     expect((await post(root, { key, content }).expect(201)).body.content).toEqual(content);
     expect((await post(`${root}/${key}/versions`, { content: { ...content, version: 2 } }).expect(201)).body.content).toEqual({ ...content, version: 2 });
   });
-  it('captures a Local Hunt snapshot exactly, blocks publish and protects public/participant/supervisor reads', async () => {
+  it('captures a Local Hunt snapshot exactly, does not block publish and protects public/participant/supervisor reads', async () => {
     const key = `local-${randomUUID()}`, content = customTemplateFixture(key, 1, [exerciseFixtures[1], exerciseFixtures[21]]);
     content.configuration.checkpointPositions = [{ checkpointNumber: 1, name: 'Start', latitude: 46, longitude: 23, radiusMeters: 10 }];
     content.configuration.finishPoint = { name: 'Finish', latitude: 46.1, longitude: 23.1, radiusMeters: 10 };
@@ -220,10 +220,13 @@ type Actor = { id: string; auth: string };
     expect(JSON.stringify(contexts.body)).not.toContain('customExercises');
     for (const config of [{ format: 'solo', teamSize: null }, { format: 'team', teamSize: 3 }, { format: 'team', teamSize: 4 }]) {
       await request(app).patch(`/api/hunts/${hunt.id}`).set('Authorization', owner.auth).send(config).expect(200);
-      const publish = await post(`/api/hunts/${hunt.id}/publish`, {}).expect(422);
-      expect(publish.body.issues.some((issue: any) => issue.message.includes('Custom exercise gameplay'))).toBe(true);
+      // Custom exercises are playable now (docs/Custom_Exercise_Gameplay.md): they never block publication themselves.
+      const publish = await post(`/api/hunts/${hunt.id}/publish`, {});
+      expect([200, 422]).toContain(publish.status);
+      if (publish.status === 422) expect(publish.body.issues.some((issue: any) => /custom exercise/i.test(issue.message))).toBe(false);
       // Required Personal and Team slots both remain pinned, including the terminal slot.
       expect((await db.query('SELECT template_snapshot FROM hunts WHERE id=$1', [hunt.id])).rows[0].template_snapshot).toEqual(saved);
+      if (publish.status === 200) break;
     }
   });
 });
