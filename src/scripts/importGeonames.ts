@@ -9,7 +9,7 @@ import { normalizeCityName } from '../domain/geographicNames.js';
 
 export interface CityImport {
  id: string; country: string; countryName: string; name: string; aliases: string[];
- context: string; admin1Name?: string; admin1: string; admin2: string; latitude: number; longitude: number;
+ context: string; admin1Name?: string; admin1: string; admin2Name?: string; admin2: string; latitude: number; longitude: number;
  population: number; modified: string;
 }
 const bounded = (v: unknown, n: number): v is string => typeof v === 'string' && v.trim().length>0 && v.length<=n;
@@ -17,7 +17,9 @@ export function validateCity(c: CityImport) {
  if (!c || !/^[1-9]\d{0,14}$/.test(c.id) || !/^[A-Z]{2}$/.test(c.country) || !bounded(c.countryName,100)
   || !bounded(c.name,200) || !bounded(c.context,200) || typeof c.admin1!=='string' || c.admin1.length>40
   || (c.admin1Name !== undefined && (!bounded(c.admin1Name,200) || !/^[A-Za-z0-9-]{1,40}$/.test(c.admin1) || c.admin1==='00'))
-  || typeof c.admin2!=='string' || c.admin2.length>40 || !Array.isArray(c.aliases) || c.aliases.length>10000
+  || typeof c.admin2!=='string' || c.admin2.length>40
+  || (c.admin2Name !== undefined && (c.admin1Name === undefined || !bounded(c.admin2Name,200) || !/^[A-Za-z0-9-]{1,40}$/.test(c.admin2) || c.admin2==='00'))
+  || !Array.isArray(c.aliases) || c.aliases.length>10000
   || c.aliases.some(n=>!bounded(n,300)) || !Number.isFinite(c.latitude) || Math.abs(c.latitude)>90
   || !Number.isFinite(c.longitude) || Math.abs(c.longitude)>180 || !Number.isSafeInteger(c.population) || c.population<0
   || !/^\d{4}-\d{2}-\d{2}$/.test(c.modified) || Number.isNaN(Date.parse(c.modified))) throw new Error('Invalid GeoNames populated-place row');
@@ -66,6 +68,16 @@ export async function importCities(connection: PoolClient | ImportTarget, cities
   if(regions.size) await client.execute(`INSERT INTO geographic_regions(country_code,admin1_code,display_name,import_id)
    SELECT country,code,name,$2::uuid FROM jsonb_to_recordset($1::jsonb) AS r(country text,code text,name text)
    ON CONFLICT(country_code,admin1_code) DO UPDATE SET display_name=EXCLUDED.display_name,import_id=EXCLUDED.import_id`,[JSON.stringify([...regions.values()]),run]);
+  // Admin2 subdivisions (county, district, commune...) under an official admin1 region, same rules as regions.
+  const subregions=new Map<string,{country:string;admin1:string;code:string;name:string}>();
+  for(const c of batch) if(c.admin2Name) {
+   const key=`${c.country}.${c.admin1}.${c.admin2}`, previous=subregions.get(key);
+   if(previous && previous.name!==c.admin2Name) throw new Error('Conflicting admin2 labels');
+   subregions.set(key,{country:c.country,admin1:c.admin1,code:c.admin2,name:c.admin2Name});
+  }
+  if(subregions.size) await client.execute(`INSERT INTO geographic_subregions(country_code,admin1_code,admin2_code,display_name,import_id)
+   SELECT country,admin1,code,name,$2::uuid FROM jsonb_to_recordset($1::jsonb) AS r(country text,admin1 text,code text,name text)
+   ON CONFLICT(country_code,admin1_code,admin2_code) DO UPDATE SET display_name=EXCLUDED.display_name,import_id=EXCLUDED.import_id`,[JSON.stringify([...subregions.values()]),run]);
   // Repeated IDs within a batch: last source row wins, preserving the source identity.
   const rows=[...new Map(batch.map(c=>[c.id,c])).values()];
   await client.execute('SELECT geoname_id FROM geographic_cities WHERE geoname_id=ANY($1::bigint[]) ORDER BY geoname_id FOR UPDATE',[rows.map(c=>c.id)]);
@@ -116,7 +128,9 @@ export async function* readGeonames(citiesPath: string, countriesPath: string, a
   // Never infer an omitted parent code or join admin2 without its full source key.
   const a2=f[10]&&f[11]?admin2.get(`${f[8]}.${f[10]}.${f[11]}`):undefined;
   yield validateCity({id:f[0],country:f[8],countryName,name:f[1],aliases:[f[2],...f[3].split(',')].filter(Boolean),
-   ...(a1?.trim()?{admin1Name:a1}:{}),context:[a2,a1].filter(label=>label?.trim()).join(', ') || countryName,admin1:f[10],admin2:f[11],latitude:Number(f[4]),longitude:Number(f[5]),population:Number(f[14]),modified:f[18]});
+   ...(a1?.trim()?{admin1Name:a1}:{}),
+   // A subdivision is a record only when its code is valid and officially named under a named admin1 region.
+   ...(a1?.trim() && a2?.trim() && /^[A-Za-z0-9-]{1,40}$/.test(f[11]) && f[11]!=='00' && a2.length<=200?{admin2Name:a2}:{}),context:[a2,a1].filter(label=>label?.trim()).join(', ') || countryName,admin1:f[10],admin2:f[11],latitude:Number(f[4]),longitude:Number(f[5]),population:Number(f[14]),modified:f[18]});
  }
 }
 export async function hashGeonames(paths: string[]) {

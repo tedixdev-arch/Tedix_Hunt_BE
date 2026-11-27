@@ -302,4 +302,42 @@ suite('Manual locality proposals against PostgreSQL', () => {
       await db.query('DELETE FROM geographic_cities WHERE geoname_id IN (990001,990002)');
     }
   });
+  it('stays at region level with subdivisions: a city under any subdivision blocks a proposal; an approved place joins the unspecified group', async () => {
+    // A completed import: the catalog endpoints answer only after one.
+    const run = (await db.query(`INSERT INTO geographic_imports(source,dataset,sha256,attribution,row_count,completed_at)
+      VALUES('geonames','subregion proposal fixture',repeat('c',64),'GeoNames (CC BY 4.0)',1,now()) RETURNING id`)).rows[0].id;
+    await db.query(`INSERT INTO geographic_regions(country_code,admin1_code,display_name,import_id) VALUES('RO','33','Divided County',$1)`, [run]);
+    await db.query(`INSERT INTO geographic_subregions(country_code,admin1_code,admin2_code,display_name,import_id) VALUES('RO','33','7001','Comuna Test',$1)`, [run]);
+    await db.query(`INSERT INTO geographic_cities(geoname_id,country_code,name,administrative_context,admin1_code,admin2_code,latitude,longitude,population,source_modified,import_id)
+      VALUES(990003,'RO','Sub Town','Comuna Test, Divided County','33','7001',46.2,23.2,600,'2026-01-01',$1)`, [run]);
+    await db.query(`INSERT INTO geographic_city_names(geoname_id,country_code,normalized_name) VALUES(990003,'RO','sub town')`);
+    const get = (path: string, actor = 'creator') => request(app).get(path).set('Authorization', bearer(actor));
+    try {
+      // The duplicate check covers the whole region, so a city listed under a subdivision is never proposed again.
+      await submit({ ...input('Sub Town'), admin1Code: '33' }).expect(409, { error: 'catalog_city_exists' });
+      const hamlet = (await submit({ ...input('Brand New Hamlet'), administrativeContext: 'Comuna Test, Divided County', admin1Code: '33' }).expect(201)).body;
+      const { localityId } = (await decide(hamlet.id).expect(200)).body;
+      // The manual Locality has no official subdivision: the unspecified group, never Comuna Test.
+      expect((await get(`/api/geography/localities/${localityId}`).expect(200)).body).toMatchObject({ admin1Code: '33', admin2Code: 'unspecified', subregionDisplayName: null, geographicId: null });
+      expect((await get('/api/geography/subregions?countryCode=RO&admin1Code=33').expect(200)).body.subregions.map((s: { admin2Code: string }) => s.admin2Code)).toEqual(['7001', 'unspecified']);
+      const listed = async (query: string) => {
+        const body = (await get(`/api/geography/cities?countryCode=RO&admin1Code=33${query}`).expect(200)).body;
+        return [...body.cities, ...(body.registryLocalities ?? [])].map((c: { name: string }) => c.name).sort();
+      };
+      expect(await listed('')).toEqual(['Brand New Hamlet', 'Sub Town']);
+      expect(await listed('&admin2Code=7001')).toEqual(['Sub Town']);
+      expect(await listed('&admin2Code=unspecified')).toEqual(['Brand New Hamlet']);
+      // Organizers see the same split through opaque IDs.
+      expect((await get('/api/organizer/geography/subregions?countryCode=RO&regionId=RO:admin1:33&limit=50', 'organizer').expect(200)).body.subregions
+        .map((s: { subregionId: string }) => s.subregionId)).toEqual(['RO:admin1:33:admin2:7001', 'RO:admin1:33:unspecified']);
+      const organizerCities = async (subregionId: string) => (await get(`/api/organizer/geography/cities?countryCode=RO&regionId=RO:admin1:33&subregionId=${subregionId}&limit=50`, 'organizer').expect(200)).body.cities
+        .map((c: { name: string; source: string }) => `${c.name}:${c.source}`);
+      expect(await organizerCities('RO:admin1:33:unspecified')).toEqual(['Brand New Hamlet:registry']);
+      expect(await organizerCities('RO:admin1:33:admin2:7001')).toEqual(['Sub Town:geonames']);
+    } finally {
+      await db.query('DELETE FROM geographic_city_names WHERE geoname_id=990003');
+      await db.query('DELETE FROM geographic_cities WHERE geoname_id=990003');
+      await db.query("DELETE FROM geographic_subregions WHERE country_code='RO' AND admin1_code='33'");
+    }
+  });
 });

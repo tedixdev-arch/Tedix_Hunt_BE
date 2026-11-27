@@ -15,6 +15,9 @@ export interface Locality {
   /** admin1 region from the linked city, else the manual Locality's region, else `unspecified`. */
   admin1Code: string;
   regionDisplayName: string | null;
+  /** Official admin2 subdivision of the linked city, else `unspecified` (manual Localities have none). */
+  admin2Code: string;
+  subregionDisplayName: string | null;
 }
 
 // Catalog projection deliberately excludes internal source/provider metadata.
@@ -24,11 +27,14 @@ const localitySelect = `SELECT l.id, l.country_code AS "countryCode",
   l.administrative_context AS "administrativeContext", l.latitude, l.longitude, l.active,
   gc.geoname_id::text AS "geographicId",
   COALESCE(NULLIF(NULLIF(gc.admin1_code, ''), '00'), CASE WHEN gc.geoname_id IS NULL THEN l.admin1_code END, 'unspecified') AS "admin1Code",
-  gr.display_name AS "regionDisplayName"
+  gr.display_name AS "regionDisplayName",
+  COALESCE(gs.admin2_code, 'unspecified') AS "admin2Code", gs.display_name AS "subregionDisplayName"
   FROM localities l JOIN countries c ON c.code = l.country_code
   LEFT JOIN geographic_cities gc ON gc.locality_id = l.id
   LEFT JOIN geographic_regions gr ON gr.country_code = l.country_code
-    AND gr.admin1_code = COALESCE(NULLIF(NULLIF(gc.admin1_code, ''), '00'), CASE WHEN gc.geoname_id IS NULL THEN l.admin1_code END)`;
+    AND gr.admin1_code = COALESCE(NULLIF(NULLIF(gc.admin1_code, ''), '00'), CASE WHEN gc.geoname_id IS NULL THEN l.admin1_code END)
+  LEFT JOIN geographic_subregions gs ON gs.country_code = gc.country_code
+    AND gs.admin1_code = gc.admin1_code AND gs.admin2_code = gc.admin2_code`;
 
 export const Geography = {
   async countries(): Promise<Country[]> {

@@ -25,7 +25,8 @@ describe('Organizer catalog geography',()=>{
     const city=row('681290');
     vi.mocked(pool.query).mockResolvedValue({rows:[city]} as never);
     const r=await get('/cities?countryCode=RO&regionId=RO:admin1:13&limit=1').expect(200);
-    expect(r.body).toEqual({cities:[{...city,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
+    // No subdivision record matches this city, so it belongs to the region's unspecified subregion group.
+    expect(r.body).toEqual({cities:[{...city,regionId:'RO:admin1:13',subregionId:'RO:admin1:13:unspecified',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
     expect(r.headers['cache-control']).toBe('private, no-store');
     const sql=vi.mocked(pool.query).mock.calls[0][0];
     expect(sql).toContain('FROM geographic_cities');expect(sql).not.toMatch(/hunt_templates|hunt_template_versions|hunt_template_reviews|FROM hunts/);
