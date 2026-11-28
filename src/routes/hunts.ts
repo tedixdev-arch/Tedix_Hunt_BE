@@ -11,6 +11,7 @@ import { HuntTemplates } from '../models/HuntTemplate.js';
 import { validTeamSize, supportedHuntOptionValues } from '../domain/huntOptions.js';
 import { validateHuntForPublish } from '../domain/huntReadiness.js';
 import { isLifecycleAction, lifecycleActions } from '../domain/huntLifecycle.js';
+import { participationForSelection, participationViolation } from '../domain/templateParticipation.js';
 
 const router = express.Router();
 
@@ -265,6 +266,17 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
     update.templateKey = template.key;
     update.templateVersion = template.version;
     update.templateSnapshot = template.content as Record<string, unknown>;
+    // The Template fixes the Hunt format; team size follows its range (null for Single Hunters).
+    const current = { format: update.format ?? hunt.format, teamSize: update.teamSize !== undefined ? update.teamSize : hunt.teamSize };
+    const participation = participationForSelection(update.templateSnapshot, current);
+    if (participation.format && participation.format !== current.format) update.format = participation.format;
+    if (participation.teamSize !== current.teamSize) update.teamSize = participation.teamSize;
+  }
+  // Format, capacity and team size must respect the selected Template's participation rules.
+  const snapshot = update.templateSnapshot ?? hunt.templateSnapshot;
+  if (snapshot) {
+    const violation = participationViolation(snapshot, { format: update.format, capacity: update.capacity, teamSize: update.teamSize });
+    if (violation) return res.status(400).json(violation);
   }
   const updated = await Hunt.updateDraft(id, update);
   if (!updated) {

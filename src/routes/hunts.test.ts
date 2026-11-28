@@ -362,8 +362,8 @@ describe('Hunt routes', () => {
   it('lists only supported pilot options for authenticated users', async () => {
     await request(app).get('/api/hunt-options').expect(401, { error: 'unauthorized' });
     await request(app).get('/api/hunt-options').set('Authorization', auth).expect(200, {
-      formats: [{ key: 'solo', label: 'Solo' }, { key: 'team', label: 'Team Hunters' }],
-      teamSizes: [4],
+      formats: [{ key: 'solo', label: 'Single Hunters' }, { key: 'team', label: 'Team Hunters' }],
+      teamSizes: [2, 3, 4, 5, 6, 7, 8, 9, 10],
       accessModes: [{ key: 'invitation_only', label: 'Invitation-only' }],
       difficulties: [{ key: 'easy', label: 'Easy' }],
       checkpointOrders: [{ key: 'recommended', label: 'Recommended route' }],
