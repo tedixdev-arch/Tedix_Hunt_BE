@@ -6,6 +6,7 @@ import { projectTemplateGeography } from '../domain/huntTemplates.js';
 import type { Locality } from './Geography.js';
 import type { LocalitySnapshot } from './HuntTemplate.js';
 import { mapHuntRow } from './Hunt.js';
+import { participationForSelection } from '../domain/templateParticipation.js';
 
 export class LocalSelectionError extends Error {
   constructor(public readonly code: string, public readonly status = 409) { super(code); }
@@ -117,9 +118,13 @@ export async function selectLocalTemplate(huntId: string, actorId: string, expec
       throw new LocalSelectionError('template_not_eligible');
     if (artifact.localityId !== expected.localityId.toLowerCase() || artifact.localitySnapshot.countryCode !== expected.countryCode)
       throw new LocalSelectionError('template_not_eligible');
+    // The Template fixes the Hunt format; team size follows its range (null for Single Hunters).
+    const participation = participationForSelection(artifact.content, { format: hunt.hunt_format ?? null, teamSize: hunt.team_size ?? null });
     const result = await client.query(`UPDATE hunts SET template_id=$2,template_key=$3,template_version=$4,
-      template_snapshot=$5,template_locality_id=$6,template_locality_snapshot=$7,checkpoint_radius_configuration=$8,updated_at=now()
-      WHERE id=$1 RETURNING *`,[huntId,artifact.templateId,artifact.key,artifact.version,artifact.content,artifact.localityId,artifact.localitySnapshot,inheritedRadii(artifact.content)]);
+      template_snapshot=$5,template_locality_id=$6,template_locality_snapshot=$7,checkpoint_radius_configuration=$8,
+      hunt_format=COALESCE($9,hunt_format),team_size=$10,updated_at=now()
+      WHERE id=$1 RETURNING *`,[huntId,artifact.templateId,artifact.key,artifact.version,artifact.content,artifact.localityId,artifact.localitySnapshot,inheritedRadii(artifact.content),
+      participation.format,participation.teamSize]);
     await client.query('COMMIT');
     return mapHuntRow(result.rows[0]);
   } catch (error) { await client.query('ROLLBACK'); throw error; }

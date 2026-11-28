@@ -1,4 +1,5 @@
 import { validParticipationConfiguration } from './huntOptions.js';
+import { inRange, templateParticipation } from './templateParticipation.js';
 import { hasCustomExercises, validateCustomExercises } from './customExercises.js';
 import type { IHunt } from '../models/Hunt.js';
 
@@ -62,11 +63,24 @@ export function validateHuntForPublish(hunt: IHunt): HuntReadinessResult {
     const field = hunt.format !== 'team' && hunt.format !== 'solo' ? 'format' : !validParticipationConfiguration(hunt.format, hunt.teamSize) ? 'teamSize' : 'accessMode';
     add({ section: 'options', field, message: 'Save Participants & access' });
   }
-  // Pilot Solo gameplay plays every Personal and Team stage for each participant, so Solo
-  // discards no required content. Variable Team sizes still need D2/D5 membership approval.
-  if (hunt.format === 'team' && hunt.teamSize !== null && hunt.teamSize !== 4) {
-    add({ section: 'options', field: 'teamSize',
-      message: 'Variable Team-size gameplay readiness requires approved membership and content compatibility (D2/D5)' });
+  // Pilot Solo gameplay plays every Personal and Team stage for each participant, so Solo discards no required
+  // content. The Template's participation rules (format, participant and team size ranges) bind the Hunt; Templates
+  // without a team size range keep the historical pilot size of 4 (variable sizes need D2/D5 approval).
+  const rules = templateParticipation(snapshot);
+  if (rules.format && hunt.format && hunt.format !== rules.format) {
+    add({ section: 'options', field: 'format', message: `Use the template's format: ${rules.format === 'solo' ? 'Single Hunters' : 'Team Hunters'}` });
+  }
+  if (rules.participants && Number.isInteger(hunt.capacity) && !inRange(hunt.capacity as number, rules.participants)) {
+    add({ section: 'general', field: 'capacity', message: `Participants must be between ${rules.participants.min} and ${rules.participants.max} for this template` });
+  }
+  if (hunt.format === 'team' && hunt.teamSize !== null) {
+    if (rules.teamSize) {
+      if (!inRange(hunt.teamSize, rules.teamSize)) add({ section: 'options', field: 'teamSize',
+        message: `Team size must be between ${rules.teamSize.min} and ${rules.teamSize.max} for this template` });
+    } else if (hunt.teamSize !== 4) {
+      add({ section: 'options', field: 'teamSize',
+        message: 'Variable Team-size gameplay readiness requires approved membership and content compatibility (D2/D5)' });
+    }
   }
   if (hunt.difficulty !== 'easy' || hunt.checkpointOrder !== 'recommended') {
     const field = hunt.difficulty !== 'easy' ? 'difficulty' : 'checkpointOrder';
