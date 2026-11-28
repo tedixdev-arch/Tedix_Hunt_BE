@@ -1277,3 +1277,15 @@ CREATE TABLE email_outbox (
   sent_at TIMESTAMPTZ
 );
 CREATE INDEX email_outbox_pending_idx ON email_outbox(created_at) WHERE status = 'pending';
+
+-- GeoNames admin2 subdivisions under an admin1 region (migration 047). Written only by the importer.
+CREATE TABLE geographic_subregions (
+ country_code TEXT NOT NULL REFERENCES countries(code),
+ admin1_code TEXT NOT NULL CHECK (admin1_code ~ '^[A-Za-z0-9-]{1,40}$' AND admin1_code <> '00'),
+ admin2_code TEXT NOT NULL CHECK (admin2_code ~ '^[A-Za-z0-9-]{1,40}$' AND admin2_code <> '00'),
+ display_name TEXT NOT NULL CHECK (length(btrim(display_name)) BETWEEN 1 AND 200),
+ source TEXT NOT NULL DEFAULT 'geonames' CHECK (source='geonames'),
+ import_id UUID NOT NULL REFERENCES geographic_imports(id),
+ PRIMARY KEY(country_code,admin1_code,admin2_code)
+);
+CREATE INDEX geographic_cities_subregion_idx ON geographic_cities(country_code,admin1_code,admin2_code,geoname_id);

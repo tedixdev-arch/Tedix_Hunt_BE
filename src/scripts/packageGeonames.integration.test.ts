@@ -21,6 +21,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
  const snapshot = async () => ({
   cities: (await db.query("SELECT to_jsonb(g)-'import_id' AS city FROM geographic_cities g ORDER BY geoname_id")).rows,
   regions: (await db.query("SELECT to_jsonb(r)-'import_id' AS region FROM geographic_regions r ORDER BY country_code,admin1_code")).rows,
+  subregions: (await db.query("SELECT to_jsonb(s)-'import_id' AS subregion FROM geographic_subregions s ORDER BY country_code,admin1_code,admin2_code")).rows,
   aliases: (await db.query('SELECT * FROM geographic_city_names ORDER BY geoname_id,normalized_name')).rows,
   countries: (await db.query('SELECT * FROM countries ORDER BY code')).rows,
   localities: (await db.query('SELECT * FROM localities ORDER BY id')).rows,
@@ -57,7 +58,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
    expect(await runMigrations(c, migrations)).toEqual([]);
    await c.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO "${role}";
     GRANT SELECT ON schema_migrations TO "${role}";
-    GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names,geographic_regions TO "${role}"`);
+    GRANT SELECT,INSERT,UPDATE,DELETE ON countries,geographic_imports,geographic_cities,geographic_city_names,geographic_regions,geographic_subregions TO "${role}"`);
   } finally { c.release(); }
   paths = ['cities500.txt','countryInfo.txt','admin1CodesASCII.txt','admin2Codes.txt'].map(f => join(dir,f));
   await writeFile(paths[1], 'RO\t\t\t\tRomania\nHU\t\t\t\tHungary\n');
@@ -77,7 +78,9 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
   if (dir) await rm(dir, {recursive:true,force:true});
  });
  it('matches direct importer, including hostile quotes/delimiters; repeat creates only new metadata', async () => {
-  const sql = await generate(source, true);
+  // An official admin2 subdivision with a hostile label: the package must write the same subregion record.
+  await writeFile(paths[3], "RO.13.54975\tComuna 'Hostile' $tedix_geonames_package$; --\n");
+  const sql = await generate([...source.slice(0, 11), '54975', ...source.slice(12)], true);
   const c = await db.connect();
   try {
    await c.query('BEGIN');
@@ -87,15 +90,17 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
    await c.query('COMMIT');
   } finally { c.release(); }
   const direct = await snapshot();
+  expect(direct.subregions).toEqual([{subregion:{country_code:'RO',admin1_code:'13',admin2_code:'54975',display_name:"Comuna 'Hostile' $tedix_geonames_package$; --",source:'geonames'}}]);
   const metadata = (await db.query('SELECT source,dataset,sha256,attribution,row_count FROM geographic_imports')).rows;
   expect(metadata[0].row_count).toBe('501');
-  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_subregions,geographic_regions,geographic_imports');
   await execute(sql);
   expect(await snapshot()).toEqual(direct);
   expect((await db.query('SELECT source,dataset,sha256,attribution,row_count FROM geographic_imports')).rows).toEqual(metadata);
   await execute(sql);
   expect(await snapshot()).toEqual(direct);
   expect((await db.query('SELECT * FROM geographic_imports WHERE completed_at IS NOT NULL')).rowCount).toBe(2);
+  await writeFile(paths[3], '');
  });
  it('retains newer names when importing an older source revision', async () => {
   const before = await snapshot();
@@ -130,7 +135,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
  });
  it('filters mixed-country input before SQL generation, preserving RO semantics on first/repeat import', async () => {
   await db.query(`GRANT DELETE ON geographic_city_names TO "${role}"`);
-  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_subregions,geographic_regions,geographic_imports');
   const foreign = [...source]; foreign[0]='901'; foreign[8]='HU'; foreign[1]='Foreign city';
   // Missing foreign-country metadata/coordinates cannot prevent an RO package.
   const excluded = [...foreign]; excluded[0]='902'; excluded[8]='ZZ'; excluded[4]='';
@@ -146,7 +151,7 @@ suite('SQL package with all discovered migrations and restricted invoker', () =>
    await c.query('COMMIT');
   } finally { c.release(); }
   const direct = await snapshot();
-  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_regions,geographic_imports');
+  await db.query('TRUNCATE library_content_review_events,library_content_revisions,library_content,geographic_city_names,geographic_cities,geographic_subregions,geographic_regions,geographic_imports');
   await execute(sql);
   expect(await snapshot()).toEqual(direct);
   await execute(sql);

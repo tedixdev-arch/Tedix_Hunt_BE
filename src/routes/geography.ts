@@ -130,6 +130,7 @@ router.get('/catalog-status', async (req,res,next) => {
  *     parameters:
  *       - { in: query, name: countryCode, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
  *       - { in: query, name: admin1Code, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,40}$' }, description: Optional exact GeoNames admin1 identity from /regions, or unspecified for cities without admin1. Reset cursor when region changes. }
+ *       - { in: query, name: admin2Code, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,40}$' }, description: Optional subregion from /subregions (or unspecified for cities matching no official subdivision). Requires a concrete admin1Code. Omit to list the whole region. }
  *       - { in: query, name: q, schema: { type: string, minLength: 2, maxLength: 100 }, description: Required unless admin1Code is given }
  *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
  *       - { in: query, name: after, schema: { type: string, pattern: '^[1-9]\d{0,14}$' } }
@@ -192,6 +193,8 @@ router.get('/catalog-status', async (req,res,next) => {
  *         countryDisplayName: { type: string }
  *         name: { type: string }
  *         admin1Code: { type: string, description: Raw GeoNames admin1 code; empty or 00 means unspecified. Identity requires countryCode. }
+ *         admin2Code: { type: string, description: Official admin2 subdivision code (with countryCode and admin1Code), or unspecified }
+ *         subregionDisplayName: { type: string, nullable: true, description: Official admin2 label from admin2Codes; null when unspecified }
  *         regionDisplayName: { type: string, nullable: true, description: Authoritative admin1 dictionary label; never parsed from context }
  *         regionStatus: { type: string, enum: [resolved, missing_label, unspecified] }
  *         administrativeContext: { type: string }
@@ -205,6 +208,22 @@ router.get('/catalog-status', async (req,res,next) => {
  */
 /**
  * @openapi
+ * /api/geography/subregions:
+ *   get:
+ *     tags: [Geography]
+ *     summary: Official admin2 subdivisions (county, district, commune, department...) of one region
+ *     description: Optional level between region and city. Lists officially named admin2 records of the region, plus one admin2Code unspecified group when some cities or manual Localities of the region match none. An empty list means the region has no named subdivisions and clients skip the level. subregionLabel and regionLabel name both levels per country (e.g. RO County/Commune, US State/County, IN State/District, FR Region/Department; generic District/County).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: countryCode, required: true, schema: { type: string, pattern: '^[A-Z]{2}$' } }
+ *       - { in: query, name: admin1Code, required: true, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,40}$' } }
+ *     responses:
+ *       200: { description: subregions array of countryCode/admin1Code/admin2Code/displayName/labelStatus (resolved or unspecified), regionLabel, subregionLabel }
+ *       400: { description: invalid_input }
+ *       401: { description: Authentication required }
+ *       403: { description: Creator, Organizer or Admin required }
+ *       429: { description: rate_limited }
+ *       503: { description: catalog_not_imported }
  * /api/geography/regions:
  *   get:
  *     tags: [Geography]
@@ -235,18 +254,29 @@ router.get('/regions', async(req,res,next)=>{
     return res.json(await GeographicCatalog.regions(countryCode,Number(limit),after as string));
   }catch(error){return catalogFailure(error,res,next);}
 });
+router.get('/subregions', async(req,res,next)=>{
+  const {countryCode,admin1Code}=req.query;
+  if(Object.keys(req.query).some(k=>!['countryCode','admin1Code'].includes(k))
+    || typeof countryCode!=='string' || !/^[A-Z]{2}$/.test(countryCode) || !admin1CodeValid(admin1Code))return res.status(400).json({error:'invalid_input'});
+  try {
+    if(!(await Geography.countries()).some(c=>c.code===countryCode))return res.status(400).json({error:'invalid_input'});
+    return res.json(await GeographicCatalog.subregions(countryCode,admin1Code));
+  }catch(error){return catalogFailure(error,res,next);}
+});
 router.get('/cities', async (req, res, next) => {
-  const {countryCode,q,admin1Code,limit='20',after='0'}=req.query;
-  if(Object.keys(req.query).some(k=>!['countryCode','q','admin1Code','limit','after'].includes(k))
+  const {countryCode,q,admin1Code,admin2Code,limit='20',after='0'}=req.query;
+  if(Object.keys(req.query).some(k=>!['countryCode','q','admin1Code','admin2Code','limit','after'].includes(k))
     || typeof countryCode!=='string' || !/^[A-Z]{2}$/.test(countryCode)
     || (admin1Code!==undefined && !admin1CodeValid(admin1Code))
+    // A subregion narrows one concrete region.
+    || (admin2Code!==undefined && (!admin1CodeValid(admin2Code) || admin1Code===undefined || admin1Code==='unspecified'))
     // Without q the request browses one region (dropdown); with q it searches names and aliases.
     || (q===undefined ? admin1Code===undefined : (typeof q!=='string' || q.length>100 || normalizeCityName(q).length<2))
     || typeof limit!=='string' || !/^(?:[1-9]|[1-4]\d|50)$/.test(limit)
     || typeof after!=='string' || (after!=='0' && !geographicId(after))) return res.status(400).json({error:'invalid_input'});
   try {
     if(!(await Geography.countries()).some(c=>c.code===countryCode))return res.status(400).json({error:'invalid_input'});
-    return res.json(await GeographicCatalog.search(countryCode,q as string|undefined,Number(limit),after,admin1Code as string|undefined));
+    return res.json(await GeographicCatalog.search(countryCode,q as string|undefined,Number(limit),after,admin1Code as string|undefined,admin2Code as string|undefined));
   }catch(error){return catalogFailure(error,res,next);}
 });
 router.get('/cities/:id', async(req,res,next)=>{

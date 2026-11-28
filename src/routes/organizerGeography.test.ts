@@ -1,4 +1,5 @@
 import express from 'express';
+import { performance } from 'node:perf_hooks';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/postgres.js',()=>({pool:{query:vi.fn()}}));
@@ -25,7 +26,8 @@ describe('Organizer catalog geography',()=>{
     const city=row('681290');
     vi.mocked(pool.query).mockResolvedValue({rows:[city]} as never);
     const r=await get('/cities?countryCode=RO&regionId=RO:admin1:13&limit=1').expect(200);
-    expect(r.body).toEqual({cities:[{...city,regionId:'RO:admin1:13',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
+    // No subdivision record matches this city, so it belongs to the region's unspecified subregion group.
+    expect(r.body).toEqual({cities:[{...city,regionId:'RO:admin1:13',subregionId:'RO:admin1:13:unspecified',source:'geonames',attribution:'GeoNames (CC BY 4.0)'}],nextCursor:null});
     expect(r.headers['cache-control']).toBe('private, no-store');
     const sql=vi.mocked(pool.query).mock.calls[0][0];
     expect(sql).toContain('FROM geographic_cities');expect(sql).not.toMatch(/hunt_templates|hunt_template_versions|hunt_template_reviews|FROM hunts/);
@@ -77,8 +79,19 @@ describe('Organizer catalog geography',()=>{
   it.each(['/countries?countryCode=RO','/regions','/cities?countryCode=RO','/countries?limit=51','/countries?cursor=bad'])('rejects invalid query %s',async path=>{await get(path).expect(400);expect(pool.query).not.toHaveBeenCalled();});
   it('rate limits Organizer geography with no-store and Retry-After',async()=>{
     vi.mocked(User.findById).mockResolvedValue({id:'budget-actor',roles:['organizer'],isGuest:false,accountStatus:'active'} as any);
-    for(let n=0;n<120;n++)await get('/countries').expect(200);
-    const r=await get('/countries').expect(429);expect(r.headers['retry-after']).toBeDefined();expect(r.headers['cache-control']).toBe('private, no-store');
+    // The budget is a token bucket (120 per 60 s) that refills continuously, one token every 500 ms. Freeze its clock
+    // so the burst is judged at one instant however long the 121 requests take on the test machine.
+    let now=1_000_000;
+    const clock=vi.spyOn(performance,'now').mockImplementation(()=>now);
+    try {
+      for(let n=0;n<120;n++)await get('/countries').expect(200);
+      const r=await get('/countries').expect(429);expect(r.headers['retry-after']).toBe('1');expect(r.headers['cache-control']).toBe('private, no-store');
+      expect(r.body).toEqual({error:'rate_limited'});
+      // Refill is gradual: one token per 500 ms allows exactly one more request, never a fresh full budget.
+      now+=499;await get('/countries').expect(429);
+      now+=1;await get('/countries').expect(200);
+      await get('/countries').expect(429);
+    } finally { clock.mockRestore(); }
   });
   it('applies persisted authentication/capabilities before inventory lookup',async()=>{
     await request(app).get(root+'/countries').expect(401);
