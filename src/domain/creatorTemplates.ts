@@ -21,6 +21,56 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+  const SUPPORTED_HUNT_FORMATS = [
+    'Single Hunters',
+    'Team Hunters',
+  ] as const
+
+  const LEGACY_HUNT_FORMAT = 'Single and Team Hunters'
+
+  const hasValidHuntFormat = (
+    configuration: Record<string, unknown>,
+    allowLegacy = true,
+  ): boolean => {
+    const format = configuration.format
+
+    // Older templates did not necessarily contain a format.
+    if (format === undefined) return true
+
+    return (
+      SUPPORTED_HUNT_FORMATS.includes(
+        format as typeof SUPPORTED_HUNT_FORMATS[number]
+      ) ||
+      (allowLegacy && format === LEGACY_HUNT_FORMAT)
+    )
+  }
+  const hasNoTeamGameplay = (
+    checkpoints: unknown
+  ): boolean => {
+    if (!Array.isArray(checkpoints)) return false
+
+    return checkpoints.every(checkpoint => {
+      if (!isObject(checkpoint)) return false
+
+      const hasTeamKind =
+        checkpoint.teamKind !== undefined
+
+      const hasTeamLibraryAllocation =
+        isObject(checkpoint.libraryAllocations) &&
+        checkpoint.libraryAllocations.team !== undefined
+
+      const hasTeamCustomExercise =
+        isObject(checkpoint.customExercises) &&
+        checkpoint.customExercises.team !== undefined
+
+      return (
+        !hasTeamKind &&
+        !hasTeamLibraryAllocation &&
+        !hasTeamCustomExercise
+      )
+    })
+  }
+
 /** New authoring only. Omitted selectors mean Mixed without changing saved artifacts.
  * Keep this separate from isTemplateContent, which also reads historical versions. */
 export const hasValidLearningConfiguration = (content: unknown): boolean => {
@@ -77,16 +127,62 @@ const hasValidCheckpointGameplay = (checkpoint: Record<string, unknown>): boolea
       && types.includes(checkpoint[field] as string)));
 };
 
-const hasValidGameplayDraft = (checkpoints: unknown, validateTypes = true): checkpoints is Record<string, unknown>[] => {
-  if (!Array.isArray(checkpoints) || checkpoints.length === 0 || !checkpoints.every(isObject)) return false;
-  const terminal = checkpoints.filter((checkpoint) => checkpoint.role === 'terminal');
-  if (terminal.length > 1) return false;
-  return checkpoints.every((checkpoint) =>
-    (checkpoint.role === undefined || checkpoint.role === 'normal' || checkpoint.role === 'terminal')
-    && (checkpoint.role !== 'terminal' || (checkpoint.checkpoint === undefined && checkpoint.checkpointNumber === undefined))
-    && (!validateTypes || hasValidCheckpointGameplay(checkpoint)));
-};
+// const hasValidGameplayDraft = (checkpoints: unknown, validateTypes = true): checkpoints is Record<string, unknown>[] => {
+//   if (!Array.isArray(checkpoints) || checkpoints.length === 0 || !checkpoints.every(isObject)) return false;
+//   const terminal = checkpoints.filter((checkpoint) => checkpoint.role === 'terminal');
+//   if (terminal.length > 1) return false;
+//   return checkpoints.every((checkpoint) =>
+//     (checkpoint.role === undefined || checkpoint.role === 'normal' || checkpoint.role === 'terminal')
+//     && (checkpoint.role !== 'terminal' || (checkpoint.checkpoint === undefined && checkpoint.checkpointNumber === undefined))
+//     && (!validateTypes || hasValidCheckpointGameplay(checkpoint)));
+// };
 
+const hasValidGameplayDraft = (
+  checkpoints: unknown,
+  validateTypes = true,
+  format?: unknown
+): checkpoints is Record<string, unknown>[] => {
+  if (
+    !Array.isArray(checkpoints) ||
+    checkpoints.length === 0 ||
+    !checkpoints.every(isObject)
+  ) {
+    return false
+  }
+
+  const terminal = checkpoints.filter(
+    checkpoint => checkpoint.role === 'terminal'
+  )
+
+  if (terminal.length > 1) return false
+
+  // Single Hunters cannot contain any team-specific gameplay.
+  if (
+    format === 'Single Hunters' &&
+    !hasNoTeamGameplay(checkpoints)
+  ) {
+    return false
+  }
+
+  return checkpoints.every(checkpoint =>
+    (
+      checkpoint.role === undefined ||
+      checkpoint.role === 'normal' ||
+      checkpoint.role === 'terminal'
+    ) &&
+    (
+      checkpoint.role !== 'terminal' ||
+      (
+        checkpoint.checkpoint === undefined &&
+        checkpoint.checkpointNumber === undefined
+      )
+    ) &&
+    (
+      !validateTypes ||
+      hasValidCheckpointGameplay(checkpoint)
+    )
+  )
+}
 // Legacy non-geographic JSON had no typed gameplay validation; explicit roles opt into it.
 const usesGameplayContract = (value: Record<string, unknown>): boolean => {
   const configuration = value.configuration as Record<string, unknown>;
@@ -113,9 +209,9 @@ export const isTemplateContent = (
   if (typeof value.theme !== 'string' || value.theme.trim() === '') return false;
   if (!isObject(value.mission) || Object.keys(value.mission).length === 0) return false;
   if (!isObject(value.configuration) || Object.keys(value.configuration).length === 0
-    || !hasValidGeographicDraft(value.configuration)) return false;
+    || !hasValidGeographicDraft(value.configuration) || !hasValidHuntFormat(value.configuration, true)) return false;
   if (!isObject(value.scoring) || Object.keys(value.scoring).length === 0) return false;
-  return hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value));
+  return hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value), value.configuration.format);
 };
 
 export const isTemplateContentV1 = (value: unknown, key: string): value is TemplateContent =>
@@ -129,8 +225,17 @@ export const isTemplateContentV1 = (value: unknown, key: string): value is Templ
 export const isTemplateContentSubmittable = (value: unknown, category: TemplateCategory | null = null): value is TemplateContent => {
   if (!isObject(value) || !isObject(value.configuration) || !hasValidPersistedCustomOwnership(value)) return false;
   const { normalCheckpointCount: count, checkpointPositions: positions } = value.configuration;
-  if (!hasValidGeographicDraft(value.configuration)
-    || !hasValidGameplayDraft(value.checkpoints, usesGameplayContract(value))) return false;
+  if (
+    !hasValidGeographicDraft(value.configuration) ||
+    !hasValidHuntFormat(value.configuration, false) ||
+    !hasValidGameplayDraft(
+      value.checkpoints,
+      usesGameplayContract(value),
+      value.configuration.format
+    )
+  ) {
+    return false
+  }
   if (category === 'local' && count === undefined) return false;
   if (count === undefined && positions === undefined) return true; // Universal or legacy content without a geographic contract.
   if (!Number.isInteger(count)) return false;
